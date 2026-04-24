@@ -1,6 +1,6 @@
 import axios from "axios";
 
-export const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+export const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || "").replace(/\/$/, "");
 export const API = `${BACKEND_URL}/api`;
 
 export const api = axios.create({
@@ -30,7 +30,7 @@ export function formatApiError(err) {
 
 export function getWsUrl() {
   const token = localStorage.getItem("chatflow_token");
-  if (!token) return null;
+  if (!token || !BACKEND_URL) return null;
   const url = new URL(BACKEND_URL);
   const wsProto = url.protocol === "https:" ? "wss:" : "ws:";
   return `${wsProto}//${url.host}/api/ws?token=${encodeURIComponent(token)}`;
@@ -38,6 +38,6 @@ export function getWsUrl() {
 
 export function fileUrl(path) {
   if (!path) return "";
-  if (path.startsWith("http")) return path;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
   return `${BACKEND_URL}${path}`;
 }
