@@ -830,12 +830,18 @@ async def shutdown_db_client():
 
 
 # ---------- CORS & router ----------
+CORS_ORIGINS = [
+    "https://chatflow-vert.vercel.app",
+    "https://chatflow-agge8ikm5-vijayanugantis-projects.vercel.app",
+]
+
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_origins=[x.strip() for x in os.environ.get("CORS_ORIGINS", "*").split(",") if x.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(api_router)
 app.include_router(api_router)
