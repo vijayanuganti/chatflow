@@ -17,10 +17,6 @@ import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Set
-import smtplib
-import ssl
-from email.message import EmailMessage
-from email.utils import parseaddr
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 import requests
@@ -148,46 +144,9 @@ def _verify_otp(otp: str, otp_hash: str) -> bool:
     return verify_password(otp, otp_hash)
 
 
-def _smtp_send(to_email: str, subject: str, body: str) -> bool:
-    host = os.environ.get("SMTP_HOST")
-    port = int(os.environ.get("SMTP_PORT", "587"))
-    user = os.environ.get("SMTP_USER")
-    password = os.environ.get("SMTP_PASS")
-    from_email = os.environ.get("SMTP_FROM", user or "no-reply@chatflow.local")
-    secure_mode = (os.environ.get("SMTP_SECURE", "starttls") or "starttls").strip().lower()
-
-    if not host or not user or not password:
-        return False
-    if "@" not in parseaddr(from_email)[1]:
-        logger.warning("Invalid SMTP_FROM configured; falling back to SMTP_USER")
-        from_email = user
-
-    msg = EmailMessage()
-    msg["From"] = from_email
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    msg.set_content(body)
-
-    timeout = int(os.environ.get("SMTP_TIMEOUT", "20"))
-    if secure_mode == "ssl":
-        with smtplib.SMTP_SSL(host, port, timeout=timeout, context=ssl.create_default_context()) as s:
-            s.ehlo()
-            s.login(user, password)
-            s.send_message(msg)
-    else:
-        with smtplib.SMTP(host, port, timeout=timeout) as s:
-            s.ehlo()
-            if secure_mode == "starttls":
-                s.starttls(context=ssl.create_default_context())
-                s.ehlo()
-            s.login(user, password)
-            s.send_message(msg)
-    return True
-
-
 def _resend_send(to_email: str, subject: str, body: str) -> bool:
     api_key = os.environ.get("RESEND_API_KEY")
-    from_email = os.environ.get("EMAIL_FROM") or os.environ.get("SMTP_FROM") or "ChatFlow <onboarding@resend.dev>"
+    from_email = os.environ.get("EMAIL_FROM") or "ChatFlow <onboarding@resend.dev>"
     if not api_key:
         return False
     url = "https://api.resend.com/emails"
@@ -205,33 +164,8 @@ def _resend_send(to_email: str, subject: str, body: str) -> bool:
     return False
 
 
-def _sendgrid_send(to_email: str, subject: str, body: str) -> bool:
-    api_key = os.environ.get("SENDGRID_API_KEY")
-    from_email = os.environ.get("EMAIL_FROM") or os.environ.get("SMTP_FROM")
-    if not api_key or not from_email:
-        return False
-    url = "https://api.sendgrid.com/v3/mail/send"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {
-        "personalizations": [{"to": [{"email": to_email}]}],
-        "from": {"email": parseaddr(from_email)[1] or from_email},
-        "subject": subject,
-        "content": [{"type": "text/plain", "value": body}],
-    }
-    r = requests.post(url, json=payload, headers=headers, timeout=20)
-    if r.status_code in (200, 202):
-        return True
-    logger.warning(f"SendGrid failed ({r.status_code}): {r.text}")
-    return False
-
-
 def _email_send(to_email: str, subject: str, body: str) -> bool:
-    provider = (os.environ.get("EMAIL_PROVIDER") or "resend").strip().lower()
-    if provider == "sendgrid":
-        return _sendgrid_send(to_email, subject, body)
-    if provider == "smtp":
-        return _smtp_send(to_email, subject, body)
-    # default: resend
+    # Single email provider: Resend (API-based).
     return _resend_send(to_email, subject, body)
 
 
