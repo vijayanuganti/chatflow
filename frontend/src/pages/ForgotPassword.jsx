@@ -49,13 +49,13 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 bg-gray-50" data-testid="forgot-password-page">
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-sm border border-gray-100 p-8 sm:p-10">
+    <div className="min-h-screen flex items-center justify-center p-4 sm:p-6 bg-gray-50" data-testid="forgot-password-page">
+      <div className="w-full max-w-md bg-white rounded-3xl shadow-sm border border-gray-100 p-5 sm:p-8">
         <div className="flex items-center gap-3 mb-6">
           <div className="h-10 w-10 rounded-xl bg-emerald-900 text-white flex items-center justify-center">
             <KeyRound className="h-5 w-5" />
           </div>
-          <span className="font-display text-2xl font-semibold">Reset password</span>
+          <span className="font-display text-xl sm:text-2xl font-semibold">Reset password</span>
         </div>
 
         {step === 1 ? (

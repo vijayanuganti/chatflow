@@ -97,17 +97,38 @@ export default function ProfileDialog({ open, onOpenChange }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg" data-testid="profile-dialog">
+      <DialogContent
+        className="w-[calc(100vw-1rem)] max-w-lg sm:w-full max-h-[88dvh] overflow-y-auto p-4 sm:p-6"
+        data-testid="profile-dialog"
+      >
         <DialogHeader>
           <DialogTitle className="font-display">Profile & Settings</DialogTitle>
           <DialogDescription>Manage your identity on ChatFlow.</DialogDescription>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="grid grid-cols-3 w-full rounded-full">
-            <TabsTrigger value="profile" data-testid="profile-tab-profile" className="rounded-full">Profile</TabsTrigger>
-            <TabsTrigger value="status" data-testid="profile-tab-status" className="rounded-full">Status</TabsTrigger>
-            <TabsTrigger value="security" data-testid="profile-tab-security" className="rounded-full">Security</TabsTrigger>
+        <Tabs value={tab} onValueChange={setTab} className="min-w-0">
+          <TabsList className="flex w-full gap-2 bg-transparent p-0 h-auto">
+            <TabsTrigger
+              value="profile"
+              data-testid="profile-tab-profile"
+              className="flex-1 h-10 rounded-xl px-0 text-xs sm:text-sm leading-none whitespace-nowrap border border-gray-200 bg-white data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-900 data-[state=active]:border-emerald-700 data-[state=active]:shadow-none"
+            >
+              Profile
+            </TabsTrigger>
+            <TabsTrigger
+              value="status"
+              data-testid="profile-tab-status"
+              className="flex-1 h-10 rounded-xl px-0 text-xs sm:text-sm leading-none whitespace-nowrap border border-gray-200 bg-white data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-900 data-[state=active]:border-emerald-700 data-[state=active]:shadow-none"
+            >
+              Status
+            </TabsTrigger>
+            <TabsTrigger
+              value="security"
+              data-testid="profile-tab-security"
+              className="flex-1 h-10 rounded-xl px-0 text-xs sm:text-sm leading-none whitespace-nowrap border border-gray-200 bg-white data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-900 data-[state=active]:border-emerald-700 data-[state=active]:shadow-none"
+            >
+              Security
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="profile" className="mt-4 space-y-4">

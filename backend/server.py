@@ -17,6 +17,12 @@ import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Set
+import smtplib
+import ssl
+from email.message import EmailMessage
+from email.utils import parseaddr
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Request, WebSocket, WebSocketDisconnect, Query
@@ -44,6 +50,10 @@ OTP_EXPIRY_MINUTES = 10
 
 UPLOAD_DIR = ROOT_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+S3_BUCKET = os.environ.get("S3_BUCKET") or ""
+S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("S3_REGION") or ""
+S3_PUBLIC_BASE_URL = (os.environ.get("S3_PUBLIC_BASE_URL") or "").rstrip("/")
 
 
 client = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=10000)
@@ -129,6 +139,75 @@ def mask_email(email: Optional[str]) -> Optional[str]:
     return f"{masked_name}@{domain}"
 
 
+def _hash_otp(otp: str) -> str:
+    return bcrypt.hashpw(otp.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_otp(otp: str, otp_hash: str) -> bool:
+    return verify_password(otp, otp_hash)
+
+
+def _smtp_send(to_email: str, subject: str, body: str) -> bool:
+    host = os.environ.get("SMTP_HOST")
+    port = int(os.environ.get("SMTP_PORT", "587"))
+    user = os.environ.get("SMTP_USER")
+    password = os.environ.get("SMTP_PASS")
+    from_email = os.environ.get("SMTP_FROM", user or "no-reply@chatflow.local")
+    secure_mode = (os.environ.get("SMTP_SECURE", "starttls") or "starttls").strip().lower()
+
+    if not host or not user or not password:
+        return False
+    if "@" not in parseaddr(from_email)[1]:
+        logger.warning("Invalid SMTP_FROM configured; falling back to SMTP_USER")
+        from_email = user
+
+    msg = EmailMessage()
+    msg["From"] = from_email
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.set_content(body)
+
+    timeout = int(os.environ.get("SMTP_TIMEOUT", "20"))
+    if secure_mode == "ssl":
+        with smtplib.SMTP_SSL(host, port, timeout=timeout, context=ssl.create_default_context()) as s:
+            s.ehlo()
+            s.login(user, password)
+            s.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port, timeout=timeout) as s:
+            s.ehlo()
+            if secure_mode == "starttls":
+                s.starttls(context=ssl.create_default_context())
+                s.ehlo()
+            s.login(user, password)
+            s.send_message(msg)
+    return True
+
+
+def _infer_public_url(bucket: str, region: str, key: str) -> str:
+    if S3_PUBLIC_BASE_URL:
+        return f"{S3_PUBLIC_BASE_URL}/{key}"
+    # Default virtual-hosted style URL (works for public buckets)
+    if region:
+        return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+    return f"https://{bucket}.s3.amazonaws.com/{key}"
+
+
+def _upload_to_s3(fileobj, key: str, content_type: str) -> str:
+    if not S3_BUCKET:
+        raise RuntimeError("S3_BUCKET not configured")
+    session = boto3.session.Session(region_name=S3_REGION or None)
+    s3 = session.client("s3")
+    extra = {}
+    if content_type:
+        extra["ContentType"] = content_type
+    try:
+        s3.upload_fileobj(fileobj, S3_BUCKET, key, ExtraArgs=extra or None)
+    except (BotoCoreError, ClientError) as e:
+        raise RuntimeError(f"S3 upload failed: {e}") from e
+    return _infer_public_url(S3_BUCKET, S3_REGION, key)
+
+
 async def get_current_user(request: Request) -> dict:
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
@@ -152,8 +231,12 @@ class RegisterBody(BaseModel):
     username: str
     password: str
     full_name: str
-    email: Optional[EmailStr] = None
+    email: EmailStr
     role: str  # employee | client
+    # Only for clients (allocation)
+    batch_id: Optional[str] = None
+    employee_id: Optional[str] = None
+    email_verification_token: str
 
 
 class LoginBody(BaseModel):
@@ -169,6 +252,15 @@ class ResetBody(BaseModel):
     identifier: str
     otp: str
     new_password: str
+
+
+class EmailOtpSendBody(BaseModel):
+    email: EmailStr
+
+
+class EmailOtpVerifyBody(BaseModel):
+    email: EmailStr
+    otp: str
 
 
 class ProfileBody(BaseModel):
@@ -201,6 +293,10 @@ class CreateGroupBody(BaseModel):
     member_ids: List[str]
 
 
+class CreateBatchBody(BaseModel):
+    name: str
+
+
 # ---------- Auth ----------
 @api_router.post("/auth/register")
 async def register(body: RegisterBody):
@@ -217,8 +313,15 @@ async def register(body: RegisterBody):
     if await db.users.find_one({"username": username}):
         raise HTTPException(status_code=400, detail="Username already taken")
 
-    if email and await db.users.find_one({"email": email}):
+    if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already in use")
+
+    # Require verified email before creating account
+    ver = await db.email_verifications.find_one({"email": email}, {"_id": 0})
+    if not ver or not ver.get("verified") or ver.get("token") != body.email_verification_token:
+        raise HTTPException(status_code=400, detail="Email is not verified")
+    if ver.get("expires_at") and datetime.fromisoformat(ver["expires_at"]) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Email verification expired. Please request OTP again.")
 
     user_id = str(uuid.uuid4())
     doc = {
@@ -234,10 +337,42 @@ async def register(body: RegisterBody):
         "online": False,
         "last_seen": now_iso(),
     }
-    if email:
-        doc["email"] = email
+    doc["email"] = email
+
+    # Client allocation: must pick employee + batch
+    if body.role == "client":
+        if not body.employee_id or not body.batch_id:
+            raise HTTPException(status_code=400, detail="Client must select employee and batch")
+
+        employee = await db.users.find_one({"id": body.employee_id, "role": "employee"}, {"_id": 0})
+        if not employee:
+            raise HTTPException(status_code=400, detail="Selected employee not found")
+
+        batch = await db.batches.find_one({"id": body.batch_id}, {"_id": 0})
+        if not batch:
+            raise HTTPException(status_code=400, detail="Selected batch not found")
+        if batch.get("employee_id") != body.employee_id:
+            raise HTTPException(status_code=400, detail="Selected batch does not belong to selected employee")
+
+        client_ids = batch.get("client_ids") or []
+        max_clients = int(batch.get("max_clients") or 20)
+        if len(client_ids) >= max_clients:
+            raise HTTPException(status_code=400, detail="Selected batch is full")
+
+        doc["employee_id"] = body.employee_id
+        doc["batch_id"] = body.batch_id
 
     await db.users.insert_one(dict(doc))
+
+    # Keep batch membership in sync (best-effort; if this fails we still created the user)
+    if body.role == "client":
+        await db.batches.update_one(
+            {"id": body.batch_id},
+            {"$addToSet": {"client_ids": user_id}},
+        )
+        # Auto-create the employee↔client conversation so it shows up immediately
+        await _ensure_direct(body.employee_id, user_id)
+
     token = create_access_token(user_id, username, body.role)
     return {"token": token, "user": clean_user(doc)}
 
@@ -250,6 +385,76 @@ async def login(body: LoginBody):
         raise HTTPException(status_code=401, detail="Invalid username or password")
     token = create_access_token(user["id"], user["username"], user["role"])
     return {"token": token, "user": clean_user(user)}
+
+
+@api_router.post("/auth/email/send-otp")
+async def send_email_otp(body: EmailOtpSendBody):
+    email = normalize_email(body.email)
+    if not email:
+        raise HTTPException(status_code=400, detail="Email required")
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Email already in use")
+
+    otp = f"{random.randint(100000, 999999)}"
+    await db.email_verifications.update_one(
+        {"email": email},
+        {"$set": {
+            "email": email,
+            "otp_hash": _hash_otp(otp),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)).isoformat(),
+            "verified": False,
+            "token": None,
+            "updated_at": now_iso(),
+        }},
+        upsert=True,
+    )
+
+    subject = "ChatFlow email verification OTP"
+    body_text = f"Your ChatFlow verification OTP is: {otp}\n\nThis OTP expires in {OTP_EXPIRY_MINUTES} minutes."
+    sent = False
+    try:
+        sent = _smtp_send(email, subject, body_text)
+    except Exception as e:
+        logger.warning(f"SMTP send failed for {email}: {e}")
+        sent = False
+
+    if not sent:
+        logger.warning(f"[DEV EMAIL OTP] email={email} otp={otp}")
+        raise HTTPException(
+            status_code=503,
+            detail="Email delivery failed. Please check SMTP settings and try again."
+        )
+
+    return {
+        "message": "OTP sent to your email.",
+        "sent_via_email": sent,
+        "expires_in_minutes": OTP_EXPIRY_MINUTES,
+        "email_masked": mask_email(email),
+    }
+
+
+@api_router.post("/auth/email/verify-otp")
+async def verify_email_otp(body: EmailOtpVerifyBody):
+    email = normalize_email(body.email)
+    if not email:
+        raise HTTPException(status_code=400, detail="Email required")
+
+    rec = await db.email_verifications.find_one({"email": email}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=400, detail="No OTP requested for this email")
+
+    if datetime.fromisoformat(rec["expires_at"]) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="OTP expired. Please request again.")
+
+    if not _verify_otp(body.otp.strip(), rec.get("otp_hash", "")):
+        raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    token = uuid.uuid4().hex
+    await db.email_verifications.update_one(
+        {"email": email},
+        {"$set": {"verified": True, "token": token, "verified_at": now_iso()}},
+    )
+    return {"message": "Email verified", "email_verification_token": token}
 
 
 @api_router.get("/auth/me")
@@ -316,6 +521,75 @@ async def reset_password(body: ResetBody):
 async def list_users(user: dict = Depends(get_current_user)):
     users = await db.users.find({"id": {"$ne": user["id"]}}, {"_id": 0, "password_hash": 0}).to_list(1000)
     return users
+
+
+# ---------- Public registration metadata ----------
+@api_router.get("/public/employees")
+async def public_employees():
+    employees = await db.users.find(
+        {"role": "employee"},
+        {"_id": 0, "password_hash": 0},
+    ).sort("full_name", 1).to_list(1000)
+    return employees
+
+
+@api_router.get("/public/batches")
+async def public_batches(employee_id: Optional[str] = None):
+    query = {}
+    if employee_id:
+        query["employee_id"] = employee_id
+    batches = await db.batches.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+
+    emp_ids = list({b.get("employee_id") for b in batches if b.get("employee_id")})
+    emp_map = {}
+    if emp_ids:
+        async for e in db.users.find({"id": {"$in": emp_ids}}, {"_id": 0, "password_hash": 0}):
+            emp_map[e["id"]] = e
+
+    out = []
+    for b in batches:
+        client_count = len(b.get("client_ids") or [])
+        max_clients = int(b.get("max_clients") or 20)
+        out.append({
+            **b,
+            "client_count": client_count,
+            "max_clients": max_clients,
+            "employee": clean_user(emp_map.get(b.get("employee_id")) or {}),
+            "is_full": client_count >= max_clients,
+        })
+    return out
+
+
+# ---------- Batches (employee) ----------
+@api_router.get("/batches/me")
+async def my_batches(user: dict = Depends(get_current_user)):
+    if user.get("role") != "employee":
+        raise HTTPException(status_code=403, detail="Employee access required")
+    batches = await db.batches.find({"employee_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    for b in batches:
+        b["client_count"] = len(b.get("client_ids") or [])
+        b["max_clients"] = int(b.get("max_clients") or 20)
+    return batches
+
+
+@api_router.post("/batches")
+async def create_batch(body: CreateBatchBody, user: dict = Depends(get_current_user)):
+    if user.get("role") != "employee":
+        raise HTTPException(status_code=403, detail="Employee access required")
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Batch name required")
+
+    batch = {
+        "id": f"batch_{uuid.uuid4().hex}",
+        "name": name[:80],
+        "employee_id": user["id"],
+        "client_ids": [],
+        "max_clients": 20,
+        "created_at": now_iso(),
+    }
+    await db.batches.insert_one(dict(batch))
+    return batch
 
 
 @api_router.put("/users/me")
@@ -434,6 +708,15 @@ async def _enrich_conversations(convs: List[dict], viewer_id: Optional[str]) -> 
         async for u in db.users.find({"id": {"$in": list(user_ids)}}, {"_id": 0, "password_hash": 0}):
             users_map[u["id"]] = u
 
+    unread_map: Dict[str, int] = {}
+    if viewer_id:
+        pipeline = [
+            {"$match": {"recipient_ids": viewer_id, "read_by": {"$ne": viewer_id}}},
+            {"$group": {"_id": "$conversation_id", "count": {"$sum": 1}}},
+        ]
+        async for row in db.messages.aggregate(pipeline):
+            unread_map[row["_id"]] = int(row["count"])
+
     result = []
     for c in convs:
         parts = [users_map.get(p) for p in c["participants"] if users_map.get(p)]
@@ -441,7 +724,12 @@ async def _enrich_conversations(convs: List[dict], viewer_id: Optional[str]) -> 
         if c["type"] == "direct" and viewer_id:
             other_id = next((p for p in c["participants"] if p != viewer_id), None)
             other = users_map.get(other_id) if other_id else None
-        result.append({**c, "participants_info": parts, "other_user": other})
+        result.append({
+            **c,
+            "participants_info": parts,
+            "other_user": other,
+            "unread_count": unread_map.get(c["id"], 0) if viewer_id else 0,
+        })
     return result
 
 
@@ -528,12 +816,22 @@ async def mark_read(conv_id: str, user: dict = Depends(get_current_user)):
 async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     ext = os.path.splitext(file.filename or "")[1].lower()
     file_id = f"{uuid.uuid4().hex}{ext}"
-    dest = UPLOAD_DIR / file_id
-
-    with dest.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
-
     mime = (file.content_type or "").lower()
+
+    # Prefer S3 in production (Render) when configured; fallback to local disk for dev.
+    if S3_BUCKET:
+        key = f"uploads/{file_id}"
+        try:
+            file_url = _upload_to_s3(file.file, key, mime)
+        except Exception as e:
+            logger.warning(f"S3 upload error: {e}")
+            raise HTTPException(status_code=503, detail="Upload failed. Please try again.")
+    else:
+        dest = UPLOAD_DIR / file_id
+        with dest.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+        file_url = f"/api/files/{file_id}"
+
     if mime.startswith("image/"):
         ftype = "image"
     elif mime.startswith("video/"):
@@ -542,7 +840,7 @@ async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_cur
         ftype = "file"
 
     return {
-        "file_url": f"/api/files/{file_id}",
+        "file_url": file_url,
         "file_name": file.filename,
         "message_type": ftype,
     }
@@ -599,6 +897,60 @@ async def admin_user_activity(user_id: str, user: dict = Depends(require_admin))
         "conversations": enriched,
         "messages_sent": msg_count,
     }
+
+
+@api_router.get("/admin/employees")
+async def admin_employees(user: dict = Depends(require_admin)):
+    employees = await db.users.find({"role": "employee"}, {"_id": 0, "password_hash": 0}).sort("full_name", 1).to_list(2000)
+    return employees
+
+
+@api_router.get("/admin/employees/{employee_id}/batches")
+async def admin_employee_batches(employee_id: str, user: dict = Depends(require_admin)):
+    employee = await db.users.find_one({"id": employee_id, "role": "employee"}, {"_id": 0, "password_hash": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    batches = await db.batches.find({"employee_id": employee_id}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    client_ids: Set[str] = set()
+    for b in batches:
+        for cid in (b.get("client_ids") or []):
+            client_ids.add(cid)
+
+    clients_map: Dict[str, dict] = {}
+    if client_ids:
+        async for c in db.users.find({"id": {"$in": list(client_ids)}}, {"_id": 0, "password_hash": 0}):
+            clients_map[c["id"]] = clean_user(c)
+
+    # Preload direct conversations for employee↔client pairs
+    conv_ids = [direct_conv_id(employee_id, cid) for cid in client_ids]
+    conv_map: Dict[str, dict] = {}
+    if conv_ids:
+        async for conv in db.conversations.find({"id": {"$in": conv_ids}}, {"_id": 0}):
+            conv_map[conv["id"]] = conv
+
+    out_batches = []
+    for b in batches:
+        max_clients = int(b.get("max_clients") or 20)
+        client_list = []
+        for cid in (b.get("client_ids") or []):
+            conv_id = direct_conv_id(employee_id, cid)
+            conv = conv_map.get(conv_id)
+            client_list.append({
+                **(clients_map.get(cid) or {"id": cid}),
+                "conversation_id": conv_id,
+                "conversation_last_message": conv.get("last_message") if conv else None,
+                "conversation_last_message_at": conv.get("last_message_at") if conv else None,
+            })
+
+        out_batches.append({
+            **b,
+            "client_count": len(b.get("client_ids") or []),
+            "max_clients": max_clients,
+            "clients": client_list,
+        })
+
+    return {"employee": clean_user(employee), "batches": out_batches}
 
 
 # ---------- WebSocket Manager ----------
@@ -761,6 +1113,9 @@ async def on_startup():
         await db.messages.create_index("conversation_id")
         await db.messages.create_index("created_at")
         await db.password_otps.create_index("user_id", unique=True)
+        await db.email_verifications.create_index("email", unique=True)
+        await db.batches.create_index("employee_id")
+        await db.batches.create_index([("employee_id", 1), ("name", 1)])
     except Exception as e:
         logger.exception("Database startup failed")
         raise RuntimeError(
@@ -830,10 +1185,15 @@ async def shutdown_db_client():
 
 
 # ---------- CORS & router ----------
-CORS_ORIGINS = [
-    "https://chatflow-vert.vercel.app",
-    "https://chatflow-agge8ikm5-vijayanugantis-projects.vercel.app",
-]
+# Configure as comma-separated list in env: CORS_ORIGINS="https://yourapp.vercel.app,http://localhost:3000"
+_cors_env = (os.environ.get("CORS_ORIGINS") or "").strip()
+if _cors_env:
+    CORS_ORIGINS = [o.strip().rstrip("/") for o in _cors_env.split(",") if o.strip()]
+else:
+    CORS_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
@@ -843,5 +1203,4 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router)
 app.include_router(api_router)

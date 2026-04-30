@@ -76,17 +76,17 @@ export default function LoginPage() {
       </div>
 
       {/* Right panel */}
-      <div className="flex items-center justify-center p-6 sm:p-12 bg-white">
+      <div className="flex items-center justify-center p-4 sm:p-8 lg:p-12 bg-white">
         <div className="w-full max-w-md">
-          <div className="lg:hidden flex items-center gap-3 mb-8">
+          <div className="lg:hidden flex items-center gap-3 mb-6">
             <div className="h-10 w-10 rounded-xl bg-emerald-900 text-white flex items-center justify-center">
               <MessageCircle className="h-6 w-6" />
             </div>
             <span className="font-display text-2xl font-semibold">ChatFlow</span>
           </div>
 
-          <h2 className="font-display text-3xl font-semibold mb-2">Welcome back</h2>
-          <p className="text-gray-500 mb-8">Sign in to continue your conversations.</p>
+          <h2 className="font-display text-2xl sm:text-3xl font-semibold mb-2">Welcome back</h2>
+          <p className="text-gray-500 mb-6 sm:mb-8">Sign in to continue your conversations.</p>
 
           <form onSubmit={handleSubmit} className="space-y-5" data-testid="login-form">
             <div className="space-y-2">
@@ -130,13 +130,13 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <p className="mt-8 text-sm text-gray-600">
+          <p className="mt-6 sm:mt-8 text-sm text-gray-600">
             New here?{" "}
             <Link to="/register" className="text-emerald-900 font-medium hover:underline" data-testid="login-to-register-link">
               Create an account
             </Link>
           </p>
-          <p className="mt-6 text-xs text-gray-400 text-center">
+          <p className="mt-5 sm:mt-6 text-xs text-gray-400 text-center">
             © {new Date().getFullYear()} ChatFlow · Designed & built by vijay_anuganti
           </p>
         </div>
