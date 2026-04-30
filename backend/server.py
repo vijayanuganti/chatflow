@@ -23,6 +23,7 @@ from email.message import EmailMessage
 from email.utils import parseaddr
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
+import requests
 
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Request, WebSocket, WebSocketDisconnect, Query
@@ -182,6 +183,56 @@ def _smtp_send(to_email: str, subject: str, body: str) -> bool:
             s.login(user, password)
             s.send_message(msg)
     return True
+
+
+def _resend_send(to_email: str, subject: str, body: str) -> bool:
+    api_key = os.environ.get("RESEND_API_KEY")
+    from_email = os.environ.get("EMAIL_FROM") or os.environ.get("SMTP_FROM") or "ChatFlow <onboarding@resend.dev>"
+    if not api_key:
+        return False
+    url = "https://api.resend.com/emails"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "from": from_email,
+        "to": [to_email],
+        "subject": subject,
+        "text": body,
+    }
+    r = requests.post(url, json=payload, headers=headers, timeout=20)
+    if r.status_code >= 200 and r.status_code < 300:
+        return True
+    logger.warning(f"Resend failed ({r.status_code}): {r.text}")
+    return False
+
+
+def _sendgrid_send(to_email: str, subject: str, body: str) -> bool:
+    api_key = os.environ.get("SENDGRID_API_KEY")
+    from_email = os.environ.get("EMAIL_FROM") or os.environ.get("SMTP_FROM")
+    if not api_key or not from_email:
+        return False
+    url = "https://api.sendgrid.com/v3/mail/send"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "personalizations": [{"to": [{"email": to_email}]}],
+        "from": {"email": parseaddr(from_email)[1] or from_email},
+        "subject": subject,
+        "content": [{"type": "text/plain", "value": body}],
+    }
+    r = requests.post(url, json=payload, headers=headers, timeout=20)
+    if r.status_code in (200, 202):
+        return True
+    logger.warning(f"SendGrid failed ({r.status_code}): {r.text}")
+    return False
+
+
+def _email_send(to_email: str, subject: str, body: str) -> bool:
+    provider = (os.environ.get("EMAIL_PROVIDER") or "resend").strip().lower()
+    if provider == "sendgrid":
+        return _sendgrid_send(to_email, subject, body)
+    if provider == "smtp":
+        return _smtp_send(to_email, subject, body)
+    # default: resend
+    return _resend_send(to_email, subject, body)
 
 
 def _infer_public_url(bucket: str, region: str, key: str) -> str:
@@ -413,16 +464,16 @@ async def send_email_otp(body: EmailOtpSendBody):
     body_text = f"Your ChatFlow verification OTP is: {otp}\n\nThis OTP expires in {OTP_EXPIRY_MINUTES} minutes."
     sent = False
     try:
-        sent = _smtp_send(email, subject, body_text)
+        sent = _email_send(email, subject, body_text)
     except Exception as e:
-        logger.warning(f"SMTP send failed for {email}: {e}")
+        logger.warning(f"Email send failed for {email}: {e}")
         sent = False
 
     if not sent:
         logger.warning(f"[DEV EMAIL OTP] email={email} otp={otp}")
         raise HTTPException(
             status_code=503,
-            detail="Email delivery failed. Please check SMTP settings and try again."
+            detail="Email delivery failed. Please check email provider settings and try again."
         )
 
     return {

@@ -53,6 +53,8 @@ AWS_SECRET_ACCESS_KEY="..."
 S3_PUBLIC_BASE_URL="https://your-bucket.s3.ap-south-1.amazonaws.com"
 ```
 
+Tip: you can copy `backend/.env.example` → `backend/.env` and fill values.
+
 ### Frontend (React / CRA)
 
 ```bash
@@ -67,6 +69,8 @@ Create `frontend/.env` (example):
 REACT_APP_BACKEND_URL=http://localhost:8001
 WDS_SOCKET_PORT=0
 ```
+
+Tip: you can copy `frontend/.env.example` → `frontend/.env` and fill values.
 
 ---
 
