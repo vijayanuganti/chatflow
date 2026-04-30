@@ -3,12 +3,13 @@ import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import NewChatDialog from "@/components/NewChatDialog";
 import ProfileDialog from "@/components/ProfileDialog";
+import TopBar from "@/components/TopBar";
 import useChatSocket from "@/hooks/useChatSocket";
 import { api, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Users, MessageSquare, Briefcase, UserCircle2, LayoutDashboard,
-  MessageCircle, LogOut, Eye, Activity, Plus,
+  MessageCircle, Eye, Activity, Plus, Layers,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -29,10 +30,16 @@ function StatCard({ icon: Icon, label, value, testId, accent }) {
 }
 
 export default function AdminDashboard() {
-  const { user, logout } = useAuth();
-  const [tab, setTab] = useState("overview");
+  const { user } = useAuth();
+  const [tab, setTab] = useState("batches");
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [employeeBatches, setEmployeeBatches] = useState([]);
+  const [mobileBatchesStep, setMobileBatchesStep] = useState("employees"); // employees | batches | chat
+  const [mobileChatStep, setMobileChatStep] = useState("list"); // list | chat
+  const [mobileActivityStep, setMobileActivityStep] = useState("list"); // list | detail
   const [allConvs, setAllConvs] = useState([]); // admin monitoring
   const [myConvs, setMyConvs] = useState([]);   // admin's own chats
   const [selected, setSelected] = useState(null);
@@ -64,7 +71,38 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  const loadEmployees = useCallback(async () => {
+    try {
+      const res = await api.get("/admin/employees");
+      setEmployees(res.data || []);
+    } catch (err) {
+      toast.error(formatApiError(err));
+    }
+  }, []);
+
+  const loadEmployeeBatches = useCallback(async (employeeId) => {
+    if (!employeeId) {
+      setEmployeeBatches([]);
+      return;
+    }
+    try {
+      const res = await api.get(`/admin/employees/${employeeId}/batches`);
+      setEmployeeBatches(res.data?.batches || []);
+    } catch (err) {
+      toast.error(formatApiError(err));
+    }
+  }, []);
+
   useEffect(() => { loadOverview(); }, [loadOverview]);
+  useEffect(() => { loadEmployees(); }, [loadEmployees]);
+  useEffect(() => {
+    if (tab !== "batches") setMobileBatchesStep("employees");
+    if (tab !== "chats" && tab !== "mychats") {
+      setMobileChatStep("list");
+      setSelected(null);
+    }
+    if (tab !== "activity") setMobileActivityStep("list");
+  }, [tab]);
 
   const loadMessages = useCallback(async (convId) => {
     try {
@@ -82,6 +120,13 @@ export default function AdminDashboard() {
     if (selected) loadMessages(selected.id);
     else setMessages([]);
   }, [selected, loadMessages]);
+
+  useEffect(() => {
+    if (!selected?.id) return;
+    setMyConvs((prev) => prev.map((c) => (
+      c.id === selected.id ? { ...c, unread_count: 0 } : c
+    )));
+  }, [selected?.id]);
 
   const loadActivity = async (u) => {
     setActivityTarget(u);
@@ -105,15 +150,25 @@ export default function AdminDashboard() {
       const previewText = msg.conversation_type === "group" ? `${msg.sender_name}: ${preview}` : preview;
       const exists = prev.find((c) => c.id === msg.conversation_id);
       if (!exists) { loadOverview(); return prev; }
+      const shouldIncrementUnread = (
+        (!selected || msg.conversation_id !== selected.id) &&
+        Array.isArray(msg.recipient_ids) &&
+        msg.recipient_ids.includes(user.id)
+      );
       const updated = prev.map((c) => c.id === msg.conversation_id
-        ? { ...c, last_message: previewText, last_message_at: msg.created_at } : c
+        ? {
+          ...c,
+          last_message: previewText,
+          last_message_at: msg.created_at,
+          unread_count: shouldIncrementUnread ? (Number(c.unread_count || 0) + 1) : Number(c.unread_count || 0),
+        } : c
       );
       updated.sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || ""));
       return updated;
     };
     setAllConvs(updater);
     setMyConvs(updater);
-  }, [selected, loadOverview]);
+  }, [selected, loadOverview, user.id]);
 
   const handlePresence = useCallback((data) => {
     setOnlineUsers((prev) => ({ ...prev, [data.user_id]: data.online }));
@@ -168,9 +223,11 @@ export default function AdminDashboard() {
     try {
       const res = await api.post("/conversations/start", { other_user_id: otherUser.id });
       const conv = { ...res.data.conversation, other_user: res.data.other_user, participants_info: [user, res.data.other_user] };
+      conv.unread_count = 0;
       setMyConvs((prev) => prev.some((c) => c.id === conv.id) ? prev : [conv, ...prev]);
       setTab("mychats");
       setSelected(conv);
+      setMobileChatStep("chat");
     } catch (err) {
       toast.error(formatApiError(err));
     }
@@ -182,6 +239,7 @@ export default function AdminDashboard() {
       await loadOverview();
       setTab("mychats");
       setSelected(res.data);
+      setMobileChatStep("chat");
       setNewChatOpen(false);
     } catch (err) {
       toast.error(formatApiError(err));
@@ -192,72 +250,109 @@ export default function AdminDashboard() {
   const isSelectedAdminChat = selected && myConvs.find((c) => c.id === selected.id);
   const currentConvs = tab === "mychats" ? myConvs : allConvs;
 
+  const topbarTitle = (() => {
+    if (tab === "batches") return "Admin · Batches";
+    if (tab === "chats") return "Admin · Monitor";
+    if (tab === "mychats") return "Admin · My Chats";
+    if (tab === "users") return "Admin · Users";
+    if (tab === "activity") return "Admin · Activity";
+    return "Admin";
+  })();
+
+  const unreadTotal = myConvs.reduce((sum, c) => sum + Number(c.unread_count || 0), 0);
+
+  useEffect(() => {
+    const base = topbarTitle || "Admin";
+    document.title = unreadTotal > 0 ? `(${unreadTotal}) ${base}` : base;
+  }, [topbarTitle, unreadTotal]);
+
+  const topbarOnBack = (() => {
+    if (tab === "batches") {
+      if (mobileBatchesStep === "batches") return () => setMobileBatchesStep("employees");
+      if (mobileBatchesStep === "chat") return () => setMobileBatchesStep("batches");
+      return undefined;
+    }
+    if ((tab === "chats" || tab === "mychats") && mobileChatStep === "chat") {
+      return () => { setSelected(null); setMobileChatStep("list"); };
+    }
+    if (tab === "activity" && mobileActivityStep === "detail") {
+      return () => { setActivityTarget(null); setActivityData(null); setMobileActivityStep("list"); };
+    }
+    return undefined;
+  })();
+
   return (
-    <div className="h-screen w-full flex bg-gray-50 overflow-hidden" data-testid="admin-dashboard">
-      {/* Admin Nav */}
-      <nav className="w-20 lg:w-60 bg-emerald-950 text-emerald-100 flex flex-col py-6 px-3">
-        <div className="flex items-center gap-3 px-2 mb-8">
-          <div className="h-10 w-10 rounded-xl bg-emerald-700/40 flex items-center justify-center">
-            <MessageCircle className="h-5 w-5" strokeWidth={1.5} />
-          </div>
-          <span className="font-display text-lg font-semibold hidden lg:inline">ChatFlow</span>
+    <div className="h-screen w-full flex flex-col bg-gray-50 overflow-hidden" data-testid="admin-dashboard">
+      <TopBar
+        onOpenSettings={() => setProfileOpen(true)}
+        title={topbarTitle}
+        onBack={topbarOnBack}
+        unreadTotal={unreadTotal}
+      />
+
+      <div className="md:hidden bg-white border-b border-gray-200 px-2 py-2 overflow-x-auto" data-testid="admin-mobile-tabs">
+        <div className="flex gap-2 min-w-max">
+          <MobileTabButton label="Overview" active={tab === "overview"} onClick={() => { setTab("overview"); setSelected(null); }} />
+          <MobileTabButton label="Batches" active={tab === "batches"} onClick={() => { setTab("batches"); setSelected(null); setMobileBatchesStep("employees"); }} />
+          <MobileTabButton label="Monitor" active={tab === "chats"} onClick={() => { setTab("chats"); setSelected(null); setMobileChatStep("list"); }} />
+          <MobileTabButton label="My Chats" active={tab === "mychats"} onClick={() => { setTab("mychats"); setSelected(null); setMobileChatStep("list"); }} />
+          <MobileTabButton label="Activity" active={tab === "activity"} onClick={() => { setTab("activity"); setActivityTarget(null); setActivityData(null); setMobileActivityStep("list"); }} />
+          <MobileTabButton label="Users" active={tab === "users"} onClick={() => { setTab("users"); setSelected(null); }} />
         </div>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden pb-14 md:pb-0">
+        {/* Admin Nav */}
+        <nav className="hidden md:flex w-20 lg:w-60 bg-emerald-950 text-emerald-100 flex-col py-6 px-3">
+          <div className="flex items-center gap-3 px-2 mb-8">
+            <div className="h-10 w-10 rounded-xl bg-emerald-700/40 flex items-center justify-center">
+              <MessageCircle className="h-5 w-5" strokeWidth={1.5} />
+            </div>
+            <span className="font-display text-lg font-semibold hidden lg:inline">Admin</span>
+          </div>
         <NavButton icon={LayoutDashboard} label="Overview" active={tab === "overview"} onClick={() => { setTab("overview"); setSelected(null); }} testId="admin-nav-overview" />
+        <NavButton icon={Layers} label="Batches" active={tab === "batches"} onClick={() => { setTab("batches"); setSelected(null); }} testId="admin-nav-batches" />
         <NavButton icon={Eye} label="Monitor Chats" active={tab === "chats"} onClick={() => { setTab("chats"); setSelected(null); }} testId="admin-nav-chats" />
         <NavButton icon={MessageSquare} label="My Chats" active={tab === "mychats"} onClick={() => { setTab("mychats"); setSelected(null); }} testId="admin-nav-mychats" />
         <NavButton icon={Activity} label="Activity" active={tab === "activity"} onClick={() => { setTab("activity"); setSelected(null); }} testId="admin-nav-activity" />
         <NavButton icon={Users} label="Users" active={tab === "users"} onClick={() => { setTab("users"); setSelected(null); }} testId="admin-nav-users" />
-        <div className="mt-auto">
-          <button
-            onClick={() => setProfileOpen(true)}
-            data-testid="admin-profile-btn"
-            className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-emerald-900"
-          >
-            <Avatar name={user?.full_name} avatarUrl={user?.avatar_url} status={user?.status || "available"} size={32} />
-            <div className="hidden lg:block min-w-0 text-left">
-              <div className="text-sm font-medium truncate">{user?.full_name}</div>
-              <div className="text-[10px] text-emerald-300/70 truncate">Admin</div>
-            </div>
-          </button>
-          <button onClick={logout} data-testid="admin-logout-btn" className="mt-2 w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-emerald-900 text-emerald-100">
-            <LogOut className="h-5 w-5" strokeWidth={1.5} />
-            <span className="hidden lg:inline text-sm">Sign out</span>
-          </button>
+        <div className="mt-auto px-2 py-2 text-[10px] text-emerald-200/70 hidden lg:block">
+          Logged in as <span className="font-medium text-emerald-100">{user?.full_name}</span>
         </div>
-      </nav>
+        </nav>
 
-      {/* Content */}
-      <div className="flex-1 min-w-0 flex flex-col">
+        {/* Content */}
+        <div className="flex-1 min-w-0 flex flex-col">
         {tab === "overview" && (
-          <div className="p-6 lg:p-10 space-y-6 overflow-y-auto" data-testid="admin-overview-pane">
+          <div className="p-4 sm:p-6 lg:p-10 space-y-6 overflow-y-auto" data-testid="admin-overview-pane">
             <div>
               <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800">Admin panel</div>
-              <h1 className="font-display text-4xl font-semibold mt-1">Hi, {user?.full_name?.split(" ")[0] || "Admin"}.</h1>
+              <h1 className="font-display text-2xl sm:text-4xl font-semibold mt-1">Hi, {user?.full_name?.split(" ")[0] || "Admin"}.</h1>
               <p className="text-gray-500 mt-1">Monitor conversations and chat with anyone on the platform.</p>
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard icon={Users} label="Total users" value={stats?.total_users ?? "—"} testId="stat-total-users" />
               <StatCard icon={Briefcase} label="Employees" value={stats?.employees ?? "—"} testId="stat-employees" accent="bg-amber-50 text-amber-900" />
               <StatCard icon={UserCircle2} label="Clients" value={stats?.clients ?? "—"} testId="stat-clients" accent="bg-sky-50 text-sky-900" />
               <StatCard icon={MessageSquare} label="Conversations" value={stats?.conversations ?? "—"} testId="stat-conversations" accent="bg-violet-50 text-violet-900" />
             </div>
-            <div className="grid lg:grid-cols-2 gap-4">
-              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6 min-w-0">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="font-display text-xl font-semibold">Latest activity</h2>
-                  <Button variant="ghost" onClick={() => setTab("chats")} data-testid="overview-view-all-chats">View all →</Button>
+                  <h2 className="font-display text-lg sm:text-xl font-semibold">Latest activity</h2>
+                  <Button variant="ghost" className="text-xs sm:text-sm px-2 sm:px-3" onClick={() => setTab("chats")} data-testid="overview-view-all-chats">View all →</Button>
                 </div>
                 <div className="divide-y divide-gray-100">
                   {allConvs.slice(0, 6).map((c) => (
                     <button
                       key={c.id}
-                      onClick={() => { setTab("chats"); setSelected(c); }}
+                      onClick={() => { setTab("chats"); setSelected(c); setMobileChatStep("chat"); }}
                       data-testid={`overview-conv-${c.id}`}
                       className="w-full py-3 flex items-center gap-3 hover:bg-gray-50 rounded-xl px-2 text-left"
                     >
-                      <div className="flex -space-x-2">
+                      <div className="flex -space-x-2 shrink-0">
                         {(c.participants_info || []).slice(0, 2).map((p) => (
-                          <Avatar key={p.id} name={p.full_name} avatarUrl={p.avatar_url} online={onlineUsers[p.id]} size={36} />
+                          <Avatar key={p.id} name={p.full_name} avatarUrl={p.avatar_url} online={onlineUsers[p.id]} size={32} />
                         ))}
                       </div>
                       <div className="flex-1 min-w-0">
@@ -266,33 +361,33 @@ export default function AdminDashboard() {
                         </div>
                         <div className="text-xs text-gray-500 truncate">{c.last_message || "No messages"}</div>
                       </div>
-                      {c.type === "group" && <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full">Group</span>}
+                      {c.type === "group" && <span className="hidden sm:inline text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full">Group</span>}
                     </button>
                   ))}
                   {allConvs.length === 0 && <div className="py-8 text-center text-sm text-gray-400">No activity yet.</div>}
                 </div>
               </div>
-              <div className="bg-white rounded-2xl border border-gray-200 p-6">
+              <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6 min-w-0">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="font-display text-xl font-semibold">Quick actions</h2>
+                  <h2 className="font-display text-lg sm:text-xl font-semibold">Quick actions</h2>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => setNewChatOpen(true)} data-testid="overview-new-chat-btn" className="p-4 rounded-2xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-left">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button onClick={() => setNewChatOpen(true)} data-testid="overview-new-chat-btn" className="p-4 rounded-2xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-left min-w-0">
                     <Plus className="h-5 w-5 text-emerald-900 mb-2" />
                     <div className="font-semibold">Start a chat</div>
                     <div className="text-xs text-gray-600 mt-1">Direct or group with anyone</div>
                   </button>
-                  <button onClick={() => setTab("activity")} data-testid="overview-activity-btn" className="p-4 rounded-2xl border border-amber-200 bg-amber-50 hover:bg-amber-100 text-left">
+                  <button onClick={() => setTab("activity")} data-testid="overview-activity-btn" className="p-4 rounded-2xl border border-amber-200 bg-amber-50 hover:bg-amber-100 text-left min-w-0">
                     <Activity className="h-5 w-5 text-amber-900 mb-2" />
                     <div className="font-semibold">Employee activity</div>
                     <div className="text-xs text-gray-600 mt-1">See who chatted what</div>
                   </button>
-                  <button onClick={() => setTab("users")} data-testid="overview-users-btn" className="p-4 rounded-2xl border border-sky-200 bg-sky-50 hover:bg-sky-100 text-left">
+                  <button onClick={() => setTab("users")} data-testid="overview-users-btn" className="p-4 rounded-2xl border border-sky-200 bg-sky-50 hover:bg-sky-100 text-left min-w-0">
                     <Users className="h-5 w-5 text-sky-900 mb-2" />
                     <div className="font-semibold">Manage users</div>
                     <div className="text-xs text-gray-600 mt-1">{stats?.total_users ?? 0} on platform</div>
                   </button>
-                  <button onClick={() => setTab("chats")} data-testid="overview-monitor-btn" className="p-4 rounded-2xl border border-violet-200 bg-violet-50 hover:bg-violet-100 text-left">
+                  <button onClick={() => setTab("chats")} data-testid="overview-monitor-btn" className="p-4 rounded-2xl border border-violet-200 bg-violet-50 hover:bg-violet-100 text-left min-w-0">
                     <Eye className="h-5 w-5 text-violet-900 mb-2" />
                     <div className="font-semibold">Monitor all</div>
                     <div className="text-xs text-gray-600 mt-1">Read-only conversation feed</div>
@@ -303,9 +398,107 @@ export default function AdminDashboard() {
           </div>
         )}
 
+        {tab === "batches" && (
+          <div className="flex flex-1 overflow-hidden" data-testid="admin-batches-pane">
+            {/* Employees */}
+            <div className={`w-full md:w-72 bg-white border-r border-gray-200 flex flex-col ${mobileBatchesStep !== "employees" ? "hidden md:flex" : ""}`}>
+              <div className="p-4 border-b border-gray-200">
+                <h2 className="font-display font-semibold">Employees</h2>
+                <p className="text-xs text-gray-500">Pick an employee to view their batches.</p>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {(employees || []).map((e) => (
+                  <button
+                    key={e.id}
+                    onClick={() => {
+                      setSelectedEmployee(e);
+                      loadEmployeeBatches(e.id);
+                      setMobileBatchesStep("batches");
+                    }}
+                    data-testid={`admin-employee-${e.id}`}
+                    className={`w-full flex items-center gap-3 p-3 hover:bg-gray-50 border-b border-gray-50 text-left ${
+                      selectedEmployee?.id === e.id ? "bg-emerald-50" : ""
+                    }`}
+                  >
+                    <Avatar name={e.full_name} avatarUrl={e.avatar_url} online={onlineUsers[e.id]} status={e.status} size={38} />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{e.full_name}</div>
+                      <div className="text-xs text-gray-500">@{e.username}</div>
+                    </div>
+                  </button>
+                ))}
+                {(employees || []).length === 0 && (
+                  <div className="p-6 text-sm text-gray-400">No employees found.</div>
+                )}
+              </div>
+            </div>
+
+            {/* Batches & clients */}
+            <div className={`w-full md:w-[420px] bg-white border-r border-gray-200 flex flex-col ${mobileBatchesStep !== "batches" ? "hidden md:flex" : ""}`}>
+              <div className="p-4 border-b border-gray-200">
+                <h2 className="font-display font-semibold">Batches</h2>
+                <p className="text-xs text-gray-500">
+                  {selectedEmployee ? `Batches for ${selectedEmployee.full_name}` : "Select an employee first."}
+                </p>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {!selectedEmployee ? (
+                  <div className="p-6 text-sm text-gray-400">Choose an employee to see batches.</div>
+                ) : employeeBatches.length === 0 ? (
+                  <div className="p-6 text-sm text-gray-400">No batches for this employee.</div>
+                ) : (
+                  employeeBatches.map((b) => (
+                    <div key={b.id} className="border-b border-gray-100">
+                      <div className="px-4 py-3">
+                        <div className="font-medium">{b.name}</div>
+                        <div className="text-xs text-gray-500">{b.client_count || 0}/{b.max_clients || 20} clients</div>
+                      </div>
+                      <div className="pb-2">
+                        {(b.clients || []).map((c) => (
+                          <button
+                            key={c.id}
+                            onClick={() => {
+                              setSelected({ id: c.conversation_id, type: "direct", participants: [selectedEmployee.id, c.id], other_user: c });
+                              setMobileBatchesStep("chat");
+                            }}
+                            className="w-full px-4 py-2 flex items-center gap-3 hover:bg-gray-50 text-left"
+                            data-testid={`admin-batch-client-${b.id}-${c.id}`}
+                          >
+                            <Avatar name={c.full_name} avatarUrl={c.avatar_url} online={onlineUsers[c.id]} status={c.status} size={34} />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate">{c.full_name}</div>
+                              <div className="text-xs text-gray-500 truncate">{c.conversation_last_message || "No messages yet"}</div>
+                            </div>
+                          </button>
+                        ))}
+                        {(b.clients || []).length === 0 && (
+                          <div className="px-4 pb-3 text-xs text-gray-400">No clients yet.</div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Chat */}
+            <main className={`flex-1 flex flex-col ${mobileBatchesStep !== "chat" ? "hidden md:flex" : ""}`}>
+              <ChatWindow
+                conversation={selected}
+                messages={messages}
+                onSendMessage={handleSendMessage}
+                typingUsers={(selected && typingUsers[selected.id]) || {}}
+                onlineUsers={onlineUsers}
+                sendTyping={sendTyping}
+                readOnly
+              />
+            </main>
+          </div>
+        )}
+
         {(tab === "chats" || tab === "mychats") && (
           <div className="flex flex-1 overflow-hidden" data-testid={`admin-${tab}-pane`}>
-            <div className="flex flex-col">
+            <div className={`w-full md:w-80 lg:w-96 flex flex-col ${mobileChatStep !== "list" ? "hidden md:flex" : ""}`}>
               <div className="px-4 py-3 border-b border-gray-200 bg-white">
                 <h2 className="font-display font-semibold">
                   {tab === "chats" ? "Monitoring" : "My Chats"}
@@ -318,13 +511,16 @@ export default function AdminDashboard() {
                 conversations={currentConvs}
                 onlineUsers={onlineUsers}
                 selectedId={selected?.id}
-                onSelect={setSelected}
+                onSelect={(c) => { setSelected(c); setMobileChatStep("chat"); }}
                 onNewChat={() => setNewChatOpen(true)}
-                onOpenProfile={() => setProfileOpen(true)}
                 adminView={tab === "chats"}
+                batches={[]}
+                selectedBatchId={null}
+                onSelectBatch={undefined}
+                onBatchesChanged={undefined}
               />
             </div>
-            <main className="flex-1 flex flex-col">
+            <main className={`flex-1 flex flex-col ${mobileChatStep !== "chat" ? "hidden md:flex" : ""}`}>
               <ChatWindow
                 conversation={selected}
                 messages={messages}
@@ -333,6 +529,7 @@ export default function AdminDashboard() {
                 onlineUsers={onlineUsers}
                 sendTyping={sendTyping}
                 readOnly={tab === "chats" && !isSelectedAdminChat}
+                onBack={() => { setSelected(null); setMobileChatStep("list"); }}
               />
             </main>
           </div>
@@ -340,7 +537,7 @@ export default function AdminDashboard() {
 
         {tab === "activity" && (
           <div className="flex flex-1 overflow-hidden" data-testid="admin-activity-pane">
-            <div className="w-72 bg-white border-r border-gray-200 flex flex-col">
+            <div className={`w-full md:w-72 bg-white border-r border-gray-200 flex flex-col ${mobileActivityStep !== "list" ? "hidden md:flex" : ""}`}>
               <div className="p-4 border-b border-gray-200">
                 <h2 className="font-display font-semibold">Employee activity</h2>
                 <p className="text-xs text-gray-500">Click a person to see their chats.</p>
@@ -349,7 +546,7 @@ export default function AdminDashboard() {
                 {users.filter((u) => u.role !== "admin").map((u) => (
                   <button
                     key={u.id}
-                    onClick={() => loadActivity(u)}
+                    onClick={() => { loadActivity(u); setMobileActivityStep("detail"); }}
                     data-testid={`activity-user-${u.id}`}
                     className={`w-full flex items-center gap-3 p-3 hover:bg-gray-50 border-b border-gray-50 text-left ${
                       activityTarget?.id === u.id ? "bg-amber-50" : ""
@@ -364,7 +561,7 @@ export default function AdminDashboard() {
                 ))}
               </div>
             </div>
-            <main className="flex-1 overflow-y-auto">
+            <main className={`flex-1 overflow-y-auto ${mobileActivityStep !== "detail" ? "hidden md:block" : "block"}`}>
               {!activityTarget ? (
                 <div className="h-full flex items-center justify-center text-gray-400 text-sm" data-testid="activity-empty">
                   Select a user from the left to view their activity.
@@ -372,7 +569,7 @@ export default function AdminDashboard() {
               ) : !activityData ? (
                 <div className="p-10 text-gray-400">Loading activity...</div>
               ) : (
-                <div className="p-6 lg:p-10 space-y-6">
+                <div className="p-4 sm:p-6 lg:p-10 space-y-6">
                   <div className="flex items-start gap-4">
                     <Avatar name={activityData.user.full_name} avatarUrl={activityData.user.avatar_url} online={onlineUsers[activityData.user.id]} status={activityData.user.status} size={64} />
                     <div>
@@ -381,7 +578,7 @@ export default function AdminDashboard() {
                       {activityData.user.bio && <p className="mt-2 text-sm text-gray-600 max-w-md">{activityData.user.bio}</p>}
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-3 max-w-lg">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-lg">
                     <StatCard icon={MessageSquare} label="Conversations" value={activityData.conversations.length} testId="activity-stat-convs" />
                     <StatCard icon={Activity} label="Messages sent" value={activityData.messages_sent} testId="activity-stat-msgs" accent="bg-amber-50 text-amber-900" />
                     <StatCard icon={Users} label="Groups" value={activityData.conversations.filter((c) => c.type === "group").length} testId="activity-stat-groups" accent="bg-violet-50 text-violet-900" />
@@ -394,7 +591,7 @@ export default function AdminDashboard() {
                       {activityData.conversations.map((c) => (
                         <button
                           key={c.id}
-                          onClick={() => { setTab("chats"); setSelected(c); }}
+                          onClick={() => { setTab("chats"); setSelected(c); setMobileChatStep("chat"); }}
                           data-testid={`activity-conv-${c.id}`}
                           className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50 text-left"
                         >
@@ -424,9 +621,40 @@ export default function AdminDashboard() {
         )}
 
         {tab === "users" && (
-          <div className="p-6 lg:p-10 overflow-y-auto" data-testid="admin-users-pane">
-            <h1 className="font-display text-3xl font-semibold mb-6">Users</h1>
-            <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto" data-testid="admin-users-pane">
+            <h1 className="font-display text-2xl sm:text-3xl font-semibold mb-4 sm:mb-6">Users</h1>
+            <div className="md:hidden space-y-3">
+              {users.map((u) => (
+                <div key={u.id} className="bg-white rounded-2xl border border-gray-200 p-4" data-testid={`admin-user-card-${u.id}`}>
+                  <div className="flex items-center gap-3">
+                    <Avatar name={u.full_name} avatarUrl={u.avatar_url} online={onlineUsers[u.id]} status={u.status} size={40} />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate">{u.full_name}</div>
+                      <div className="text-xs text-gray-500 truncate">@{u.username} · {u.email || "—"}</div>
+                    </div>
+                    <span className={`inline-flex text-[11px] px-2 py-1 rounded-full ${
+                      u.role === "admin" ? "bg-amber-100 text-amber-900"
+                      : u.role === "employee" ? "bg-emerald-100 text-emerald-900"
+                      : "bg-sky-100 text-sky-900"
+                    }`}>{u.role}</span>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+                    <span className="inline-flex items-center gap-2">
+                      <span className={`h-2 w-2 rounded-full ${onlineUsers[u.id] ? "bg-emerald-500" : "bg-gray-300"}`} />
+                      {onlineUsers[u.id] ? "Online" : "Offline"} · {u.status || "available"}
+                    </span>
+                    <span>{u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}</span>
+                  </div>
+                  {u.id !== user.id && (
+                    <Button size="sm" variant="outline" className="rounded-full mt-3 w-full" onClick={() => handleStartDirect(u)} data-testid={`users-chat-mobile-${u.id}`}>
+                      Chat
+                    </Button>
+                  )}
+                </div>
+              ))}
+              {users.length === 0 && (<div className="py-8 text-center text-gray-400 bg-white rounded-2xl border border-gray-200">No users yet.</div>)}
+            </div>
+            <div className="hidden md:block bg-white rounded-2xl border border-gray-200 overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 text-gray-500 text-[10px] uppercase tracking-[0.2em]">
                   <tr>
@@ -492,6 +720,27 @@ export default function AdminDashboard() {
         onlineUsers={onlineUsers}
       />
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
+      </div>
+
+      {/* Mobile bottom nav */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 h-14 bg-white border-t border-gray-200 flex items-center justify-around z-20" data-testid="admin-bottom-nav">
+        <button onClick={() => { setTab("batches"); setSelected(null); setMobileBatchesStep("employees"); }} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "batches" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-batches">
+          <Layers className="h-5 w-5" />
+          Batches
+        </button>
+        <button onClick={() => { setTab("chats"); setSelected(null); setMobileChatStep("list"); }} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "chats" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-monitor">
+          <Eye className="h-5 w-5" />
+          Monitor
+        </button>
+        <button onClick={() => { setTab("mychats"); setSelected(null); setMobileChatStep("list"); }} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "mychats" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-mychats">
+          <MessageSquare className="h-5 w-5" />
+          My chats
+        </button>
+        <button onClick={() => { setTab("users"); setSelected(null); }} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "users" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-users">
+          <Users className="h-5 w-5" />
+          Users
+        </button>
+      </div>
     </div>
   );
 }
@@ -507,6 +756,19 @@ function NavButton({ icon: Icon, label, active, onClick, testId }) {
     >
       <Icon className="h-5 w-5" strokeWidth={1.5} />
       <span className="hidden lg:inline text-sm font-medium">{label}</span>
+    </button>
+  );
+}
+
+function MobileTabButton({ label, active, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap border transition-colors ${
+        active ? "bg-emerald-900 border-emerald-900 text-white" : "bg-white border-gray-200 text-gray-700"
+      }`}
+    >
+      {label}
     </button>
   );
 }

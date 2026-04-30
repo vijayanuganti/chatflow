@@ -1,9 +1,13 @@
-import React, { useState, useMemo } from "react";
-import { Search, Plus, LogOut, MessageCircle, Settings, Users as UsersIcon } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { Search, Plus, Users as UsersIcon, LayoutGrid, FolderPlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import Avatar from "./Avatar";
 import { useAuth } from "@/context/AuthContext";
+import { api, formatApiError } from "@/lib/api";
+import { toast } from "sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 
 function formatLastTime(iso) {
   if (!iso) return "";
@@ -22,11 +26,17 @@ export default function ChatSidebar({
   selectedId,
   onSelect,
   onNewChat,
-  onOpenProfile,
   adminView = false,
+  batches = [],
+  selectedBatchId = null,
+  onSelectBatch,
+  onBatchesChanged,
 }) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [q, setQ] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newBatchName, setNewBatchName] = useState("");
+  const [creating, setCreating] = useState(false);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -41,29 +51,89 @@ export default function ChatSidebar({
     });
   }, [conversations, q, adminView]);
 
+  const showBatches = !adminView && user?.role === "employee";
+
+  const createBatch = async () => {
+    const name = newBatchName.trim();
+    if (!name) return toast.error("Batch name required");
+    setCreating(true);
+    try {
+      await api.post("/batches", { name });
+      toast.success("Batch created");
+      setCreateOpen(false);
+      setNewBatchName("");
+      onBatchesChanged?.();
+    } catch (err) {
+      toast.error(formatApiError(err));
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <aside className="h-full w-full md:w-80 lg:w-96 bg-white border-r border-gray-200 flex flex-col" data-testid="chat-sidebar">
       {/* Header / Profile */}
       <div className="p-4 border-b border-gray-100 flex items-center gap-3">
-        <button onClick={onOpenProfile} data-testid="sidebar-profile-btn" className="shrink-0">
+        <div data-testid="sidebar-profile" className="shrink-0">
           <Avatar name={user?.full_name} avatarUrl={user?.avatar_url} status={user?.status || "available"} size={40} />
-        </button>
+        </div>
         <div className="flex-1 min-w-0">
           <div className="font-display font-semibold truncate">{user?.full_name}</div>
           <div className="text-xs text-gray-500 capitalize">{user?.role}</div>
         </div>
-        {!adminView && (
-          <Button size="icon" variant="ghost" onClick={onNewChat} data-testid="new-chat-btn" title="New chat" className="rounded-full">
-            <Plus className="h-5 w-5" strokeWidth={1.5} />
-          </Button>
-        )}
-        <Button size="icon" variant="ghost" onClick={onOpenProfile} data-testid="open-settings-btn" title="Profile & settings" className="rounded-full">
-          <Settings className="h-5 w-5" strokeWidth={1.5} />
-        </Button>
-        <Button size="icon" variant="ghost" onClick={logout} data-testid="logout-btn" title="Sign out" className="rounded-full">
-          <LogOut className="h-5 w-5" strokeWidth={1.5} />
-        </Button>
       </div>
+
+      {/* Batch boards (employee) */}
+      {showBatches && (
+        <div className="p-3 border-b border-gray-100" data-testid="batch-boards">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
+              <LayoutGrid className="h-4 w-4" />
+              Batch boards
+            </div>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => setCreateOpen(true)}
+              className="rounded-full"
+              data-testid="add-batch-btn"
+              title="Add batch"
+            >
+              <FolderPlus className="h-5 w-5" strokeWidth={1.5} />
+            </Button>
+          </div>
+
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            <button
+              type="button"
+              onClick={() => onSelectBatch?.(null)}
+              className={`shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                !selectedBatchId ? "bg-emerald-900 text-white border-emerald-900" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+              }`}
+              data-testid="batch-chip-all"
+            >
+              All
+            </button>
+            {(batches || []).map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => onSelectBatch?.(b.id)}
+                className={`shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                  selectedBatchId === b.id ? "bg-emerald-900 text-white border-emerald-900" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                }`}
+                data-testid={`batch-chip-${b.id}`}
+                title={`${b.name} (${b.client_count || 0}/${b.max_clients || 20})`}
+              >
+                {b.name} <span className="text-[10px] opacity-80">({b.client_count || 0})</span>
+              </button>
+            ))}
+            {(batches || []).length === 0 && (
+              <div className="text-xs text-gray-400 py-1">No batches yet.</div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Search */}
       <div className="p-3 border-b border-gray-100">
@@ -90,6 +160,7 @@ export default function ChatSidebar({
           filtered.map((c) => {
             const isGroup = c.type === "group";
             const other = adminView ? null : c.other_user;
+            const unreadCount = Number(c.unread_count || 0);
             const title = isGroup
               ? c.name
               : adminView
@@ -114,10 +185,17 @@ export default function ChatSidebar({
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium truncate text-gray-900">{title}</span>
-                    <span className="text-[11px] text-gray-400 shrink-0">{formatLastTime(c.last_message_at)}</span>
+                    <span className={`font-medium truncate ${unreadCount > 0 ? "text-gray-950" : "text-gray-900"}`}>{title}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {unreadCount > 0 && (
+                        <span className="h-5 min-w-[20px] px-1.5 rounded-full bg-emerald-600 text-white text-[10px] font-semibold flex items-center justify-center">
+                          {unreadCount > 99 ? "99+" : unreadCount}
+                        </span>
+                      )}
+                      <span className={`text-[11px] ${unreadCount > 0 ? "text-emerald-700 font-medium" : "text-gray-400"}`}>{formatLastTime(c.last_message_at)}</span>
+                    </div>
                   </div>
-                  <div className="text-sm text-gray-500 truncate">
+                  <div className={`text-sm truncate ${unreadCount > 0 ? "text-gray-800 font-medium" : "text-gray-500"}`}>
                     {c.last_message || (adminView ? "Monitoring" : "Say hello 👋")}
                   </div>
                 </div>
@@ -129,6 +207,36 @@ export default function ChatSidebar({
       <div className="px-4 py-2 text-[10px] text-gray-400 text-center border-t border-gray-100">
         ChatFlow · © {new Date().getFullYear()} vijay_anuganti
       </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-md max-h-[88dvh] overflow-y-auto p-4 sm:p-6" data-testid="create-batch-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-display">Create batch</DialogTitle>
+            <DialogDescription>Add a new board for your clients.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label htmlFor="batch_name">Batch name</Label>
+              <Input
+                id="batch_name"
+                value={newBatchName}
+                onChange={(e) => setNewBatchName(e.target.value)}
+                placeholder="Batch 1"
+                className="h-11 rounded-xl"
+                data-testid="create-batch-name-input"
+              />
+            </div>
+            <Button
+              onClick={createBatch}
+              disabled={creating}
+              className="w-full h-11 rounded-full bg-emerald-900 hover:bg-emerald-950"
+              data-testid="create-batch-submit"
+            >
+              {creating ? "Creating..." : "Create batch"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </aside>
   );
 }

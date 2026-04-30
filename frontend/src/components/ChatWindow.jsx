@@ -134,7 +134,7 @@ export default function ChatWindow({
   return (
     <div className="flex-1 flex flex-col chat-bg h-full" data-testid="chat-window">
       {/* Header */}
-      <div className="bg-white/90 backdrop-blur-xl border-b border-gray-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10">
+      <div className="bg-white/90 backdrop-blur-xl border-b border-gray-200 px-3 sm:px-4 py-3 flex items-center gap-2 sm:gap-3 sticky top-0 z-10">
         {onBack && (
           <Button size="icon" variant="ghost" className="md:hidden rounded-full" onClick={onBack} data-testid="chat-back-btn">
             <ArrowLeft className="h-5 w-5" />
@@ -148,7 +148,7 @@ export default function ChatWindow({
           <Avatar name={otherUser?.full_name} avatarUrl={otherUser?.avatar_url} online={isOnline} status={otherUser?.status} size={42} />
         )}
         <div className="flex-1 min-w-0">
-          <div className="font-display font-semibold truncate flex items-center gap-2" data-testid="chat-header-name">
+          <div className="font-display font-semibold text-sm sm:text-base truncate flex items-center gap-2" data-testid="chat-header-name">
             {headerName}
             {readOnly && (
               <span className="inline-flex items-center gap-1 text-[10px] tracking-[0.2em] uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
@@ -166,7 +166,7 @@ export default function ChatWindow({
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-5 space-y-2" data-testid="messages-container">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-4 py-4 sm:py-5 space-y-2" data-testid="messages-container">
         {messages.length === 0 && (
           <div className="text-center text-sm text-gray-400 py-10" data-testid="empty-messages">
             No messages yet. {readOnly ? "Conversation is quiet." : "Say hi!"}
@@ -210,7 +210,7 @@ export default function ChatWindow({
 
       {/* Input */}
       {!readOnly && (
-        <div className="bg-white border-t border-gray-200 p-3 md:pr-52 sticky bottom-0">
+        <div className="bg-white border-t border-gray-200 p-2.5 sm:p-3 sticky bottom-0">
           <div className="flex items-end gap-2">
             <input
               ref={fileRef}

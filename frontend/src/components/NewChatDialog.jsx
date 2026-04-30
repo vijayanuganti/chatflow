@@ -60,7 +60,7 @@ export default function NewChatDialog({ open, onOpenChange, onSelectUser, onCrea
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md" data-testid="new-chat-dialog">
+      <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-md max-h-[88dvh] overflow-y-auto p-4 sm:p-6" data-testid="new-chat-dialog">
         <DialogHeader>
           <DialogTitle className="font-display">Start a conversation</DialogTitle>
           <DialogDescription>Pick a person for a direct chat, or create a group.</DialogDescription>
