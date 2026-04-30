@@ -37,13 +37,9 @@ ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="admin123"
 CORS_ORIGINS="http://localhost:3000"
 
-# SMTP (optional for email OTP)
-SMTP_HOST="smtp.gmail.com"
-SMTP_PORT="587"
-SMTP_SECURE="starttls"
-SMTP_USER="your@gmail.com"
-SMTP_PASS="your_app_password"
-SMTP_FROM="ChatFlow <your@gmail.com>"
+# Email (Resend for email OTP)
+EMAIL_FROM="ChatFlow <no-reply@yourdomain.com>"
+RESEND_API_KEY="re_..."
 
 # S3 (optional for local; required for production)
 S3_BUCKET="your-bucket"
@@ -148,8 +144,9 @@ If you keep the bucket private, you’ll need signed URLs.
     https://yourapp.vercel.app,https://yourapp-git-main-yourname.vercel.app
     ```
 
-**SMTP (if you want email OTP)**
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+**Email (Resend for email OTP)**
+- `RESEND_API_KEY`
+- `EMAIL_FROM`
 
 **S3**
 - `S3_BUCKET`
