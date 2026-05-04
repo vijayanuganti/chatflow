@@ -553,8 +553,8 @@ export default function AdminDashboard() {
 
         {(tab === "chats" || tab === "mychats") && (
           <div className="flex min-h-0 flex-1 overflow-hidden" data-testid={`admin-${tab}-pane`}>
-            <div className={`flex min-h-0 w-full flex-col md:w-80 lg:w-96 ${mobileChatStep !== "list" ? "hidden md:flex" : ""}`}>
-              <div className="px-4 py-3 border-b border-gray-200 bg-white">
+            <div className={`flex h-full min-h-0 w-full flex-col md:w-80 lg:w-96 ${mobileChatStep !== "list" ? "hidden md:flex" : ""}`}>
+              <div className="shrink-0 border-b border-gray-200 bg-white px-4 py-3">
                 <h2 className="font-display font-semibold">
                   {tab === "chats" ? "Monitoring" : "My Chats"}
                 </h2>
