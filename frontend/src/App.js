@@ -50,7 +50,7 @@ function App() {
               }
             />
             <Route
-              path="/admin"
+              path="/admin/:section?"
               element={
                 <Protected roles={["admin"]}>
                   <AdminDashboard />

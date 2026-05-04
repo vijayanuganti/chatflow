@@ -22,8 +22,8 @@ export default function LoginPage() {
       const res = await api.post("/auth/login", { username, password });
       login(res.data.token, res.data.user);
       toast.success(`Welcome back, ${res.data.user.full_name}!`);
-      if (res.data.user.role === "admin") navigate("/admin");
-      else navigate("/chat");
+      if (res.data.user.role === "admin") navigate("/admin", { replace: true });
+      else navigate("/chat", { replace: true });
     } catch (err) {
       toast.error(formatApiError(err));
     } finally {

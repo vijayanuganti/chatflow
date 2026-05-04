@@ -51,9 +51,10 @@ export default function RegisterPage() {
     }
   };
 
-  const loadBatches = async (employeeId) => {
+  const loadBatches = async (employeeId = form.employee_id) => {
     if (!employeeId) {
       setBatches([]);
+      setLoadingMeta(false);
       return;
     }
     setLoadingMeta(true);
@@ -62,6 +63,7 @@ export default function RegisterPage() {
       setBatches(res.data || []);
     } catch (err) {
       toast.error(formatApiError(err));
+      setBatches([]);
     } finally {
       setLoadingMeta(false);
     }
@@ -105,7 +107,7 @@ export default function RegisterPage() {
     try {
       await api.post("/auth/email/send-otp", { email });
       setOtpSent(true);
-      toast.success("OTP sent. Check your email.");
+      toast.success("Check your email for the verification code.");
     } catch (err) {
       toast.error(formatApiError(err));
     } finally {

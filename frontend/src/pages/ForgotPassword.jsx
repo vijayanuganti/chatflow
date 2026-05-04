@@ -14,18 +14,13 @@ export default function ForgotPasswordPage() {
   const [otp, setOtp] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [devOtp, setDevOtp] = useState(null);
 
   const requestOtp = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
       const res = await api.post("/auth/forgot-password", { identifier });
-      toast.success(res.data.message);
-      if (res.data.dev_otp) {
-        setDevOtp(res.data.dev_otp);
-        toast.info(`Dev OTP: ${res.data.dev_otp}`, { duration: 10000 });
-      }
+      toast.success(res.data.message || "Check your email for the reset code.");
       setStep(2);
     } catch (err) {
       toast.error(formatApiError(err));
@@ -76,14 +71,8 @@ export default function ForgotPasswordPage() {
         ) : (
           <>
             <p className="text-gray-500 mb-4 text-sm">
-              Enter the 6-digit code you received{devOtp ? " (shown as toast in dev mode)" : " in your email"}.
+              Enter the 6-digit code from your email.
             </p>
-            {devOtp && (
-              <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-sm" data-testid="dev-otp-notice">
-                <strong>Dev OTP:</strong> <code className="font-mono text-base">{devOtp}</code>
-                <div className="text-xs text-amber-700 mt-1">Expires in 10 minutes. In production this is emailed.</div>
-              </div>
-            )}
             <form onSubmit={resetPassword} className="space-y-5" data-testid="reset-form">
               <div className="space-y-2">
                 <Label>OTP code</Label>

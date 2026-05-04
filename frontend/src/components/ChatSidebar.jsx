@@ -71,7 +71,10 @@ export default function ChatSidebar({
   };
 
   return (
-    <aside className="h-full w-full md:w-80 lg:w-96 bg-white border-r border-gray-200 flex flex-col" data-testid="chat-sidebar">
+    <aside
+      className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden border-r border-gray-200 bg-white md:h-full md:w-80 md:flex-none lg:w-96"
+      data-testid="chat-sidebar"
+    >
       {/* Header / Profile */}
       <div className="p-4 border-b border-gray-100 flex items-center gap-3">
         <div data-testid="sidebar-profile" className="shrink-0">
@@ -144,7 +147,7 @@ export default function ChatSidebar({
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
           <div className="p-8 text-center text-gray-400 text-sm" data-testid="no-conversations">
             No conversations yet.
@@ -204,7 +207,7 @@ export default function ChatSidebar({
           })
         )}
       </div>
-      <div className="px-4 py-2 text-[10px] text-gray-400 text-center border-t border-gray-100">
+      <div className="shrink-0 border-t border-gray-100 bg-white px-4 py-2 text-center text-[10px] text-gray-400">
         ChatFlow · © {new Date().getFullYear()} vijay_anuganti
       </div>
 

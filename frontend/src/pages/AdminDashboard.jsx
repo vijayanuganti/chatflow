@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import NewChatDialog from "@/components/NewChatDialog";
@@ -14,6 +15,12 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import Avatar from "@/components/Avatar";
+
+const ADMIN_TAB_IDS = new Set(["overview", "batches", "chats", "mychats", "activity", "users"]);
+
+function pathForAdminTab(t) {
+  return t === "overview" ? "/admin" : `/admin/${t}`;
+}
 
 function StatCard({ icon: Icon, label, value, testId, accent }) {
   return (
@@ -31,7 +38,19 @@ function StatCard({ icon: Icon, label, value, testId, accent }) {
 
 export default function AdminDashboard() {
   const { user } = useAuth();
-  const [tab, setTab] = useState("batches");
+  const navigate = useNavigate();
+  const { section } = useParams();
+  const tab = useMemo(() => {
+    if (!section) return "overview";
+    return ADMIN_TAB_IDS.has(section) ? section : "overview";
+  }, [section]);
+
+  useEffect(() => {
+    if (section && !ADMIN_TAB_IDS.has(section)) {
+      navigate("/admin", { replace: true });
+    }
+  }, [section, navigate]);
+
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -45,11 +64,36 @@ export default function AdminDashboard() {
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState({});
+  const [lastSeenByUser, setLastSeenByUser] = useState({});
   const [typingUsers, setTypingUsers] = useState({});
+  const selectedIdRef = useRef(null);
+  useEffect(() => {
+    selectedIdRef.current = selected?.id ?? null;
+  }, [selected?.id]);
   const [activityTarget, setActivityTarget] = useState(null);
   const [activityData, setActivityData] = useState(null);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+
+  const goToTab = useCallback((t, opts = {}) => {
+    const {
+      selectedConv,
+      mobileBatchesStep,
+      mobileChatStep,
+      replace,
+      resetActivityList,
+    } = opts;
+    if (resetActivityList) {
+      setActivityTarget(null);
+      setActivityData(null);
+      setMobileActivityStep("list");
+    }
+    if (mobileBatchesStep != null) setMobileBatchesStep(mobileBatchesStep);
+    if (mobileChatStep != null) setMobileChatStep(mobileChatStep);
+    if (selectedConv !== undefined) setSelected(selectedConv);
+    else if (t !== "chats" && t !== "mychats") setSelected(null);
+    navigate(pathForAdminTab(t), { replace: Boolean(replace) });
+  }, [navigate]);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -64,8 +108,13 @@ export default function AdminDashboard() {
       setAllConvs(c.data);
       setMyConvs(my.data);
       const online = {};
-      u.data.forEach((x) => { online[x.id] = !!x.online; });
+      const lastSeen = {};
+      u.data.forEach((x) => {
+        online[x.id] = !!x.online;
+        if (x.last_seen) lastSeen[x.id] = x.last_seen;
+      });
       setOnlineUsers(online);
+      setLastSeenByUser(lastSeen);
     } catch (err) {
       toast.error(formatApiError(err));
     }
@@ -139,8 +188,9 @@ export default function AdminDashboard() {
   };
 
   const handleIncoming = useCallback((msg) => {
+    const activeId = selectedIdRef.current;
     setMessages((prev) => {
-      if (selected && msg.conversation_id === selected.id && !prev.some((m) => m.id === msg.id)) {
+      if (activeId && msg.conversation_id === activeId && !prev.some((m) => m.id === msg.id)) {
         return [...prev, msg];
       }
       return prev;
@@ -151,7 +201,7 @@ export default function AdminDashboard() {
       const exists = prev.find((c) => c.id === msg.conversation_id);
       if (!exists) { loadOverview(); return prev; }
       const shouldIncrementUnread = (
-        (!selected || msg.conversation_id !== selected.id) &&
+        (!activeId || msg.conversation_id !== activeId) &&
         Array.isArray(msg.recipient_ids) &&
         msg.recipient_ids.includes(user.id)
       );
@@ -168,10 +218,13 @@ export default function AdminDashboard() {
     };
     setAllConvs(updater);
     setMyConvs(updater);
-  }, [selected, loadOverview, user.id]);
+  }, [loadOverview, user.id]);
 
   const handlePresence = useCallback((data) => {
     setOnlineUsers((prev) => ({ ...prev, [data.user_id]: data.online }));
+    if (data.last_seen) {
+      setLastSeenByUser((prev) => ({ ...prev, [data.user_id]: data.last_seen }));
+    }
   }, []);
 
   const handleTypingEvent = useCallback((data) => {
@@ -184,7 +237,8 @@ export default function AdminDashboard() {
   }, []);
 
   const handleReadReceipt = useCallback((data) => {
-    if (selected && data.conversation_id === selected.id) {
+    const activeId = selectedIdRef.current;
+    if (activeId && data.conversation_id === activeId) {
       setMessages((prev) => prev.map((m) => {
         if (m.sender_id === user.id && !(m.read_by || []).includes(data.reader_id)) {
           return { ...m, read_by: [...(m.read_by || []), data.reader_id] };
@@ -192,13 +246,14 @@ export default function AdminDashboard() {
         return m;
       }));
     }
-  }, [selected, user.id]);
+  }, [user.id]);
 
   const { sendTyping } = useChatSocket({
     onMessage: handleIncoming,
     onTyping: handleTypingEvent,
     onPresence: handlePresence,
     onReadReceipt: handleReadReceipt,
+    enabled: Boolean(user?.id),
   });
 
   const handleSendMessage = async (body) => {
@@ -225,9 +280,7 @@ export default function AdminDashboard() {
       const conv = { ...res.data.conversation, other_user: res.data.other_user, participants_info: [user, res.data.other_user] };
       conv.unread_count = 0;
       setMyConvs((prev) => prev.some((c) => c.id === conv.id) ? prev : [conv, ...prev]);
-      setTab("mychats");
-      setSelected(conv);
-      setMobileChatStep("chat");
+      goToTab("mychats", { selectedConv: conv, mobileChatStep: "chat" });
     } catch (err) {
       toast.error(formatApiError(err));
     }
@@ -237,9 +290,7 @@ export default function AdminDashboard() {
     try {
       const res = await api.post("/conversations/group", { name, member_ids });
       await loadOverview();
-      setTab("mychats");
-      setSelected(res.data);
-      setMobileChatStep("chat");
+      goToTab("mychats", { selectedConv: res.data, mobileChatStep: "chat" });
       setNewChatOpen(false);
     } catch (err) {
       toast.error(formatApiError(err));
@@ -251,6 +302,7 @@ export default function AdminDashboard() {
   const currentConvs = tab === "mychats" ? myConvs : allConvs;
 
   const topbarTitle = (() => {
+    if (tab === "overview") return "Admin · Overview";
     if (tab === "batches") return "Admin · Batches";
     if (tab === "chats") return "Admin · Monitor";
     if (tab === "mychats") return "Admin · My Chats";
@@ -282,26 +334,28 @@ export default function AdminDashboard() {
   })();
 
   return (
-    <div className="h-screen w-full flex flex-col bg-gray-50 overflow-hidden" data-testid="admin-dashboard">
-      <TopBar
-        onOpenSettings={() => setProfileOpen(true)}
-        title={topbarTitle}
-        onBack={topbarOnBack}
-        unreadTotal={unreadTotal}
-      />
+    <div className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-gray-50" data-testid="admin-dashboard">
+      <div className="shrink-0">
+        <TopBar
+          onOpenSettings={() => setProfileOpen(true)}
+          title={topbarTitle}
+          onBack={topbarOnBack}
+          unreadTotal={unreadTotal}
+        />
+      </div>
 
-      <div className="md:hidden bg-white border-b border-gray-200 px-2 py-2 overflow-x-auto" data-testid="admin-mobile-tabs">
+      <div className="shrink-0 overflow-x-auto border-b border-gray-200 bg-white px-2 py-2 md:hidden" data-testid="admin-mobile-tabs">
         <div className="flex gap-2 min-w-max">
-          <MobileTabButton label="Overview" active={tab === "overview"} onClick={() => { setTab("overview"); setSelected(null); }} />
-          <MobileTabButton label="Batches" active={tab === "batches"} onClick={() => { setTab("batches"); setSelected(null); setMobileBatchesStep("employees"); }} />
-          <MobileTabButton label="Monitor" active={tab === "chats"} onClick={() => { setTab("chats"); setSelected(null); setMobileChatStep("list"); }} />
-          <MobileTabButton label="My Chats" active={tab === "mychats"} onClick={() => { setTab("mychats"); setSelected(null); setMobileChatStep("list"); }} />
-          <MobileTabButton label="Activity" active={tab === "activity"} onClick={() => { setTab("activity"); setActivityTarget(null); setActivityData(null); setMobileActivityStep("list"); }} />
-          <MobileTabButton label="Users" active={tab === "users"} onClick={() => { setTab("users"); setSelected(null); }} />
+          <MobileTabButton label="Overview" active={tab === "overview"} onClick={() => goToTab("overview")} />
+          <MobileTabButton label="Batches" active={tab === "batches"} onClick={() => goToTab("batches", { mobileBatchesStep: "employees" })} />
+          <MobileTabButton label="Monitor" active={tab === "chats"} onClick={() => goToTab("chats", { mobileChatStep: "list" })} />
+          <MobileTabButton label="My Chats" active={tab === "mychats"} onClick={() => goToTab("mychats", { mobileChatStep: "list" })} />
+          <MobileTabButton label="Activity" active={tab === "activity"} onClick={() => goToTab("activity", { resetActivityList: true })} />
+          <MobileTabButton label="Users" active={tab === "users"} onClick={() => goToTab("users")} />
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden pb-14 md:pb-0">
+      <div className="flex min-h-0 flex-1 overflow-hidden pb-14 md:pb-0">
         {/* Admin Nav */}
         <nav className="hidden md:flex w-20 lg:w-60 bg-emerald-950 text-emerald-100 flex-col py-6 px-3">
           <div className="flex items-center gap-3 px-2 mb-8">
@@ -310,19 +364,19 @@ export default function AdminDashboard() {
             </div>
             <span className="font-display text-lg font-semibold hidden lg:inline">Admin</span>
           </div>
-        <NavButton icon={LayoutDashboard} label="Overview" active={tab === "overview"} onClick={() => { setTab("overview"); setSelected(null); }} testId="admin-nav-overview" />
-        <NavButton icon={Layers} label="Batches" active={tab === "batches"} onClick={() => { setTab("batches"); setSelected(null); }} testId="admin-nav-batches" />
-        <NavButton icon={Eye} label="Monitor Chats" active={tab === "chats"} onClick={() => { setTab("chats"); setSelected(null); }} testId="admin-nav-chats" />
-        <NavButton icon={MessageSquare} label="My Chats" active={tab === "mychats"} onClick={() => { setTab("mychats"); setSelected(null); }} testId="admin-nav-mychats" />
-        <NavButton icon={Activity} label="Activity" active={tab === "activity"} onClick={() => { setTab("activity"); setSelected(null); }} testId="admin-nav-activity" />
-        <NavButton icon={Users} label="Users" active={tab === "users"} onClick={() => { setTab("users"); setSelected(null); }} testId="admin-nav-users" />
+        <NavButton icon={LayoutDashboard} label="Overview" active={tab === "overview"} onClick={() => goToTab("overview")} testId="admin-nav-overview" />
+        <NavButton icon={Layers} label="Batches" active={tab === "batches"} onClick={() => goToTab("batches")} testId="admin-nav-batches" />
+        <NavButton icon={Eye} label="Monitor Chats" active={tab === "chats"} onClick={() => goToTab("chats")} testId="admin-nav-chats" />
+        <NavButton icon={MessageSquare} label="My Chats" active={tab === "mychats"} onClick={() => goToTab("mychats")} testId="admin-nav-mychats" />
+        <NavButton icon={Activity} label="Activity" active={tab === "activity"} onClick={() => goToTab("activity")} testId="admin-nav-activity" />
+        <NavButton icon={Users} label="Users" active={tab === "users"} onClick={() => goToTab("users")} testId="admin-nav-users" />
         <div className="mt-auto px-2 py-2 text-[10px] text-emerald-200/70 hidden lg:block">
           Logged in as <span className="font-medium text-emerald-100">{user?.full_name}</span>
         </div>
         </nav>
 
         {/* Content */}
-        <div className="flex-1 min-w-0 flex flex-col">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {tab === "overview" && (
           <div className="p-4 sm:p-6 lg:p-10 space-y-6 overflow-y-auto" data-testid="admin-overview-pane">
             <div>
@@ -340,13 +394,13 @@ export default function AdminDashboard() {
               <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-6 min-w-0">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="font-display text-lg sm:text-xl font-semibold">Latest activity</h2>
-                  <Button variant="ghost" className="text-xs sm:text-sm px-2 sm:px-3" onClick={() => setTab("chats")} data-testid="overview-view-all-chats">View all →</Button>
+                  <Button variant="ghost" className="text-xs sm:text-sm px-2 sm:px-3" onClick={() => goToTab("chats")} data-testid="overview-view-all-chats">View all →</Button>
                 </div>
                 <div className="divide-y divide-gray-100">
                   {allConvs.slice(0, 6).map((c) => (
                     <button
                       key={c.id}
-                      onClick={() => { setTab("chats"); setSelected(c); setMobileChatStep("chat"); }}
+                      onClick={() => goToTab("chats", { selectedConv: c, mobileChatStep: "chat" })}
                       data-testid={`overview-conv-${c.id}`}
                       className="w-full py-3 flex items-center gap-3 hover:bg-gray-50 rounded-xl px-2 text-left"
                     >
@@ -377,17 +431,17 @@ export default function AdminDashboard() {
                     <div className="font-semibold">Start a chat</div>
                     <div className="text-xs text-gray-600 mt-1">Direct or group with anyone</div>
                   </button>
-                  <button onClick={() => setTab("activity")} data-testid="overview-activity-btn" className="p-4 rounded-2xl border border-amber-200 bg-amber-50 hover:bg-amber-100 text-left min-w-0">
+                  <button type="button" onClick={() => goToTab("activity")} data-testid="overview-activity-btn" className="p-4 rounded-2xl border border-amber-200 bg-amber-50 hover:bg-amber-100 text-left min-w-0">
                     <Activity className="h-5 w-5 text-amber-900 mb-2" />
                     <div className="font-semibold">Employee activity</div>
                     <div className="text-xs text-gray-600 mt-1">See who chatted what</div>
                   </button>
-                  <button onClick={() => setTab("users")} data-testid="overview-users-btn" className="p-4 rounded-2xl border border-sky-200 bg-sky-50 hover:bg-sky-100 text-left min-w-0">
+                  <button type="button" onClick={() => goToTab("users")} data-testid="overview-users-btn" className="p-4 rounded-2xl border border-sky-200 bg-sky-50 hover:bg-sky-100 text-left min-w-0">
                     <Users className="h-5 w-5 text-sky-900 mb-2" />
                     <div className="font-semibold">Manage users</div>
                     <div className="text-xs text-gray-600 mt-1">{stats?.total_users ?? 0} on platform</div>
                   </button>
-                  <button onClick={() => setTab("chats")} data-testid="overview-monitor-btn" className="p-4 rounded-2xl border border-violet-200 bg-violet-50 hover:bg-violet-100 text-left min-w-0">
+                  <button type="button" onClick={() => goToTab("chats")} data-testid="overview-monitor-btn" className="p-4 rounded-2xl border border-violet-200 bg-violet-50 hover:bg-violet-100 text-left min-w-0">
                     <Eye className="h-5 w-5 text-violet-900 mb-2" />
                     <div className="font-semibold">Monitor all</div>
                     <div className="text-xs text-gray-600 mt-1">Read-only conversation feed</div>
@@ -399,14 +453,14 @@ export default function AdminDashboard() {
         )}
 
         {tab === "batches" && (
-          <div className="flex flex-1 overflow-hidden" data-testid="admin-batches-pane">
+          <div className="flex min-h-0 flex-1 overflow-hidden" data-testid="admin-batches-pane">
             {/* Employees */}
-            <div className={`w-full md:w-72 bg-white border-r border-gray-200 flex flex-col ${mobileBatchesStep !== "employees" ? "hidden md:flex" : ""}`}>
+            <div className={`flex min-h-0 w-full flex-col border-r border-gray-200 bg-white md:w-72 ${mobileBatchesStep !== "employees" ? "hidden md:flex" : ""}`}>
               <div className="p-4 border-b border-gray-200">
                 <h2 className="font-display font-semibold">Employees</h2>
                 <p className="text-xs text-gray-500">Pick an employee to view their batches.</p>
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <div className="min-h-0 flex-1 overflow-y-auto">
                 {(employees || []).map((e) => (
                   <button
                     key={e.id}
@@ -434,14 +488,14 @@ export default function AdminDashboard() {
             </div>
 
             {/* Batches & clients */}
-            <div className={`w-full md:w-[420px] bg-white border-r border-gray-200 flex flex-col ${mobileBatchesStep !== "batches" ? "hidden md:flex" : ""}`}>
+            <div className={`flex min-h-0 w-full flex-col border-r border-gray-200 bg-white md:w-[420px] ${mobileBatchesStep !== "batches" ? "hidden md:flex" : ""}`}>
               <div className="p-4 border-b border-gray-200">
                 <h2 className="font-display font-semibold">Batches</h2>
                 <p className="text-xs text-gray-500">
                   {selectedEmployee ? `Batches for ${selectedEmployee.full_name}` : "Select an employee first."}
                 </p>
               </div>
-              <div className="flex-1 overflow-y-auto">
+              <div className="min-h-0 flex-1 overflow-y-auto">
                 {!selectedEmployee ? (
                   <div className="p-6 text-sm text-gray-400">Choose an employee to see batches.</div>
                 ) : employeeBatches.length === 0 ? (
@@ -482,13 +536,14 @@ export default function AdminDashboard() {
             </div>
 
             {/* Chat */}
-            <main className={`flex-1 flex flex-col ${mobileBatchesStep !== "chat" ? "hidden md:flex" : ""}`}>
+            <main className={`flex min-h-0 flex-1 flex-col overflow-hidden ${mobileBatchesStep !== "chat" ? "hidden md:flex" : ""}`}>
               <ChatWindow
                 conversation={selected}
                 messages={messages}
                 onSendMessage={handleSendMessage}
                 typingUsers={(selected && typingUsers[selected.id]) || {}}
                 onlineUsers={onlineUsers}
+                lastSeenByUser={lastSeenByUser}
                 sendTyping={sendTyping}
                 readOnly
               />
@@ -497,8 +552,8 @@ export default function AdminDashboard() {
         )}
 
         {(tab === "chats" || tab === "mychats") && (
-          <div className="flex flex-1 overflow-hidden" data-testid={`admin-${tab}-pane`}>
-            <div className={`w-full md:w-80 lg:w-96 flex flex-col ${mobileChatStep !== "list" ? "hidden md:flex" : ""}`}>
+          <div className="flex min-h-0 flex-1 overflow-hidden" data-testid={`admin-${tab}-pane`}>
+            <div className={`flex min-h-0 w-full flex-col md:w-80 lg:w-96 ${mobileChatStep !== "list" ? "hidden md:flex" : ""}`}>
               <div className="px-4 py-3 border-b border-gray-200 bg-white">
                 <h2 className="font-display font-semibold">
                   {tab === "chats" ? "Monitoring" : "My Chats"}
@@ -520,13 +575,14 @@ export default function AdminDashboard() {
                 onBatchesChanged={undefined}
               />
             </div>
-            <main className={`flex-1 flex flex-col ${mobileChatStep !== "chat" ? "hidden md:flex" : ""}`}>
+            <main className={`flex min-h-0 flex-1 flex-col overflow-hidden ${mobileChatStep !== "chat" ? "hidden md:flex" : ""}`}>
               <ChatWindow
                 conversation={selected}
                 messages={messages}
                 onSendMessage={handleSendMessage}
                 typingUsers={(selected && typingUsers[selected.id]) || {}}
                 onlineUsers={onlineUsers}
+                lastSeenByUser={lastSeenByUser}
                 sendTyping={sendTyping}
                 readOnly={tab === "chats" && !isSelectedAdminChat}
                 onBack={() => { setSelected(null); setMobileChatStep("list"); }}
@@ -591,7 +647,7 @@ export default function AdminDashboard() {
                       {activityData.conversations.map((c) => (
                         <button
                           key={c.id}
-                          onClick={() => { setTab("chats"); setSelected(c); setMobileChatStep("chat"); }}
+                          onClick={() => goToTab("chats", { selectedConv: c, mobileChatStep: "chat" })}
                           data-testid={`activity-conv-${c.id}`}
                           className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50 text-left"
                         >
@@ -724,19 +780,19 @@ export default function AdminDashboard() {
 
       {/* Mobile bottom nav */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 h-14 bg-white border-t border-gray-200 flex items-center justify-around z-20" data-testid="admin-bottom-nav">
-        <button onClick={() => { setTab("batches"); setSelected(null); setMobileBatchesStep("employees"); }} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "batches" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-batches">
+        <button type="button" onClick={() => goToTab("batches", { mobileBatchesStep: "employees" })} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "batches" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-batches">
           <Layers className="h-5 w-5" />
           Batches
         </button>
-        <button onClick={() => { setTab("chats"); setSelected(null); setMobileChatStep("list"); }} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "chats" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-monitor">
+        <button type="button" onClick={() => goToTab("chats", { mobileChatStep: "list" })} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "chats" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-monitor">
           <Eye className="h-5 w-5" />
           Monitor
         </button>
-        <button onClick={() => { setTab("mychats"); setSelected(null); setMobileChatStep("list"); }} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "mychats" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-mychats">
+        <button type="button" onClick={() => goToTab("mychats", { mobileChatStep: "list" })} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "mychats" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-mychats">
           <MessageSquare className="h-5 w-5" />
           My chats
         </button>
-        <button onClick={() => { setTab("users"); setSelected(null); }} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "users" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-users">
+        <button type="button" onClick={() => goToTab("users")} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "users" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-users">
           <Users className="h-5 w-5" />
           Users
         </button>

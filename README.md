@@ -37,9 +37,9 @@ ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="admin123"
 CORS_ORIGINS="http://localhost:3000"
 
-# Email (Resend for email OTP)
-EMAIL_FROM="ChatFlow <no-reply@yourdomain.com>"
-RESEND_API_KEY="re_..."
+# Email (Brevo for email OTP)
+BREVO_API_KEY="xkeysib-..."
+SENDER_EMAIL="ChatFlow <no-reply@yourdomain.com>"
 
 # S3 (optional for local; required for production)
 S3_BUCKET="your-bucket"
@@ -144,9 +144,9 @@ If you keep the bucket private, you’ll need signed URLs.
     https://yourapp.vercel.app,https://yourapp-git-main-yourname.vercel.app
     ```
 
-**Email (Resend for email OTP)**
-- `RESEND_API_KEY`
-- `EMAIL_FROM`
+**Email (Brevo for email OTP)**
+- `BREVO_API_KEY`
+- `SENDER_EMAIL` (verified sender in Brevo, e.g. `ChatFlow <no-reply@yourdomain.com>`)
 
 **S3**
 - `S3_BUCKET`

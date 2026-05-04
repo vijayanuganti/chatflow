@@ -10,6 +10,7 @@ load_dotenv(ROOT_DIR / ".env")
 import os
 import uuid
 import json
+import html
 import logging
 import random
 import shutil
@@ -18,8 +19,8 @@ import jwt
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Set
 import boto3
-from botocore.exceptions import BotoCoreError, ClientError
 import requests
+from botocore.exceptions import BotoCoreError, ClientError
 
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Request, WebSocket, WebSocketDisconnect, Query
@@ -48,8 +49,10 @@ OTP_EXPIRY_MINUTES = 10
 UPLOAD_DIR = ROOT_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-S3_BUCKET = os.environ.get("S3_BUCKET") or ""
-S3_REGION = os.environ.get("AWS_REGION") or os.environ.get("S3_REGION") or ""
+S3_BUCKET = (os.environ.get("S3_BUCKET") or "").strip()
+# Must match the bucket's actual AWS region (S3 console → bucket → Properties → AWS Region).
+# Prefer S3_REGION over AWS_REGION so S3 can differ from other services if needed.
+S3_REGION = (os.environ.get("S3_REGION") or os.environ.get("AWS_REGION") or "").strip()
 S3_PUBLIC_BASE_URL = (os.environ.get("S3_PUBLIC_BASE_URL") or "").rstrip("/")
 
 
@@ -144,29 +147,66 @@ def _verify_otp(otp: str, otp_hash: str) -> bool:
     return verify_password(otp, otp_hash)
 
 
-def _resend_send(to_email: str, subject: str, body: str) -> bool:
-    api_key = os.environ.get("RESEND_API_KEY")
-    from_email = os.environ.get("EMAIL_FROM") or "ChatFlow <onboarding@resend.dev>"
-    if not api_key:
+def _brevo_sender() -> Optional[dict]:
+    """Brevo expects {\"name\": str, \"email\": str}. SENDER_EMAIL: plain or \"Name <addr@domain>\"."""
+    raw = (os.environ.get("SENDER_EMAIL") or "").strip()
+    if not raw:
+        return None
+    if "<" in raw and ">" in raw:
+        name = raw[: raw.index("<")].strip() or "ChatFlow"
+        addr = raw[raw.index("<") + 1 : raw.index(">")].strip()
+        if "@" not in addr:
+            return None
+        return {"name": name, "email": addr}
+    if "@" in raw:
+        return {"name": "ChatFlow", "email": raw}
+    return None
+
+
+def _brevo_send(to_email: str, subject: str, body: str) -> bool:
+    api_key = (os.environ.get("BREVO_API_KEY") or "").strip()
+    sender = _brevo_sender()
+    if not api_key or not sender:
+        logger.warning("Brevo API key or SENDER_EMAIL is not configured. Email delivery disabled.")
         return False
-    url = "https://api.resend.com/emails"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    safe_html = html.escape(body).replace("\n", "<br />\n")
+    html_content = (
+        f'<p style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.5">{safe_html}</p>'
+    )
     payload = {
-        "from": from_email,
-        "to": [to_email],
+        "sender": sender,
+        "to": [{"email": to_email}],
         "subject": subject,
-        "text": body,
+        "textContent": body,
+        "htmlContent": html_content,
     }
-    r = requests.post(url, json=payload, headers=headers, timeout=20)
-    if r.status_code >= 200 and r.status_code < 300:
+    try:
+        r = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            json=payload,
+            headers={
+                "api-key": api_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            timeout=30,
+        )
+        if r.status_code >= 400:
+            logger.warning("Brevo send failed (%s): %s", r.status_code, (r.text or "")[:500])
+            return False
         return True
-    logger.warning(f"Resend failed ({r.status_code}): {r.text}")
-    return False
+    except Exception as e:
+        logger.warning("Brevo send error: %s", e)
+        return False
 
 
 def _email_send(to_email: str, subject: str, body: str) -> bool:
-    # Single email provider: Resend (API-based).
-    return _resend_send(to_email, subject, body)
+    return _brevo_send(to_email, subject, body)
+
+
+def _email_configured() -> bool:
+    return bool((os.environ.get("BREVO_API_KEY") or "").strip() and _brevo_sender())
 
 
 def _infer_public_url(bucket: str, region: str, key: str) -> str:
@@ -404,10 +444,15 @@ async def send_email_otp(body: EmailOtpSendBody):
         sent = False
 
     if not sent:
-        logger.warning(f"[DEV EMAIL OTP] email={email} otp={otp}")
+        logger.warning("Email verification OTP could not be sent to %s", mask_email(email))
+        if not _email_configured():
+            raise HTTPException(
+                status_code=503,
+                detail="Email is not configured. Set BREVO_API_KEY and SENDER_EMAIL on the server so verification codes are delivered by email.",
+            )
         raise HTTPException(
             status_code=503,
-            detail="Email delivery failed. Please check email provider settings and try again."
+            detail="We could not deliver the verification email. Check your email provider configuration and try again.",
         )
 
     return {
@@ -454,6 +499,10 @@ async def forgot_password(body: ForgotBody):
     if not user:
         raise HTTPException(status_code=404, detail="No account found with that username/email")
 
+    email = normalize_email(user.get("email"))
+    if not email:
+        raise HTTPException(status_code=400, detail="No email address is associated with this account")
+
     otp = f"{random.randint(100000, 999999)}"
     await db.password_otps.update_one(
         {"user_id": user["id"]},
@@ -467,13 +516,32 @@ async def forgot_password(body: ForgotBody):
         upsert=True,
     )
 
-    logger.warning(f"[DEV OTP] username={user['username']} email={user.get('email')} otp={otp}")
-    return {
-        "message": "OTP generated. In production this would be emailed.",
-        "dev_otp": otp,
-        "expires_in_minutes": OTP_EXPIRY_MINUTES,
-        "email_masked": mask_email(user.get("email")),
-    }
+    subject = "ChatFlow password reset code"
+    body_text = f"Your ChatFlow password reset code is: {otp}\n\nThis code expires in {OTP_EXPIRY_MINUTES} minutes."
+    try:
+        sent = _email_send(email, subject, body_text)
+    except Exception as e:
+        logger.warning("Password reset email send failed for %s: %s", mask_email(email), e)
+        sent = False
+
+    if sent:
+        return {
+            "message": "OTP sent to your email.",
+            "sent_via_email": True,
+            "expires_in_minutes": OTP_EXPIRY_MINUTES,
+            "email_masked": mask_email(email),
+        }
+
+    logger.warning("Password reset OTP could not be sent for user_id=%s", user["id"])
+    if not _email_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Email is not configured. Set BREVO_API_KEY and SENDER_EMAIL on the server so reset codes are delivered by email.",
+        )
+    raise HTTPException(
+        status_code=503,
+        detail="We could not deliver the reset email. Check your email provider configuration and try again.",
+    )
 
 
 @api_router.post("/auth/reset-password")
@@ -946,16 +1014,18 @@ class ConnectionManager:
     async def connect(self, user_id: str, ws: WebSocket):
         await ws.accept()
         self.active.setdefault(user_id, set()).add(ws)
-        await db.users.update_one({"id": user_id}, {"$set": {"online": True, "last_seen": now_iso()}})
-        await self._broadcast_presence(user_id, True)
+        ts = now_iso()
+        await db.users.update_one({"id": user_id}, {"$set": {"online": True, "last_seen": ts}})
+        await self._broadcast_presence(user_id, True, ts)
 
     async def disconnect(self, user_id: str, ws: WebSocket):
         if user_id in self.active:
             self.active[user_id].discard(ws)
             if not self.active[user_id]:
                 self.active.pop(user_id, None)
-                await db.users.update_one({"id": user_id}, {"$set": {"online": False, "last_seen": now_iso()}})
-                await self._broadcast_presence(user_id, False)
+                ts = now_iso()
+                await db.users.update_one({"id": user_id}, {"$set": {"online": False, "last_seen": ts}})
+                await self._broadcast_presence(user_id, False, ts)
 
     async def send_event(self, user_id: str, event: dict):
         dead = []
@@ -1016,8 +1086,8 @@ class ConnectionManager:
         for uid in list(self.active.keys()):
             await self.send_event(uid, event)
 
-    async def _broadcast_presence(self, user_id: str, online: bool):
-        event = {"type": "presence", "user_id": user_id, "online": online}
+    async def _broadcast_presence(self, user_id: str, online: bool, last_seen: str):
+        event = {"type": "presence", "user_id": user_id, "online": online, "last_seen": last_seen}
         for uid in list(self.active.keys()):
             await self.send_event(uid, event)
 
@@ -1073,6 +1143,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
                 )
 
             elif payload.get("type") == "ping":
+                ts = now_iso()
+                await db.users.update_one({"id": user_id}, {"$set": {"last_seen": ts}})
                 await websocket.send_json({"type": "pong"})
 
     except WebSocketDisconnect:

@@ -1,7 +1,16 @@
 import axios from "axios";
 
-export const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || "").replace(/\/$/, "");
-export const API = `${BACKEND_URL}/api`;
+function resolveBackendUrl() {
+  const fromEnv = (process.env.REACT_APP_BACKEND_URL || "").replace(/\/$/, "");
+  if (fromEnv) return fromEnv;
+  if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:8001`;
+  }
+  return "";
+}
+
+export const BACKEND_URL = resolveBackendUrl();
+export const API = BACKEND_URL ? `${BACKEND_URL}/api` : "/api";
 
 export const api = axios.create({
   baseURL: API,
