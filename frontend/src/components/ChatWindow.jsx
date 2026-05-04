@@ -3,6 +3,7 @@ import { Paperclip, Send, Loader2, Eye, ArrowLeft, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api, formatApiError } from "@/lib/api";
+import { formatWhatsAppLastSeen } from "@/lib/datetime";
 import { useAuth } from "@/context/AuthContext";
 import Avatar from "./Avatar";
 import MessageBubble from "./MessageBubble";
@@ -14,6 +15,7 @@ export default function ChatWindow({
   onSendMessage,
   typingUsers, // Map of userId -> name for users currently typing (excluding self)
   onlineUsers,
+  lastSeenByUser = {},
   usersMap,     // map id -> user (for admin view & group)
   sendTyping,
   readOnly = false,
@@ -21,11 +23,13 @@ export default function ChatWindow({
 }) {
   const { user } = useAuth();
   const [text, setText] = useState("");
+  const [composerFocused, setComposerFocused] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [sending, setSending] = useState(false);
   const scrollRef = useRef(null);
   const fileRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const lastTypingPingRef = useRef(0);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -33,14 +37,48 @@ export default function ChatWindow({
     }
   }, [messages, typingUsers]);
 
+  useEffect(() => {
+    lastTypingPingRef.current = 0;
+    setComposerFocused(false);
+  }, [conversation?.id]);
+
+  /* Keep typing=true refreshed while the composer is focused (mobile WS / idle gaps). */
+  useEffect(() => {
+    if (readOnly || !conversation?.id || !sendTyping || !text.trim() || !composerFocused) {
+      return undefined;
+    }
+    sendTyping(conversation.id, true);
+    const id = setInterval(() => {
+      sendTyping(conversation.id, true);
+    }, 2200);
+    return () => clearInterval(id);
+  }, [text, conversation?.id, readOnly, sendTyping, composerFocused]);
+
+  const flushTypingStop = () => {
+    clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = null;
+    if (conversation?.id && sendTyping) sendTyping(conversation.id, false);
+    lastTypingPingRef.current = 0;
+  };
+
   const handleTyping = (value) => {
     setText(value);
     if (readOnly || !conversation || !sendTyping) return;
-    sendTyping(conversation.id, true);
     clearTimeout(typingTimeoutRef.current);
+    if (!value.trim()) {
+      flushTypingStop();
+      return;
+    }
+    const now = Date.now();
+    const elapsed = lastTypingPingRef.current === 0 ? 9999 : now - lastTypingPingRef.current;
+    if (elapsed > 350) {
+      sendTyping(conversation.id, true);
+      lastTypingPingRef.current = now;
+    }
     typingTimeoutRef.current = setTimeout(() => {
       sendTyping(conversation.id, false);
-    }, 1500);
+      lastTypingPingRef.current = 0;
+    }, 2800);
   };
 
   const handleSendText = async () => {
@@ -53,7 +91,7 @@ export default function ChatWindow({
         message_type: "text",
       });
       setText("");
-      if (sendTyping) sendTyping(conversation.id, false);
+      flushTypingStop();
     } catch (err) {
       toast.error(formatApiError(err));
     } finally {
@@ -95,7 +133,7 @@ export default function ChatWindow({
 
   if (!conversation) {
     return (
-      <div className="flex-1 flex items-center justify-center chat-bg" data-testid="no-conversation-placeholder">
+      <div className="chat-bg flex min-h-0 flex-1 items-center justify-center" data-testid="no-conversation-placeholder">
         <div className="text-center max-w-sm p-8">
           <div className="mx-auto h-20 w-20 rounded-2xl bg-white shadow-sm flex items-center justify-center mb-4 border border-gray-100">
             <Send className="h-9 w-9 text-emerald-800" strokeWidth={1.3} />
@@ -113,28 +151,37 @@ export default function ChatWindow({
 
   // Header
   const headerName = isGroup ? conversation.name : otherUser?.full_name;
-  const headerSub = (() => {
-    if (readOnly) return "Admin read-only view";
-    if (isGroup) return `${conversation.participants.length} members`;
-    return isOnline ? "Online" : (otherUser?.status ? `Last seen · ${otherUser.status}` : "Offline");
-  })();
-
-  // Typing indicator text — all users currently typing (excluding self)
   const typingArr = Object.entries(typingUsers || {}).filter(([uid]) => uid !== user.id);
-  const typingText = typingArr.length === 1
+  const othersTypingCount = typingArr.length;
+  const groupTypingLabel = othersTypingCount === 1
     ? `${typingArr[0][1]} is typing`
-    : typingArr.length > 1
+    : othersTypingCount > 1
       ? `${typingArr.map(([, n]) => n).join(", ")} are typing`
       : null;
+
+  const directTypingName = othersTypingCount > 0 && !isGroup ? (typingArr[0][1] || "Someone") : null;
+
+  const headerStatusLine = (() => {
+    if (readOnly && !othersTypingCount) return { kind: "text", value: "Admin read-only view" };
+    if (othersTypingCount > 0 && isGroup) return { kind: "text", value: groupTypingLabel };
+    if (othersTypingCount > 0 && !isGroup) return { kind: "typing", label: directTypingName };
+    if (readOnly) return { kind: "text", value: "Admin read-only view" };
+    if (isGroup) return { kind: "text", value: `${conversation.participants.length} members` };
+    if (isOnline) return { kind: "text", value: "online" };
+    const lsIso = (otherUser?.id && lastSeenByUser[otherUser.id]) || otherUser?.last_seen;
+    const lsText = formatWhatsAppLastSeen(lsIso);
+    if (lsText) return { kind: "text", value: lsText };
+    return { kind: "text", value: "offline" };
+  })();
 
   // For read-receipts in groups
   const totalRecipients = isGroup ? (conversation.participants?.length || 1) - 1 : 1;
   const showSenderNames = isGroup || readOnly;
 
   return (
-    <div className="flex-1 flex flex-col chat-bg h-full" data-testid="chat-window">
+    <div className="chat-bg flex h-full min-h-0 flex-1 flex-col overflow-hidden" data-testid="chat-window">
       {/* Header */}
-      <div className="bg-white/90 backdrop-blur-xl border-b border-gray-200 px-3 sm:px-4 py-3 flex items-center gap-2 sm:gap-3 sticky top-0 z-10">
+      <div className="z-10 flex shrink-0 items-center gap-2 border-b border-gray-200 bg-white/90 px-3 py-3 backdrop-blur-xl sm:gap-3 sm:px-4">
         {onBack && (
           <Button size="icon" variant="ghost" className="md:hidden rounded-full" onClick={onBack} data-testid="chat-back-btn">
             <ArrowLeft className="h-5 w-5" />
@@ -161,12 +208,25 @@ export default function ChatWindow({
               </span>
             )}
           </div>
-          <div className="text-xs text-gray-500 truncate">{headerSub}</div>
+          <div className="text-xs text-gray-500 truncate min-h-[1rem] flex items-center gap-1">
+            {headerStatusLine.kind === "typing" ? (
+              <span className="inline-flex items-center gap-1 text-emerald-800/90" data-testid="header-typing">
+                <span>{headerStatusLine.label || "Someone"} is typing</span>
+                <span className="inline-flex items-center gap-0.5 translate-y-px">
+                  <span className="typing-dot typing-dot-header" />
+                  <span className="typing-dot typing-dot-header" />
+                  <span className="typing-dot typing-dot-header" />
+                </span>
+              </span>
+            ) : (
+              <span className={othersTypingCount > 0 && isGroup ? "text-emerald-800/90" : undefined}>{headerStatusLine.value}</span>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-4 py-4 sm:py-5 space-y-2" data-testid="messages-container">
+      <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5" data-testid="messages-container">
         {messages.length === 0 && (
           <div className="text-center text-sm text-gray-400 py-10" data-testid="empty-messages">
             No messages yet. {readOnly ? "Conversation is quiet." : "Say hi!"}
@@ -196,22 +256,29 @@ export default function ChatWindow({
             />
           );
         })}
-        {typingText && (
-          <div className="flex items-end gap-2" data-testid="typing-indicator">
-            <div className="bubble-received px-3 py-2 shadow-sm flex items-center gap-2">
-              <span className="text-xs text-gray-500">{typingText}</span>
-              <span className="typing-dot" />
-              <span className="typing-dot" />
-              <span className="typing-dot" />
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* Composer: typing strip stays fixed above input on mobile */}
+      {!readOnly && othersTypingCount > 0 && (
+        <div
+          className="flex shrink-0 items-center gap-1 border-t border-emerald-100/90 bg-emerald-50/95 px-3 py-2 text-xs text-emerald-900/90"
+          data-testid="composer-typing-strip"
+        >
+          <span className="min-w-0 truncate">
+            {isGroup ? groupTypingLabel : `${directTypingName || "Someone"} is typing`}
+          </span>
+          <span className="inline-flex shrink-0 translate-y-px items-center gap-0.5">
+            <span className="typing-dot typing-dot-header" />
+            <span className="typing-dot typing-dot-header" />
+            <span className="typing-dot typing-dot-header" />
+          </span>
+        </div>
+      )}
 
       {/* Input */}
       {!readOnly && (
-        <div className="bg-white border-t border-gray-200 p-2.5 sm:p-3 sticky bottom-0">
-          <div className="flex items-end gap-2">
+        <div className="shrink-0 border-t border-gray-200 bg-white pb-[max(0.625rem,env(safe-area-inset-bottom,0px))] pt-2 sm:pb-3 sm:pt-3">
+          <div className="flex items-end gap-2 px-2.5 sm:px-3">
             <input
               ref={fileRef}
               type="file"
@@ -227,12 +294,23 @@ export default function ChatWindow({
               value={text}
               onChange={(e) => handleTyping(e.target.value)}
               onKeyDown={handleKey}
+              onBlur={() => {
+                setComposerFocused(false);
+                flushTypingStop();
+              }}
+              onFocus={() => {
+                setComposerFocused(true);
+                if (readOnly || !conversation?.id || !sendTyping || !text.trim()) return;
+                sendTyping(conversation.id, true);
+              }}
               placeholder="Type a message"
               rows={1}
               data-testid="chat-input"
-              className="flex-1 resize-none min-h-[44px] max-h-32 rounded-2xl bg-gray-50 border-gray-200"
+              className="max-h-32 min-h-[44px] flex-1 resize-none rounded-2xl border-gray-200 bg-gray-50"
+              enterKeyHint="send"
+              autoComplete="off"
             />
-            <Button size="icon" onClick={handleSendText} disabled={!text.trim() || sending} data-testid="chat-send-btn" className="rounded-full bg-emerald-900 hover:bg-emerald-950 h-10 w-10">
+            <Button size="icon" onClick={handleSendText} disabled={!text.trim() || sending} data-testid="chat-send-btn" className="h-10 w-10 rounded-full bg-emerald-900 hover:bg-emerald-950">
               {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
           </div>

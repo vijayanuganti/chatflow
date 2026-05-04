@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import NewChatDialog from "@/components/NewChatDialog";
@@ -16,7 +16,12 @@ export default function ChatApp() {
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState({});
+  const [lastSeenByUser, setLastSeenByUser] = useState({});
   const [typingUsers, setTypingUsers] = useState({}); // convId -> {userId: name}
+  const selectedIdRef = useRef(null);
+  useEffect(() => {
+    selectedIdRef.current = selected?.id ?? null;
+  }, [selected?.id]);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [selectedBatchId, setSelectedBatchId] = useState(null);
@@ -27,10 +32,15 @@ export default function ChatApp() {
       const res = await api.get("/conversations");
       setConversations(res.data);
       const online = {};
+      const lastSeen = {};
       res.data.forEach((c) => (c.participants_info || []).forEach((p) => {
-        if (p?.id) online[p.id] = !!p.online;
+        if (p?.id) {
+          online[p.id] = !!p.online;
+          if (p.last_seen) lastSeen[p.id] = p.last_seen;
+        }
       }));
       setOnlineUsers((prev) => ({ ...online, ...prev }));
+      setLastSeenByUser((prev) => ({ ...lastSeen, ...prev }));
     } catch (err) {
       toast.error(formatApiError(err));
     }
@@ -98,11 +108,12 @@ export default function ChatApp() {
 
   const handleIncomingMessage = useCallback((msg) => {
     maybeNotify(msg);
+    const activeId = selectedIdRef.current;
     setMessages((prev) => {
-      if (selected && msg.conversation_id === selected.id) {
+      if (activeId && msg.conversation_id === activeId) {
         if (prev.some((m) => m.id === msg.id)) return prev;
         if ((msg.recipient_ids || []).includes(user.id)) {
-          api.post(`/conversations/${selected.id}/read`).catch(() => {});
+          api.post(`/conversations/${activeId}/read`).catch(() => {});
         }
         return [...prev, msg];
       }
@@ -115,7 +126,7 @@ export default function ChatApp() {
         ? `${msg.sender_name}: ${preview}` : preview;
       if (!exists) { loadConversations(); return prev; }
       const shouldIncrementUnread = (
-        (!selected || msg.conversation_id !== selected.id) &&
+        (!activeId || msg.conversation_id !== activeId) &&
         Array.isArray(msg.recipient_ids) &&
         msg.recipient_ids.includes(user.id)
       );
@@ -130,7 +141,7 @@ export default function ChatApp() {
       updated.sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || ""));
       return updated;
     });
-  }, [selected, user.id, loadConversations, maybeNotify]);
+  }, [user.id, loadConversations, maybeNotify]);
 
   const handleTyping = useCallback((data) => {
     setTypingUsers((prev) => {
@@ -143,10 +154,27 @@ export default function ChatApp() {
 
   const handlePresence = useCallback((data) => {
     setOnlineUsers((prev) => ({ ...prev, [data.user_id]: data.online }));
+    if (data.last_seen) {
+      setLastSeenByUser((prev) => ({ ...prev, [data.user_id]: data.last_seen }));
+    }
+    setConversations((prev) => prev.map((c) => {
+      if (c.type === "group") return c;
+      const other = c.other_user;
+      if (!other || other.id !== data.user_id) return c;
+      return {
+        ...c,
+        other_user: {
+          ...other,
+          online: data.online,
+          last_seen: data.last_seen ?? other.last_seen,
+        },
+      };
+    }));
   }, []);
 
   const handleReadReceipt = useCallback((data) => {
-    if (selected && data.conversation_id === selected.id) {
+    const activeId = selectedIdRef.current;
+    if (activeId && data.conversation_id === activeId) {
       setMessages((prev) => prev.map((m) => {
         if (m.sender_id === user.id && !(m.read_by || []).includes(data.reader_id)) {
           return { ...m, read_by: [...(m.read_by || []), data.reader_id] };
@@ -154,13 +182,14 @@ export default function ChatApp() {
         return m;
       }));
     }
-  }, [selected, user.id]);
+  }, [user.id]);
 
   const { sendTyping: wsSendTyping } = useChatSocket({
     onMessage: handleIncomingMessage,
     onTyping: handleTyping,
     onPresence: handlePresence,
     onReadReceipt: handleReadReceipt,
+    enabled: Boolean(user?.id),
   });
 
   // Browser notifications (basic)
@@ -249,11 +278,13 @@ export default function ChatApp() {
   }, [unreadTotal]);
 
   return (
-    <div className="h-screen w-full flex flex-col overflow-hidden bg-gray-50" data-testid="chat-app">
-      <TopBar onOpenSettings={() => setProfileOpen(true)} unreadTotal={unreadTotal} />
+    <div className="flex h-dvh w-full min-h-0 flex-col overflow-hidden bg-gray-50" data-testid="chat-app">
+      <div className="shrink-0">
+        <TopBar onOpenSettings={() => setProfileOpen(true)} unreadTotal={unreadTotal} />
+      </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        <div className={`${selected ? "hidden md:flex" : "flex"} w-full md:w-auto h-full`}>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className={`${selected ? "hidden md:flex" : "flex"} h-full min-h-0 w-full flex-col md:w-auto md:flex-none`}>
           <ChatSidebar
             conversations={filteredConversations}
             onlineUsers={onlineUsers}
@@ -266,13 +297,14 @@ export default function ChatApp() {
             onBatchesChanged={loadBatches}
           />
         </div>
-        <main className={`${selected ? "flex" : "hidden md:flex"} flex-1 h-full flex-col`}>
+        <main className={`${selected ? "flex" : "hidden md:flex"} min-h-0 flex-1 flex-col overflow-hidden`}>
           <ChatWindow
             conversation={selected}
             messages={messages}
             onSendMessage={handleSendMessage}
             typingUsers={(selected && typingUsers[selected.id]) || {}}
             onlineUsers={onlineUsers}
+            lastSeenByUser={lastSeenByUser}
             sendTyping={sendTyping}
             onBack={() => setSelected(null)}
           />
