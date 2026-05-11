@@ -1,12 +1,14 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Camera, Loader2 } from "lucide-react";
+import { Camera, Loader2, Phone, Stethoscope, ShieldAlert } from "lucide-react";
 import Avatar from "./Avatar";
+import PasswordInput from "./PasswordInput";
+import { MedicalProfileReadOnly } from "./MedicalProfileFields";
 import { api, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
@@ -24,7 +26,6 @@ export default function ProfileDialog({ open, onOpenChange }) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     full_name: user?.full_name || "",
-    email: user?.email || "",
     bio: user?.bio || "",
     status: user?.status || "available",
     avatar_url: user?.avatar_url || null,
@@ -32,12 +33,28 @@ export default function ProfileDialog({ open, onOpenChange }) {
   const [passForm, setPassForm] = useState({ current_password: "", new_password: "" });
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const fileRef = useRef(null);
+  const [medical, setMedical] = useState(null);
+  const [medicalLoading, setMedicalLoading] = useState(false);
+
+  const isClient = user?.role === "client";
+
+  useEffect(() => {
+    if (!open || !isClient || tab !== "medical" || medical) return;
+    setMedicalLoading(true);
+    api.get(`/users/${user.id}/medical-profile`)
+      .then((res) => setMedical(res.data))
+      .catch((err) => toast.error(formatApiError(err)))
+      .finally(() => setMedicalLoading(false));
+  }, [open, isClient, tab, medical, user?.id]);
+
+  useEffect(() => {
+    if (!open) setMedical(null);
+  }, [open]);
 
   React.useEffect(() => {
     if (user) {
       setForm({
         full_name: user.full_name || "",
-        email: user.email || "",
         bio: user.bio || "",
         status: user.status || "available",
         avatar_url: user.avatar_url || null,
@@ -129,6 +146,15 @@ export default function ProfileDialog({ open, onOpenChange }) {
             >
               Security
             </TabsTrigger>
+            {isClient && (
+              <TabsTrigger
+                value="medical"
+                data-testid="profile-tab-medical"
+                className="flex-1 h-10 rounded-xl px-0 text-xs sm:text-sm leading-none whitespace-nowrap border border-gray-200 bg-white data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-900 data-[state=active]:border-emerald-700 data-[state=active]:shadow-none"
+              >
+                Medical
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="profile" className="mt-4 space-y-4">
@@ -155,8 +181,14 @@ export default function ProfileDialog({ open, onOpenChange }) {
               <Input data-testid="profile-fullname-input" value={form.full_name} onChange={(e) => update("full_name", e.target.value)} className="h-11 rounded-xl" />
             </div>
             <div className="space-y-2">
-              <Label>Email</Label>
-              <Input data-testid="profile-email-input" type="email" value={form.email || ""} onChange={(e) => update("email", e.target.value)} className="h-11 rounded-xl" placeholder="you@example.com" />
+              <Label>Phone number</Label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input data-testid="profile-phone-input" value={user?.phone_number || ""} disabled readOnly className="pl-10 h-11 rounded-xl bg-gray-50" />
+              </div>
+              <p className="text-[11px] text-gray-400">
+                Phone numbers are managed by your administrator. Contact them to change yours.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Bio</Label>
@@ -191,19 +223,62 @@ export default function ProfileDialog({ open, onOpenChange }) {
           </TabsContent>
 
           <TabsContent value="security" className="mt-4 space-y-4">
-            <p className="text-sm text-gray-500">Change your password.</p>
+            <p className="text-sm text-gray-500">Change your password. Use at least 6 characters.</p>
             <div className="space-y-2">
               <Label>Current password</Label>
-              <Input data-testid="current-password-input" type="password" value={passForm.current_password} onChange={(e) => setPassForm({ ...passForm, current_password: e.target.value })} className="h-11 rounded-xl" />
+              <PasswordInput
+                data-testid="current-password-input"
+                leftIcon={null}
+                value={passForm.current_password}
+                onChange={(e) => setPassForm({ ...passForm, current_password: e.target.value })}
+                className="h-11 rounded-xl"
+              />
             </div>
             <div className="space-y-2">
               <Label>New password</Label>
-              <Input data-testid="new-password-input" type="password" value={passForm.new_password} onChange={(e) => setPassForm({ ...passForm, new_password: e.target.value })} className="h-11 rounded-xl" />
+              <PasswordInput
+                data-testid="new-password-input"
+                leftIcon={null}
+                value={passForm.new_password}
+                onChange={(e) => setPassForm({ ...passForm, new_password: e.target.value })}
+                className="h-11 rounded-xl"
+              />
             </div>
             <Button onClick={changePassword} disabled={saving} data-testid="change-password-btn" className="w-full rounded-full bg-emerald-900 hover:bg-emerald-950 h-11">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Update password"}
             </Button>
           </TabsContent>
+
+          {isClient && (
+            <TabsContent value="medical" className="mt-4 space-y-4" data-testid="profile-medical-pane">
+              <div className="flex items-start gap-2 rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-[12px] text-emerald-900">
+                <Stethoscope className="h-4 w-4 mt-0.5 shrink-0" />
+                <div>
+                  Your medical profile is maintained by your administrator for your care team.
+                  Need a correction? Message them and they'll update it for you.
+                </div>
+              </div>
+              {medicalLoading ? (
+                <div className="py-10 flex items-center justify-center text-gray-400">
+                  <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading…
+                </div>
+              ) : (
+                <>
+                  {medical?.updated_at && (
+                    <p className="text-xs text-gray-500" data-testid="profile-medical-meta">
+                      Last updated {new Date(medical.updated_at).toLocaleString()}
+                      {medical.updated_by ? ` by ${medical.updated_by.full_name}` : ""}
+                    </p>
+                  )}
+                  <MedicalProfileReadOnly profile={medical?.medical_profile} />
+                  <div className="rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-[11px] text-amber-900 inline-flex items-center gap-2">
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    Read-only for clients. Only your administrator can edit these details.
+                  </div>
+                </>
+              )}
+            </TabsContent>
+          )}
         </Tabs>
       </DialogContent>
     </Dialog>

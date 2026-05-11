@@ -1,12 +1,33 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Paperclip, Send, Loader2, Eye, ArrowLeft, Users } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Paperclip,
+  Send,
+  Loader2,
+  Eye,
+  ArrowLeft,
+  Users,
+  Stethoscope,
+  UtensilsCrossed,
+  Image as ImageIcon,
+  Video as VideoIcon,
+  FileText,
+  Music,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { api, formatApiError } from "@/lib/api";
 import { formatWhatsAppLastSeen } from "@/lib/datetime";
 import { useAuth } from "@/context/AuthContext";
 import Avatar from "./Avatar";
 import MessageBubble from "./MessageBubble";
+import MedicalProfileDialog from "./MedicalProfileDialog";
+import DietPlanDialog from "./DietPlanDialog";
+import VoiceRecorder from "./VoiceRecorder";
 import { toast } from "sonner";
 
 export default function ChatWindow({
@@ -25,11 +46,17 @@ export default function ChatWindow({
   const [text, setText] = useState("");
   const [composerFocused, setComposerFocused] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
   const scrollRef = useRef(null);
-  const fileRef = useRef(null);
+  const photoInputRef = useRef(null);
+  const videoInputRef = useRef(null);
+  const docInputRef = useRef(null);
+  const audioInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const lastTypingPingRef = useRef(0);
+  const [medicalOpen, setMedicalOpen] = useState(false);
+  const [dietOpen, setDietOpen] = useState(false);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -81,22 +108,18 @@ export default function ChatWindow({
     }, 2800);
   };
 
-  const handleSendText = async () => {
-    if (!text.trim() || sending || !conversation) return;
-    setSending(true);
-    try {
-      await onSendMessage({
-        conversation_id: conversation.id,
-        content: text.trim(),
-        message_type: "text",
-      });
-      setText("");
-      flushTypingStop();
-    } catch (err) {
-      toast.error(formatApiError(err));
-    } finally {
-      setSending(false);
-    }
+  const handleSendText = () => {
+    const value = text.trim();
+    if (!value || !conversation) return;
+    // Fire-and-forget: the parent (ChatApp) renders an optimistic bubble
+    // immediately. We never block the composer waiting for the server.
+    onSendMessage({
+      conversation_id: conversation.id,
+      content: value,
+      message_type: "text",
+    });
+    setText("");
+    flushTypingStop();
   };
 
   const handleKey = (e) => {
@@ -107,8 +130,12 @@ export default function ChatWindow({
   };
 
   const handleFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file || !conversation) return;
+    const inputEl = e.target;
+    const file = inputEl?.files?.[0];
+    if (!file || !conversation) {
+      if (inputEl) inputEl.value = "";
+      return;
+    }
     setUploading(true);
     try {
       const form = new FormData();
@@ -116,7 +143,8 @@ export default function ChatWindow({
       const res = await api.post("/upload", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      await onSendMessage({
+      // Optimistic send once we have the uploaded file URL.
+      onSendMessage({
         conversation_id: conversation.id,
         content: "",
         message_type: res.data.message_type,
@@ -127,19 +155,62 @@ export default function ChatWindow({
       toast.error(formatApiError(err));
     } finally {
       setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
+      if (inputEl) inputEl.value = "";
     }
   };
+
+  const openPicker = useCallback((kind) => {
+    setAttachOpen(false);
+    const ref = kind === "photo" ? photoInputRef
+      : kind === "video" ? videoInputRef
+      : kind === "audio" ? audioInputRef
+      : docInputRef;
+    ref.current?.click();
+  }, []);
+
+  const handleVoiceNote = useCallback(async (blob, mime, durationMs) => {
+    if (!conversation) return;
+    const ext = mime?.includes("ogg") ? "ogg"
+      : mime?.includes("mp4") ? "m4a"
+      : mime?.includes("mpeg") ? "mp3"
+      : "webm";
+    const filename = `voice-${Date.now()}.${ext}`;
+    const secs = Math.max(1, Math.round((durationMs || 0) / 1000));
+    const mm = String(Math.floor(secs / 60)).padStart(1, "0");
+    const ss = String(secs % 60).padStart(2, "0");
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", new File([blob], filename, { type: mime || "audio/webm" }));
+      const res = await api.post("/upload", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      onSendMessage({
+        conversation_id: conversation.id,
+        // Non-empty content keeps the sidebar preview readable ("Voice note (0:12)").
+        // MessageBubble suppresses this caption when message_type === "audio"
+        // and renders its own player + duration instead.
+        content: `🎤 Voice note (${mm}:${ss})`,
+        message_type: "audio",
+        file_url: res.data.file_url,
+        file_name: res.data.file_name || filename,
+      });
+    } catch (err) {
+      toast.error(formatApiError(err));
+    } finally {
+      setUploading(false);
+    }
+  }, [conversation, onSendMessage]);
 
   if (!conversation) {
     return (
       <div className="chat-bg flex min-h-0 flex-1 items-center justify-center" data-testid="no-conversation-placeholder">
         <div className="text-center max-w-sm p-8">
-          <div className="mx-auto h-20 w-20 rounded-2xl bg-white shadow-sm flex items-center justify-center mb-4 border border-gray-100">
-            <Send className="h-9 w-9 text-emerald-800" strokeWidth={1.3} />
+          <div className="mx-auto h-20 w-20 rounded-2xl bg-white dark:bg-gray-900 shadow-sm flex items-center justify-center mb-4 border border-gray-100 dark:border-gray-800">
+            <Send className="h-9 w-9 text-emerald-800 dark:text-emerald-300" strokeWidth={1.3} />
           </div>
-          <h3 className="font-display text-2xl font-semibold mb-1">Your conversations</h3>
-          <p className="text-gray-500 text-sm">Select a chat on the left, or start a new one.</p>
+          <h3 className="font-display text-2xl font-semibold mb-1 dark:text-gray-100">Your conversations</h3>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">Select a chat on the left, or start a new one.</p>
         </div>
       </div>
     );
@@ -181,7 +252,7 @@ export default function ChatWindow({
   return (
     <div className="chat-bg flex h-full min-h-0 flex-1 flex-col overflow-hidden" data-testid="chat-window">
       {/* Header */}
-      <div className="z-10 flex shrink-0 items-center gap-2 border-b border-gray-200 bg-white/90 px-3 py-3 backdrop-blur-xl sm:gap-3 sm:px-4">
+      <div className="z-10 flex shrink-0 items-center gap-2 border-b border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-gray-950/80 px-3 py-3 backdrop-blur-xl sm:gap-3 sm:px-4">
         {onBack && (
           <Button size="icon" variant="ghost" className="md:hidden rounded-full" onClick={onBack} data-testid="chat-back-btn">
             <ArrowLeft className="h-5 w-5" />
@@ -195,7 +266,7 @@ export default function ChatWindow({
           <Avatar name={otherUser?.full_name} avatarUrl={otherUser?.avatar_url} online={isOnline} status={otherUser?.status} size={42} />
         )}
         <div className="flex-1 min-w-0">
-          <div className="font-display font-semibold text-sm sm:text-base truncate flex items-center gap-2" data-testid="chat-header-name">
+          <div className="font-display font-semibold text-sm sm:text-base truncate flex items-center gap-2 dark:text-gray-100" data-testid="chat-header-name">
             {headerName}
             {readOnly && (
               <span className="inline-flex items-center gap-1 text-[10px] tracking-[0.2em] uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
@@ -223,7 +294,87 @@ export default function ChatWindow({
             )}
           </div>
         </div>
+
+        {/* Medical profile shortcut — visible to admins and the assigned employee
+            when chatting with a client. Backend enforces the actual ACL. */}
+        {!isGroup && otherUser?.role === "client" && (user?.role === "admin" || user?.role === "employee") && (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              className="rounded-full hidden sm:inline-flex"
+              onClick={() => setMedicalOpen(true)}
+              data-testid="chat-header-medical-btn"
+              title="View medical profile"
+            >
+              <Stethoscope className="h-4 w-4 sm:mr-1.5" />
+              <span className="hidden md:inline">Medical</span>
+            </Button>
+            <Button
+              size="icon"
+              variant="outline"
+              className="rounded-full sm:hidden"
+              onClick={() => setMedicalOpen(true)}
+              data-testid="chat-header-medical-btn-mobile"
+              title="View medical profile"
+            >
+              <Stethoscope className="h-4 w-4" />
+            </Button>
+          </>
+        )}
+
+        {/* Diet plan shortcut.
+            - Admin / employee chatting with a client → opens that client's plan.
+            - Client chatting with an employee → opens their own plan. */}
+        {!isGroup && (
+          (otherUser?.role === "client" && (user?.role === "admin" || user?.role === "employee"))
+          || (user?.role === "client" && otherUser?.role === "employee")
+        ) && (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              className="rounded-full hidden sm:inline-flex"
+              onClick={() => setDietOpen(true)}
+              data-testid="chat-header-diet-btn"
+              title="Diet plan"
+            >
+              <UtensilsCrossed className="h-4 w-4 sm:mr-1.5" />
+              <span className="hidden md:inline">Diet</span>
+            </Button>
+            <Button
+              size="icon"
+              variant="outline"
+              className="rounded-full sm:hidden"
+              onClick={() => setDietOpen(true)}
+              data-testid="chat-header-diet-btn-mobile"
+              title="Diet plan"
+            >
+              <UtensilsCrossed className="h-4 w-4" />
+            </Button>
+          </>
+        )}
       </div>
+
+      {!isGroup && otherUser?.role === "client" && (user?.role === "admin" || user?.role === "employee") && (
+        <MedicalProfileDialog
+          open={medicalOpen}
+          onOpenChange={setMedicalOpen}
+          userId={otherUser.id}
+          initialMode="view"
+        />
+      )}
+
+      {!isGroup && (
+        (otherUser?.role === "client" && (user?.role === "admin" || user?.role === "employee"))
+        || (user?.role === "client" && otherUser?.role === "employee")
+      ) && (
+        <DietPlanDialog
+          open={dietOpen}
+          onOpenChange={setDietOpen}
+          client={user?.role === "client" ? user : otherUser}
+        />
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5" data-testid="messages-container">
@@ -277,42 +428,167 @@ export default function ChatWindow({
 
       {/* Input */}
       {!readOnly && (
-        <div className="shrink-0 border-t border-gray-200 bg-white pb-[max(0.625rem,env(safe-area-inset-bottom,0px))] pt-2 sm:pb-3 sm:pt-3">
+        <div className="shrink-0 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 pb-[max(0.625rem,env(safe-area-inset-bottom,0px))] pt-2 sm:pb-3 sm:pt-3">
           <div className="flex items-end gap-2 px-2.5 sm:px-3">
             <input
-              ref={fileRef}
+              ref={photoInputRef}
               type="file"
               className="hidden"
               onChange={handleFile}
-              data-testid="chat-file-input"
-              accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+              data-testid="chat-file-input-photo"
+              accept="image/*"
             />
-            <Button size="icon" variant="ghost" className="rounded-full text-gray-500 hover:text-emerald-900" onClick={() => fileRef.current?.click()} disabled={uploading} data-testid="chat-attach-btn" title="Attach file">
-              {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Paperclip className="h-5 w-5" strokeWidth={1.5} />}
-            </Button>
-            <Textarea
-              value={text}
-              onChange={(e) => handleTyping(e.target.value)}
-              onKeyDown={handleKey}
-              onBlur={() => {
-                setComposerFocused(false);
-                flushTypingStop();
-              }}
-              onFocus={() => {
-                setComposerFocused(true);
-                if (readOnly || !conversation?.id || !sendTyping || !text.trim()) return;
-                sendTyping(conversation.id, true);
-              }}
-              placeholder="Type a message"
-              rows={1}
-              data-testid="chat-input"
-              className="max-h-32 min-h-[44px] flex-1 resize-none rounded-2xl border-gray-200 bg-gray-50"
-              enterKeyHint="send"
-              autoComplete="off"
+            <input
+              ref={videoInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFile}
+              data-testid="chat-file-input-video"
+              accept="video/*"
             />
-            <Button size="icon" onClick={handleSendText} disabled={!text.trim() || sending} data-testid="chat-send-btn" className="h-10 w-10 rounded-full bg-emerald-900 hover:bg-emerald-950">
-              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            </Button>
+            <input
+              ref={audioInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFile}
+              data-testid="chat-file-input-audio"
+              accept="audio/*"
+            />
+            <input
+              ref={docInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFile}
+              data-testid="chat-file-input-doc"
+              accept="application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.csv,.rtf"
+            />
+            {/* Composer chrome (paperclip + textarea + send) is hidden while
+                a voice note is being recorded — the VoiceRecorder takes over
+                the row and renders its own recording strip. */}
+            {!recording && (
+              <>
+                <Popover open={attachOpen} onOpenChange={setAttachOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="rounded-full text-gray-500 hover:text-emerald-900 dark:hover:text-emerald-300"
+                      disabled={uploading}
+                      data-testid="chat-attach-btn"
+                      title="Attach media"
+                    >
+                      {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Paperclip className="h-5 w-5" strokeWidth={1.5} />}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    side="top"
+                    align="start"
+                    sideOffset={10}
+                    className="w-64 p-2 rounded-2xl"
+                    data-testid="chat-attach-menu"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => openPicker("photo")}
+                      className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-gray-800"
+                      data-testid="chat-attach-photos"
+                    >
+                      <span className="h-9 w-9 rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300 flex items-center justify-center">
+                        <ImageIcon className="h-4 w-4" />
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-medium dark:text-gray-100">Photos</span>
+                        <span className="block text-[11px] text-gray-500 dark:text-gray-400">JPEG, PNG, GIF, WebP</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openPicker("video")}
+                      className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-gray-800"
+                      data-testid="chat-attach-videos"
+                    >
+                      <span className="h-9 w-9 rounded-xl bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300 flex items-center justify-center">
+                        <VideoIcon className="h-4 w-4" />
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-medium dark:text-gray-100">Videos</span>
+                        <span className="block text-[11px] text-gray-500 dark:text-gray-400">MP4, MOV, WebM</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openPicker("document")}
+                      className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-gray-800"
+                      data-testid="chat-attach-documents"
+                    >
+                      <span className="h-9 w-9 rounded-xl bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300 flex items-center justify-center">
+                        <FileText className="h-4 w-4" />
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-medium dark:text-gray-100">Documents</span>
+                        <span className="block text-[11px] text-gray-500 dark:text-gray-400">PDF, Word, Excel, PPT, ZIP</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openPicker("audio")}
+                      className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-gray-800"
+                      data-testid="chat-attach-audio"
+                    >
+                      <span className="h-9 w-9 rounded-xl bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300 flex items-center justify-center">
+                        <Music className="h-4 w-4" />
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-medium dark:text-gray-100">Audio</span>
+                        <span className="block text-[11px] text-gray-500 dark:text-gray-400">MP3, M4A, WAV, OGG</span>
+                      </span>
+                    </button>
+                  </PopoverContent>
+                </Popover>
+                <Textarea
+                  value={text}
+                  onChange={(e) => handleTyping(e.target.value)}
+                  onKeyDown={handleKey}
+                  onBlur={() => {
+                    setComposerFocused(false);
+                    flushTypingStop();
+                  }}
+                  onFocus={() => {
+                    setComposerFocused(true);
+                    if (readOnly || !conversation?.id || !sendTyping || !text.trim()) return;
+                    sendTyping(conversation.id, true);
+                  }}
+                  placeholder="Type a message"
+                  rows={1}
+                  data-testid="chat-input"
+                  className="max-h-32 min-h-[44px] flex-1 resize-none rounded-2xl border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 dark:text-gray-100"
+                  enterKeyHint="send"
+                  autoComplete="off"
+                />
+              </>
+            )}
+            {/* When the textarea has content, show the Send button instead of
+                the mic. The VoiceRecorder is always mounted (so its state and
+                the underlying MediaRecorder stay alive across re-renders); we
+                just hide it when there's text waiting to be sent. */}
+            {!recording && text.trim() ? (
+              <Button
+                size="icon"
+                onClick={handleSendText}
+                data-testid="chat-send-btn"
+                className="h-10 w-10 rounded-full bg-emerald-900 hover:bg-emerald-950"
+                title="Send"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            ) : null}
+            <div className={!recording && text.trim() ? "hidden" : "contents"}>
+              <VoiceRecorder
+                onSend={handleVoiceNote}
+                onRecordingChange={setRecording}
+                disabled={uploading}
+              />
+            </div>
           </div>
         </div>
       )}

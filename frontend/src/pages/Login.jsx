@@ -1,26 +1,83 @@
-import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { MessageCircle, Lock, User as UserIcon, Loader2 } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { MessageCircle, Phone, User as UserIcon, Loader2, ShieldCheck, Search, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import PasswordInput from "@/components/PasswordInput";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
+import COUNTRIES, { DEFAULT_COUNTRY_CODE, getCountry } from "@/lib/countries";
+
+// Heuristic: any character that's not a digit / space / dash / plus / brackets
+// means the user is typing a username rather than a phone number.
+const USERNAME_RE = /[A-Za-z_]/;
+
+function looksLikeUsername(value) {
+  if (!value) return false;
+  return USERNAME_RE.test(value);
+}
+
+function digitsOnly(value) {
+  return (value || "").replace(/[^\d]/g, "");
+}
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const [username, setUsername] = useState("");
+  const [countryCode, setCountryCode] = useState(DEFAULT_COUNTRY_CODE);
+  const [identifier, setIdentifier] = useState(""); // either phone digits or username
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [countryOpen, setCountryOpen] = useState(false);
+  const [countryQuery, setCountryQuery] = useState("");
+
+  const country = getCountry(countryCode);
+  const isUsername = useMemo(() => looksLikeUsername(identifier), [identifier]);
+
+  const filteredCountries = useMemo(() => {
+    const q = countryQuery.trim().toLowerCase();
+    if (!q) return COUNTRIES;
+    return COUNTRIES.filter((c) =>
+      c.name.toLowerCase().includes(q) ||
+      c.dial.includes(q) ||
+      c.code.toLowerCase().includes(q),
+    );
+  }, [countryQuery]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const trimmed = (identifier || "").trim();
+    if (!trimmed) return toast.error("Enter your phone number or username");
+    if (!password) return toast.error("Enter your password");
+
+    // Build the payload depending on what the user typed.
+    let payload;
+    if (isUsername) {
+      payload = { username: trimmed, password };
+    } else {
+      // Only digits — combine with the selected country code so the server
+      // sees a full E.164 number it can normalise.
+      const localDigits = digitsOnly(trimmed);
+      if (!localDigits) {
+        return toast.error("Enter a valid phone number or username");
+      }
+      payload = {
+        phone_number: `${country.dial}${localDigits}`,
+        password,
+      };
+    }
+
     setSubmitting(true);
     try {
-      const res = await api.post("/auth/login", { username, password });
-      login(res.data.token, res.data.user);
+      const res = await api.post("/auth/login", payload);
+      login(res.data.user);
       toast.success(`Welcome back, ${res.data.user.full_name}!`);
       if (res.data.user.role === "admin") navigate("/admin", { replace: true });
       else navigate("/chat", { replace: true });
@@ -31,23 +88,20 @@ export default function LoginPage() {
     }
   };
 
-  const quickFill = (u, p) => {
-    setUsername(u);
-    setPassword(p);
-  };
-
   return (
-    <div className="min-h-screen grid lg:grid-cols-2" data-testid="login-page">
-      {/* Left panel */}
+    <div className="min-h-screen grid lg:grid-cols-2 bg-white dark:bg-gray-950" data-testid="login-page">
+      {/* Brand panel */}
       <div className="hidden lg:flex flex-col justify-between p-12 bg-emerald-900 text-white relative overflow-hidden">
         <div className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-emerald-700 opacity-30 blur-3xl" />
         <div className="absolute bottom-0 -left-16 w-80 h-80 rounded-full bg-emerald-500 opacity-20 blur-3xl" />
+
         <div className="flex items-center gap-3 z-10">
           <div className="h-10 w-10 rounded-xl bg-white/10 backdrop-blur flex items-center justify-center">
             <MessageCircle className="h-6 w-6" />
           </div>
           <span className="font-display text-2xl font-semibold tracking-tight">ChatFlow</span>
         </div>
+
         <div className="z-10 space-y-6">
           <h1 className="font-display text-5xl font-light leading-tight">
             Conversations that
@@ -55,88 +109,174 @@ export default function LoginPage() {
             <span className="font-semibold">build trust.</span>
           </h1>
           <p className="text-emerald-100 text-lg max-w-md">
-            Real-time chat for teams, clients, and admins — with groups, media and live typing.
+            Real-time chat for teams, clients and administrators — controlled access,
+            audit-ready actions, modern messaging.
           </p>
-          <div className="space-y-2 text-sm text-emerald-200">
-            <p className="tracking-[0.2em] text-[11px] uppercase">Demo credentials</p>
-            <button type="button" onClick={() => quickFill("admin", "admin123")} className="block hover:text-white underline-offset-4 hover:underline" data-testid="quickfill-admin-btn">
-              admin / admin123 (Admin)
-            </button>
-            <button type="button" onClick={() => quickFill("employee1", "employee123")} className="block hover:text-white underline-offset-4 hover:underline" data-testid="quickfill-employee-btn">
-              employee1 / employee123 (Employee)
-            </button>
-            <button type="button" onClick={() => quickFill("client1", "client123")} className="block hover:text-white underline-offset-4 hover:underline" data-testid="quickfill-client-btn">
-              client1 / client123 (Client)
-            </button>
+          <div className="flex items-center gap-3 text-sm text-emerald-100/90">
+            <ShieldCheck className="h-5 w-5 text-emerald-200" />
+            <span>
+              Accounts are created and managed by your administrator. If you don't
+              have access, contact your admin.
+            </span>
           </div>
         </div>
+
         <div className="text-xs text-emerald-200 z-10">
-          © {new Date().getFullYear()} ChatFlow — Crafted by <span className="font-semibold text-white">vijay_anuganti</span>
+          © {new Date().getFullYear()} ChatFlow — Crafted by{" "}
+          <span className="font-semibold text-white">vijay_anuganti</span>
         </div>
       </div>
 
-      {/* Right panel */}
-      <div className="flex items-center justify-center p-4 sm:p-8 lg:p-12 bg-white">
+      {/* Form panel */}
+      <div className="flex items-center justify-center p-4 sm:p-8 lg:p-12 bg-white dark:bg-gray-950">
         <div className="w-full max-w-md">
           <div className="lg:hidden flex items-center gap-3 mb-6">
             <div className="h-10 w-10 rounded-xl bg-emerald-900 text-white flex items-center justify-center">
               <MessageCircle className="h-6 w-6" />
             </div>
-            <span className="font-display text-2xl font-semibold">ChatFlow</span>
+            <span className="font-display text-2xl font-semibold dark:text-gray-100">ChatFlow</span>
           </div>
 
-          <h2 className="font-display text-2xl sm:text-3xl font-semibold mb-2">Welcome back</h2>
-          <p className="text-gray-500 mb-6 sm:mb-8">Sign in to continue your conversations.</p>
+          <h2 className="font-display text-2xl sm:text-3xl font-semibold mb-2 dark:text-gray-100">Welcome back</h2>
+          <p className="text-gray-500 dark:text-gray-400 mb-6 sm:mb-8">
+            Sign in with your phone number or username.
+          </p>
 
           <form onSubmit={handleSubmit} className="space-y-5" data-testid="login-form">
             <div className="space-y-2">
-              <Label htmlFor="username">Username or email</Label>
-              <div className="relative">
-                <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  id="username"
-                  data-testid="login-username-input"
-                  className="pl-10 h-12 rounded-xl"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="your username or email"
-                  required
-                />
+              <Label htmlFor="identifier">Phone or username</Label>
+              <div className="flex items-stretch gap-2">
+                {/* Country code selector — disabled when the input looks like
+                    a username (we don't need a dial code in that case). */}
+                <Popover open={countryOpen} onOpenChange={setCountryOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className={`flex items-center gap-1.5 h-12 px-3 rounded-xl border bg-white dark:bg-gray-900 transition-colors text-sm font-medium select-none ${
+                        isUsername
+                          ? "border-gray-100 dark:border-gray-800 text-gray-300 dark:text-gray-600 cursor-not-allowed"
+                          : "border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 hover:border-emerald-700"
+                      }`}
+                      disabled={isUsername}
+                      data-testid="login-country-trigger"
+                      aria-label="Country code"
+                      title={isUsername ? "Country code isn't used for usernames" : `${country.name} (${country.dial})`}
+                    >
+                      <span className="text-base leading-none">{country.flag}</span>
+                      <span className="tabular-nums">{country.dial}</span>
+                      <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="start"
+                    sideOffset={6}
+                    className="p-0 w-72 max-h-80 overflow-hidden flex flex-col"
+                    data-testid="login-country-menu"
+                  >
+                    <div className="p-2 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2">
+                      <Search className="h-4 w-4 text-gray-400" />
+                      <input
+                        autoFocus
+                        value={countryQuery}
+                        onChange={(e) => setCountryQuery(e.target.value)}
+                        placeholder="Search country or code"
+                        className="flex-1 bg-transparent text-sm outline-none placeholder:text-gray-400 dark:text-gray-100"
+                        data-testid="login-country-search"
+                      />
+                    </div>
+                    <div className="overflow-y-auto flex-1">
+                      {filteredCountries.length === 0 && (
+                        <div className="py-6 text-center text-xs text-gray-400 dark:text-gray-500">
+                          No matches.
+                        </div>
+                      )}
+                      {filteredCountries.map((c) => (
+                        <button
+                          type="button"
+                          key={c.code}
+                          onClick={() => {
+                            setCountryCode(c.code);
+                            setCountryOpen(false);
+                            setCountryQuery("");
+                          }}
+                          data-testid={`login-country-option-${c.code}`}
+                          className={`w-full flex items-center gap-3 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 ${
+                            c.code === countryCode ? "bg-emerald-50 dark:bg-emerald-500/10" : ""
+                          }`}
+                        >
+                          <span className="text-base leading-none">{c.flag}</span>
+                          <span className="flex-1 min-w-0 truncate dark:text-gray-100">{c.name}</span>
+                          <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">{c.dial}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                <div className="relative flex-1 min-w-0">
+                  {isUsername
+                    ? <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    : <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />}
+                  <Input
+                    id="identifier"
+                    data-testid="login-identifier-input"
+                    className="pl-10 h-12 rounded-xl"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder={isUsername ? "your_username" : "98765 43210"}
+                    inputMode={isUsername ? "text" : "tel"}
+                    autoComplete={isUsername ? "username" : "tel"}
+                    required
+                  />
+                </div>
               </div>
+              <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                {isUsername
+                  ? "Logging in with your username. Switch to digits to use a phone number."
+                  : `We'll use ${country.dial} as the country code. Type letters if you'd rather use a username.`}
+              </p>
             </div>
+
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Password</Label>
-                <Link to="/forgot-password" className="text-xs text-emerald-900 hover:underline" data-testid="forgot-password-link">
-                  Forgot password?
-                </Link>
-              </div>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  id="password"
-                  data-testid="login-password-input"
-                  type="password"
-                  className="pl-10 h-12 rounded-xl"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  required
-                />
-              </div>
+              <Label htmlFor="password">Password</Label>
+              <PasswordInput
+                id="password"
+                data-testid="login-password-input"
+                className="h-12 rounded-xl"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                autoComplete="current-password"
+                required
+              />
             </div>
-            <Button type="submit" disabled={submitting} data-testid="login-submit-btn" className="w-full h-12 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white font-medium">
+
+            <Button
+              type="submit"
+              disabled={submitting}
+              data-testid="login-submit-btn"
+              className="w-full h-12 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white font-medium"
+            >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign in"}
             </Button>
           </form>
 
-          <p className="mt-6 sm:mt-8 text-sm text-gray-600">
-            New here?{" "}
-            <Link to="/register" className="text-emerald-900 font-medium hover:underline" data-testid="login-to-register-link">
-              Create an account
-            </Link>
-          </p>
-          <p className="mt-5 sm:mt-6 text-xs text-gray-400 text-center">
+          <div
+            className="mt-8 rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 p-4 text-sm text-gray-600 dark:text-gray-300 flex gap-3"
+            data-testid="login-help"
+          >
+            <ShieldCheck className="h-5 w-5 text-emerald-800 dark:text-emerald-300 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-medium text-gray-900 dark:text-gray-100">Need an account?</div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                ChatFlow doesn't support self sign-up. Your administrator (or an
+                authorised team member) creates accounts and can reset your password
+                if you ever get locked out.
+              </p>
+            </div>
+          </div>
+
+          <p className="mt-6 text-xs text-gray-400 dark:text-gray-500 text-center">
             © {new Date().getFullYear()} ChatFlow · Designed & built by vijay_anuganti
           </p>
         </div>

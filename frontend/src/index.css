@@ -12,6 +12,11 @@ body {
     background: #F9FAFB;
     color: #111827;
     overflow-x: hidden;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+html.dark body {
+    background: #0b0f14;
+    color: #f3f4f6;
 }
 
 h1, h2, h3, h4, h5, h6, .font-display {
@@ -100,6 +105,15 @@ h1, h2, h3, h4, h5, h6, .font-display {
     border: 1px solid #F3F4F6;
     border-radius: 16px 16px 16px 4px;
 }
+html.dark .bubble-sent {
+    background: #064e3b;
+    color: #ecfdf5;
+}
+html.dark .bubble-received {
+    background: #1f2937;
+    border-color: #374151;
+    color: #f3f4f6;
+}
 
 /* Typing dots */
 .typing-dot {
@@ -130,6 +144,12 @@ h1, h2, h3, h4, h5, h6, .font-display {
     background-image:
         radial-gradient(circle at 20% 30%, rgba(16, 185, 129, 0.04) 0, transparent 40%),
         radial-gradient(circle at 80% 70%, rgba(6, 78, 59, 0.03) 0, transparent 40%);
+}
+html.dark .chat-bg {
+    background-color: #0b0f14;
+    background-image:
+        radial-gradient(circle at 20% 30%, rgba(16, 185, 129, 0.08) 0, transparent 40%),
+        radial-gradient(circle at 80% 70%, rgba(6, 78, 59, 0.10) 0, transparent 40%);
 }
 
 .animate-in-up {

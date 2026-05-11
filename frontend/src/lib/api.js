@@ -14,15 +14,7 @@ export const API = BACKEND_URL ? `${BACKEND_URL}/api` : "/api";
 
 export const api = axios.create({
   baseURL: API,
-});
-
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("chatflow_token");
-  if (token) {
-    config.headers = config.headers || {};
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
+  withCredentials: true,
 });
 
 export function formatApiError(err) {
@@ -37,12 +29,17 @@ export function formatApiError(err) {
   return err?.message || "Something went wrong";
 }
 
-export function getWsUrl() {
-  const token = localStorage.getItem("chatflow_token");
-  if (!token || !BACKEND_URL) return null;
+/**
+ * Web clients authenticate via HttpOnly cookie.
+ * Mobile (Expo) can pass an explicit token as query param if needed.
+ */
+export function getWsUrl(explicitToken) {
+  if (!BACKEND_URL) return null;
   const url = new URL(BACKEND_URL);
   const wsProto = url.protocol === "https:" ? "wss:" : "ws:";
-  return `${wsProto}//${url.host}/api/ws?token=${encodeURIComponent(token)}`;
+  const base = `${wsProto}//${url.host}/api/ws`;
+  if (explicitToken) return `${base}?token=${encodeURIComponent(explicitToken)}`;
+  return base;
 }
 
 export function fileUrl(path) {

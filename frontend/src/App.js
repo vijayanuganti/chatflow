@@ -2,9 +2,8 @@ import React from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { ThemeProvider } from "@/context/ThemeContext";
 import LoginPage from "@/pages/Login";
-import RegisterPage from "@/pages/Register";
-import ForgotPasswordPage from "@/pages/ForgotPassword";
 import ChatApp from "@/pages/ChatApp";
 import AdminDashboard from "@/pages/AdminDashboard";
 import { Toaster } from "@/components/ui/sonner";
@@ -34,13 +33,16 @@ function RoleRouter() {
 function App() {
   return (
     <div className="App">
+      <ThemeProvider>
       <AuthProvider>
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<RoleRouter />} />
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            {/* Self-registration and password-reset are disabled.
+                Accounts are created by administrators only. */}
+            <Route path="/register" element={<Navigate to="/login" replace />} />
+            <Route path="/forgot-password" element={<Navigate to="/login" replace />} />
             <Route
               path="/chat"
               element={
@@ -57,10 +59,12 @@ function App() {
                 </Protected>
               }
             />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
         <Toaster position="top-right" />
       </AuthProvider>
+      </ThemeProvider>
     </div>
   );
 }

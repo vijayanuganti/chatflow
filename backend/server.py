@@ -1,6 +1,5 @@
 from dotenv import load_dotenv
 from pathlib import Path
-from urllib.parse import quote_plus
 
 
 ROOT_DIR = Path(__file__).parent
@@ -8,26 +7,37 @@ load_dotenv(ROOT_DIR / ".env")
 
 
 import os
+import re
 import uuid
 import json
-import html
 import logging
-import random
 import shutil
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Set
+
 import boto3
-import requests
 from botocore.exceptions import BotoCoreError, ClientError
 
 
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Request, WebSocket, WebSocketDisconnect, Query
+from fastapi import (
+    FastAPI,
+    APIRouter,
+    HTTPException,
+    Depends,
+    UploadFile,
+    File,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+    Query,
+)
 from fastapi.responses import FileResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, Field, validator
 
 
 # ---------- Config ----------
@@ -43,15 +53,38 @@ DB_NAME = _get_env("DB_NAME")
 JWT_SECRET = _get_env("JWT_SECRET")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24 * 7
-OTP_EXPIRY_MINUTES = 10
+MIN_PASSWORD_LENGTH = int(os.environ.get("MIN_PASSWORD_LENGTH", "6"))
+
+
+# ---------- Auth cookies ----------
+AUTH_COOKIE_NAME = "chatflow_token"
+COOKIE_SECURE = (os.environ.get("COOKIE_SECURE") or "").strip().lower() in ("1", "true", "yes", "on")
+COOKIE_SAMESITE = (os.environ.get("COOKIE_SAMESITE") or "strict").strip().lower()  # strict | lax | none
+
+
+def _set_auth_cookie(response: Response, token: str):
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
+        max_age=int(ACCESS_TOKEN_EXPIRE_HOURS * 3600),
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response: Response):
+    response.delete_cookie(
+        key=AUTH_COOKIE_NAME,
+        path="/",
+    )
 
 
 UPLOAD_DIR = ROOT_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 S3_BUCKET = (os.environ.get("S3_BUCKET") or "").strip()
-# Must match the bucket's actual AWS region (S3 console → bucket → Properties → AWS Region).
-# Prefer S3_REGION over AWS_REGION so S3 can differ from other services if needed.
 S3_REGION = (os.environ.get("S3_REGION") or os.environ.get("AWS_REGION") or "").strip()
 S3_PUBLIC_BASE_URL = (os.environ.get("S3_PUBLIC_BASE_URL") or "").rstrip("/")
 
@@ -68,7 +101,54 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-# ---------- Helpers ----------
+# ---------- Phone helpers ----------
+# Default country for parsing local numbers without country code (configurable).
+DEFAULT_PHONE_COUNTRY = (os.environ.get("DEFAULT_PHONE_COUNTRY") or "IN").upper()
+
+try:
+    import phonenumbers  # type: ignore
+
+    HAS_PHONENUMBERS = True
+except Exception:  # pragma: no cover - fallback if lib missing
+    phonenumbers = None  # type: ignore
+    HAS_PHONENUMBERS = False
+    logger.warning("phonenumbers library not installed; falling back to basic regex validation")
+
+
+_FALLBACK_PHONE_RE = re.compile(r"^\+?[1-9]\d{6,14}$")
+
+
+def normalize_phone(raw: Optional[str]) -> str:
+    """Validate and return phone in canonical E.164 form (e.g. '+919876543210').
+
+    Uses Google's libphonenumber when available, falling back to a strict
+    E.164 regex check.
+    """
+    if not raw:
+        raise HTTPException(status_code=400, detail="Phone number is required")
+
+    cleaned = re.sub(r"[\s\-()]", "", str(raw).strip())
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="Phone number is required")
+
+    if HAS_PHONENUMBERS:
+        try:
+            parsed = phonenumbers.parse(cleaned, None if cleaned.startswith("+") else DEFAULT_PHONE_COUNTRY)
+        except phonenumbers.NumberParseException:
+            raise HTTPException(status_code=400, detail="Invalid phone number format")
+
+        if not phonenumbers.is_possible_number(parsed) or not phonenumbers.is_valid_number(parsed):
+            raise HTTPException(status_code=400, detail="Invalid phone number")
+        return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+
+    if not cleaned.startswith("+"):
+        cleaned = "+" + cleaned
+    if not _FALLBACK_PHONE_RE.match(cleaned):
+        raise HTTPException(status_code=400, detail="Invalid phone number")
+    return cleaned
+
+
+# ---------- Auth helpers ----------
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
@@ -94,9 +174,9 @@ def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
+        raise HTTPException(status_code=401, detail="Session expired. Please sign in again.")
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid session token")
 
 
 def now_iso() -> str:
@@ -115,104 +195,81 @@ def clean_user(u: dict) -> dict:
     return u
 
 
-def normalize_username(username: str) -> str:
-    return username.strip().lower()
+def normalize_username(username: Optional[str]) -> str:
+    return (username or "").strip().lower()
 
 
-def normalize_email(email: Optional[str]) -> Optional[str]:
-    if email is None:
-        return None
-    email = email.strip().lower()
-    return email or None
+def derive_username_from_phone(phone_e164: str) -> str:
+    """Fallback username when admin doesn't pick one. Stable + readable."""
+    digits = re.sub(r"\D", "", phone_e164)
+    suffix = digits[-6:] if len(digits) >= 6 else digits
+    return f"user_{suffix}"
 
 
-def mask_email(email: Optional[str]) -> Optional[str]:
-    if not email:
-        return None
-    if "@" not in email:
-        return email
-    name, domain = email.split("@", 1)
-    if len(name) <= 2:
-        masked_name = name[0] + "*" * max(0, len(name) - 1)
-    else:
-        masked_name = name[:2] + "*" * max(0, len(name) - 2)
-    return f"{masked_name}@{domain}"
+def _extract_jwt_from_request(request: Request) -> Optional[str]:
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:].strip() or None
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    return (cookie_token or "").strip() or None
 
 
-def _hash_otp(otp: str) -> str:
-    return bcrypt.hashpw(otp.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+async def get_current_user(request: Request) -> dict:
+    token = _extract_jwt_from_request(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    payload = decode_token(token)
+    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return clean_user(user)
 
 
-def _verify_otp(otp: str, otp_hash: str) -> bool:
-    return verify_password(otp, otp_hash)
+async def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
 
 
-def _brevo_sender() -> Optional[dict]:
-    """Brevo expects {\"name\": str, \"email\": str}. SENDER_EMAIL: plain or \"Name <addr@domain>\"."""
-    raw = (os.environ.get("SENDER_EMAIL") or "").strip()
-    if not raw:
-        return None
-    if "<" in raw and ">" in raw:
-        name = raw[: raw.index("<")].strip() or "ChatFlow"
-        addr = raw[raw.index("<") + 1 : raw.index(">")].strip()
-        if "@" not in addr:
-            return None
-        return {"name": name, "email": addr}
-    if "@" in raw:
-        return {"name": "ChatFlow", "email": raw}
-    return None
-
-
-def _brevo_send(to_email: str, subject: str, body: str) -> bool:
-    api_key = (os.environ.get("BREVO_API_KEY") or "").strip()
-    sender = _brevo_sender()
-    if not api_key or not sender:
-        logger.warning("Brevo API key or SENDER_EMAIL is not configured. Email delivery disabled.")
-        return False
-
-    safe_html = html.escape(body).replace("\n", "<br />\n")
-    html_content = (
-        f'<p style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.5">{safe_html}</p>'
+async def require_account_creator(user: dict = Depends(get_current_user)) -> dict:
+    """Admin OR an employee with explicit account_creation_access granted."""
+    role = user.get("role")
+    if role == "admin":
+        return user
+    if role == "employee" and bool(user.get("account_creation_access")):
+        return user
+    raise HTTPException(
+        status_code=403,
+        detail="You are not allowed to create accounts. Ask an administrator.",
     )
-    payload = {
-        "sender": sender,
-        "to": [{"email": to_email}],
-        "subject": subject,
-        "textContent": body,
-        "htmlContent": html_content,
+
+
+# ---------- Audit ----------
+async def log_audit(
+    actor_user_id: Optional[str],
+    action: str,
+    target_user_id: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> None:
+    """Persist a sensitive action to the audit log."""
+    doc = {
+        "id": str(uuid.uuid4()),
+        "actor_user_id": actor_user_id,
+        "action": action,
+        "target_user_id": target_user_id,
+        "metadata": metadata or {},
+        "timestamp": now_iso(),
     }
     try:
-        r = requests.post(
-            "https://api.brevo.com/v3/smtp/email",
-            json=payload,
-            headers={
-                "api-key": api_key,
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            timeout=30,
-        )
-        if r.status_code >= 400:
-            logger.warning("Brevo send failed (%s): %s", r.status_code, (r.text or "")[:500])
-            return False
-        return True
+        await db.audit_logs.insert_one(doc)
     except Exception as e:
-        logger.warning("Brevo send error: %s", e)
-        return False
-
-
-def _email_send(to_email: str, subject: str, body: str) -> bool:
-    return _brevo_send(to_email, subject, body)
-
-
-def _email_configured() -> bool:
-    return bool((os.environ.get("BREVO_API_KEY") or "").strip() and _brevo_sender())
+        # never fail business logic because of audit log; just warn loudly.
+        logger.warning("Audit log write failed (%s): %s", action, e)
 
 
 def _infer_public_url(bucket: str, region: str, key: str) -> str:
     if S3_PUBLIC_BASE_URL:
         return f"{S3_PUBLIC_BASE_URL}/{key}"
-    # Default virtual-hosted style URL (works for public buckets)
     if region:
         return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
     return f"https://{bucket}.s3.amazonaws.com/{key}"
@@ -233,72 +290,138 @@ def _upload_to_s3(fileobj, key: str, content_type: str) -> str:
     return _infer_public_url(S3_BUCKET, S3_REGION, key)
 
 
-async def get_current_user(request: Request) -> dict:
-    auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    token = auth[7:]
-    payload = decode_token(token)
-    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return clean_user(user)
-
-
-async def require_admin(user: dict = Depends(get_current_user)) -> dict:
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return user
-
-
 # ---------- Models ----------
-class RegisterBody(BaseModel):
-    username: str
+class LoginBody(BaseModel):
+    # Either `phone_number` (with optional country code dropdown applied
+    # client-side) OR `username` can be supplied. Server picks whichever is
+    # present. We keep them optional rather than using a oneOf so that
+    # existing clients posting just `phone_number` continue to work.
+    phone_number: Optional[str] = None
+    username: Optional[str] = None
+    password: str
+
+
+# --- Medical profile ----------------------------------------------------------
+# Every field is optional so an admin can save partial data and refine later.
+# Free-text fields are length-capped server-side to keep documents manageable.
+ALLOWED_GENDERS = {"male", "female", "other", "prefer_not_to_say"}
+ALLOWED_FOOD_PREF = {"veg", "non_veg", "vegan", "eggetarian", "jain"}
+ALLOWED_ACTIVITY = {"sedentary", "light", "moderate", "active", "very_active"}
+ALLOWED_BLOOD_GROUPS = {"A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "unknown"}
+
+
+class MedicalProfileBody(BaseModel):
+    full_name: Optional[str] = Field(None, max_length=120)
+    age: Optional[int] = Field(None, ge=0, le=150)
+    date_of_birth: Optional[str] = None  # ISO date string YYYY-MM-DD
+    gender: Optional[str] = None
+    phone_number: Optional[str] = Field(None, max_length=32)
+    address: Optional[str] = Field(None, max_length=500)
+    height_cm: Optional[float] = Field(None, ge=0, le=300)
+    weight_kg: Optional[float] = Field(None, ge=0, le=600)
+    blood_group: Optional[str] = None
+    medical_conditions: Optional[str] = Field(None, max_length=2000)
+    current_medications: Optional[str] = Field(None, max_length=2000)
+    allergies: Optional[str] = Field(None, max_length=2000)
+    food_preference: Optional[str] = None
+    water_intake_liters: Optional[float] = Field(None, ge=0, le=20)
+    physical_activity_level: Optional[str] = None
+    health_goal: Optional[str] = Field(None, max_length=400)
+    consultation_date: Optional[str] = None  # ISO date string
+    remarks: Optional[str] = Field(None, max_length=4000)
+
+    @validator("gender")
+    def _v_gender(cls, v):
+        if v is None or v == "":
+            return None
+        if v not in ALLOWED_GENDERS:
+            raise ValueError("Invalid gender")
+        return v
+
+    @validator("food_preference")
+    def _v_food(cls, v):
+        if v is None or v == "":
+            return None
+        if v not in ALLOWED_FOOD_PREF:
+            raise ValueError("Invalid food preference")
+        return v
+
+    @validator("physical_activity_level")
+    def _v_activity(cls, v):
+        if v is None or v == "":
+            return None
+        if v not in ALLOWED_ACTIVITY:
+            raise ValueError("Invalid activity level")
+        return v
+
+    @validator("blood_group")
+    def _v_blood(cls, v):
+        if v is None or v == "":
+            return None
+        if v not in ALLOWED_BLOOD_GROUPS:
+            raise ValueError("Invalid blood group")
+        return v
+
+    @validator("date_of_birth", "consultation_date")
+    def _v_date(cls, v):
+        if not v:
+            return None
+        try:
+            datetime.fromisoformat(v)
+        except Exception:
+            raise ValueError("Date must be in YYYY-MM-DD format")
+        return v
+
+
+def _serialize_medical_profile(mp: "MedicalProfileBody") -> Dict[str, object]:
+    """Pydantic v1 / v2 compatible dump for storage."""
+    try:
+        return mp.model_dump(exclude_unset=False)  # pydantic v2
+    except AttributeError:
+        return mp.dict()  # pydantic v1
+
+
+class CreateAccountBody(BaseModel):
+    phone_number: str
     password: str
     full_name: str
-    email: EmailStr
-    role: str  # employee | client
-    # Only for clients (allocation)
+    role: str  # "employee" | "client"
+    username: Optional[str] = None
+    # Client-only allocation
     batch_id: Optional[str] = None
     employee_id: Optional[str] = None
-    email_verification_token: str
+    # Optional medical profile (clients only). Admin can edit later.
+    medical_profile: Optional[MedicalProfileBody] = None
+
+    @validator("role")
+    def role_must_be_valid(cls, v: str) -> str:
+        if v not in ("employee", "client"):
+            raise ValueError("Role must be 'employee' or 'client'")
+        return v
 
 
-class LoginBody(BaseModel):
-    username: str
-    password: str
+class AdminResetPasswordBody(BaseModel):
+    new_password: str = Field(..., min_length=MIN_PASSWORD_LENGTH)
 
 
-class ForgotBody(BaseModel):
-    identifier: str  # username or email
+class PermissionUpdateBody(BaseModel):
+    account_creation_access: bool
 
 
-class ResetBody(BaseModel):
-    identifier: str
-    otp: str
-    new_password: str
-
-
-class EmailOtpSendBody(BaseModel):
-    email: EmailStr
-
-
-class EmailOtpVerifyBody(BaseModel):
-    email: EmailStr
-    otp: str
+class ActiveStatusBody(BaseModel):
+    is_active: bool
 
 
 class ProfileBody(BaseModel):
     full_name: Optional[str] = None
-    email: Optional[EmailStr] = None
     bio: Optional[str] = None
-    status: Optional[str] = None  # available | busy | away | dnd
+    status: Optional[str] = None
     avatar_url: Optional[str] = None
 
 
 class ChangePasswordBody(BaseModel):
     current_password: str
-    new_password: str
+    new_password: str = Field(..., min_length=MIN_PASSWORD_LENGTH)
 
 
 class MessageBody(BaseModel):
@@ -320,39 +443,139 @@ class CreateGroupBody(BaseModel):
 
 class CreateBatchBody(BaseModel):
     name: str
+    employee_id: str
+    max_clients: Optional[int] = 20
 
 
-# ---------- Auth ----------
-@api_router.post("/auth/register")
-async def register(body: RegisterBody):
-    username = normalize_username(body.username)
-    email = normalize_email(body.email)
-    full_name = body.full_name.strip()
+class AssignClientBody(BaseModel):
+    """Admin-only payload to move a client across employees / batches."""
+    employee_id: str
+    batch_id: str
 
-    if not username or len(body.password) < 4:
-        raise HTTPException(status_code=400, detail="Username and password (min 4 chars) required")
 
-    if body.role not in ("employee", "client"):
-        raise HTTPException(status_code=400, detail="Role must be 'employee' or 'client'")
+# --- Complaint box -----------------------------------------------------------
+# Clients raise complaints against their assigned employee. Admin reviews them
+# from a single inbox and marks them solved or leaves them pending.
 
+COMPLAINT_STATUSES = ("pending", "solved")
+
+
+class ComplaintAnswer(BaseModel):
+    """A single guided-intake Q&A pair captured before the free-text description."""
+    question: str = Field(..., min_length=1, max_length=200)
+    answer: str = Field(..., min_length=1, max_length=200)
+
+
+class CreateComplaintBody(BaseModel):
+    description: str = Field(..., min_length=10, max_length=4000)
+    answers: List[ComplaintAnswer] = Field(default_factory=list)
+    # Optional override — by default we infer the assigned employee from the
+    # client's `employee_id`. A client may pick a different employee if they
+    # want to complain about someone else (e.g. a covering employee).
+    employee_id: Optional[str] = None
+
+    @validator("answers")
+    def cap_answers(cls, v):
+        if len(v) > 10:
+            raise ValueError("Too many intake answers")
+        return v
+
+
+class UpdateComplaintBody(BaseModel):
+    """Admin-only: change status + optionally attach a resolution note."""
+    status: str
+    resolution_notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @validator("status")
+    def valid_status(cls, v):
+        if v not in COMPLAINT_STATUSES:
+            raise ValueError(f"status must be one of {COMPLAINT_STATUSES}")
+        return v
+
+
+# --- Diet plan ---------------------------------------------------------------
+MEAL_SLOTS = ("morning", "afternoon", "night")
+
+
+class DietSuggestionBody(BaseModel):
+    """Employee/admin updates the meal suggestions for an existing day."""
+    morning: Optional[str] = Field(None, max_length=1500)
+    afternoon: Optional[str] = Field(None, max_length=1500)
+    night: Optional[str] = Field(None, max_length=1500)
+
+
+class DietDayCreateBody(BaseModel):
+    """Create a new day for a client. Day number auto-increments if not supplied."""
+    date: Optional[str] = None  # YYYY-MM-DD; defaults to today
+    day_number: Optional[int] = None  # explicit numbering; defaults to next
+    morning: Optional[str] = Field(None, max_length=1500)
+    afternoon: Optional[str] = Field(None, max_length=1500)
+    night: Optional[str] = Field(None, max_length=1500)
+
+    @validator("date")
+    def _date_format(cls, v):
+        if not v:
+            return None
+        try:
+            datetime.fromisoformat(v)
+        except Exception:
+            raise ValueError("Date must be in YYYY-MM-DD format")
+        return v
+
+
+class DietPhotoBody(BaseModel):
+    """Client uploads (via /upload) and posts the resulting URL + an optional note."""
+    photo_url: str
+    note: Optional[str] = Field(None, max_length=800)
+
+
+# ---------- Account creation (shared) ----------
+async def _create_user_internal(
+    actor: dict,
+    body: CreateAccountBody,
+) -> dict:
+    """Create an account on behalf of an admin or permitted employee.
+
+    Enforces role-based rules:
+    - Admins may create employee or client accounts.
+    - Employees with account_creation_access may create clients only.
+    """
+    actor_role = actor.get("role")
+    if actor_role == "employee" and body.role != "client":
+        raise HTTPException(
+            status_code=403,
+            detail="Employees can only create client accounts.",
+        )
+
+    phone = normalize_phone(body.phone_number)
+    if await db.users.find_one({"phone_number": phone}):
+        raise HTTPException(status_code=409, detail="Phone number is already registered")
+
+    if len(body.password or "") < MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
+        )
+
+    full_name = (body.full_name or "").strip()
+    if not full_name:
+        raise HTTPException(status_code=400, detail="Full name is required")
+
+    username = normalize_username(body.username) or derive_username_from_phone(phone)
+    if not re.match(r"^[a-z0-9_.-]{2,40}$", username):
+        raise HTTPException(
+            status_code=400,
+            detail="Username may contain letters, digits, '.', '_' or '-' (2-40 chars)",
+        )
     if await db.users.find_one({"username": username}):
-        raise HTTPException(status_code=400, detail="Username already taken")
-
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(status_code=400, detail="Email already in use")
-
-    # Require verified email before creating account
-    ver = await db.email_verifications.find_one({"email": email}, {"_id": 0})
-    if not ver or not ver.get("verified") or ver.get("token") != body.email_verification_token:
-        raise HTTPException(status_code=400, detail="Email is not verified")
-    if ver.get("expires_at") and datetime.fromisoformat(ver["expires_at"]) < datetime.now(timezone.utc):
-        raise HTTPException(status_code=400, detail="Email verification expired. Please request OTP again.")
+        raise HTTPException(status_code=409, detail="Username already taken")
 
     user_id = str(uuid.uuid4())
     doc = {
         "id": user_id,
         "username": username,
-        "full_name": full_name or username,
+        "phone_number": phone,
+        "full_name": full_name[:80],
         "password_hash": hash_password(body.password),
         "role": body.role,
         "bio": "",
@@ -361,130 +584,180 @@ async def register(body: RegisterBody):
         "created_at": now_iso(),
         "online": False,
         "last_seen": now_iso(),
+        "created_by": actor.get("id"),
+        "account_creation_access": False,  # default; admin can grant later
+        "password_reset_by": None,
+        "password_reset_at": None,
+        "is_active": True,
+        "inactive_at": None,
+        "inactive_by": None,
     }
-    doc["email"] = email
 
-    # Client allocation: must pick employee + batch
     if body.role == "client":
-        if not body.employee_id or not body.batch_id:
-            raise HTTPException(status_code=400, detail="Client must select employee and batch")
+        # employees may only assign clients to themselves
+        if actor_role == "employee":
+            employee_id = actor["id"]
+        else:
+            employee_id = (body.employee_id or "").strip()
+            if not employee_id:
+                raise HTTPException(status_code=400, detail="Client must be assigned to an employee")
+        batch_id = (body.batch_id or "").strip()
+        if not batch_id:
+            raise HTTPException(status_code=400, detail="Client must be assigned to a batch")
 
-        employee = await db.users.find_one({"id": body.employee_id, "role": "employee"}, {"_id": 0})
+        employee = await db.users.find_one({"id": employee_id, "role": "employee"}, {"_id": 0})
         if not employee:
             raise HTTPException(status_code=400, detail="Selected employee not found")
 
-        batch = await db.batches.find_one({"id": body.batch_id}, {"_id": 0})
+        batch = await db.batches.find_one({"id": batch_id}, {"_id": 0})
         if not batch:
             raise HTTPException(status_code=400, detail="Selected batch not found")
-        if batch.get("employee_id") != body.employee_id:
-            raise HTTPException(status_code=400, detail="Selected batch does not belong to selected employee")
+        if batch.get("employee_id") != employee_id:
+            raise HTTPException(status_code=400, detail="Selected batch does not belong to the chosen employee")
 
         client_ids = batch.get("client_ids") or []
         max_clients = int(batch.get("max_clients") or 20)
         if len(client_ids) >= max_clients:
             raise HTTPException(status_code=400, detail="Selected batch is full")
 
-        doc["employee_id"] = body.employee_id
-        doc["batch_id"] = body.batch_id
+        doc["employee_id"] = employee_id
+        doc["batch_id"] = batch_id
+
+        # Medical profile is captured for clients only. Admins (or permitted
+        # employees) may supply it at creation time; otherwise admin fills it
+        # in later via the admin dashboard.
+        if body.medical_profile is not None:
+            doc["medical_profile"] = _serialize_medical_profile(body.medical_profile)
+            doc["medical_profile_updated_at"] = now_iso()
+            doc["medical_profile_updated_by"] = actor.get("id")
+        else:
+            doc["medical_profile"] = None
+            doc["medical_profile_updated_at"] = None
+            doc["medical_profile_updated_by"] = None
 
     await db.users.insert_one(dict(doc))
 
-    # Keep batch membership in sync (best-effort; if this fails we still created the user)
     if body.role == "client":
         await db.batches.update_one(
-            {"id": body.batch_id},
+            {"id": doc["batch_id"]},
             {"$addToSet": {"client_ids": user_id}},
         )
-        # Auto-create the employee↔client conversation so it shows up immediately
-        await _ensure_direct(body.employee_id, user_id)
+        await _ensure_direct(doc["employee_id"], user_id)
 
-    token = create_access_token(user_id, username, body.role)
-    return {"token": token, "user": clean_user(doc)}
-
-
-@api_router.post("/auth/login")
-async def login(body: LoginBody):
-    ident = body.username.strip().lower()
-    user = await db.users.find_one({"$or": [{"username": ident}, {"email": ident}]})
-    if not user or not verify_password(body.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-    token = create_access_token(user["id"], user["username"], user["role"])
-    return {"token": token, "user": clean_user(user)}
-
-
-@api_router.post("/auth/email/send-otp")
-async def send_email_otp(body: EmailOtpSendBody):
-    email = normalize_email(body.email)
-    if not email:
-        raise HTTPException(status_code=400, detail="Email required")
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(status_code=400, detail="Email already in use")
-
-    otp = f"{random.randint(100000, 999999)}"
-    await db.email_verifications.update_one(
-        {"email": email},
-        {"$set": {
-            "email": email,
-            "otp_hash": _hash_otp(otp),
-            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)).isoformat(),
-            "verified": False,
-            "token": None,
-            "updated_at": now_iso(),
-        }},
-        upsert=True,
+    await log_audit(
+        actor_user_id=actor.get("id"),
+        action="account.create",
+        target_user_id=user_id,
+        metadata={
+            "role": body.role,
+            "username": username,
+            "phone_masked": _mask_phone(phone),
+        },
     )
 
-    subject = "ChatFlow email verification OTP"
-    body_text = f"Your ChatFlow verification OTP is: {otp}\n\nThis OTP expires in {OTP_EXPIRY_MINUTES} minutes."
-    sent = False
-    try:
-        sent = _email_send(email, subject, body_text)
-    except Exception as e:
-        logger.warning(f"Email send failed for {email}: {e}")
-        sent = False
+    return clean_user(doc)
 
-    if not sent:
-        logger.warning("Email verification OTP could not be sent to %s", mask_email(email))
-        if not _email_configured():
-            raise HTTPException(
-                status_code=503,
-                detail="Email is not configured. Set BREVO_API_KEY and SENDER_EMAIL on the server so verification codes are delivered by email.",
+
+def _mask_phone(phone: Optional[str]) -> Optional[str]:
+    if not phone:
+        return None
+    if len(phone) <= 4:
+        return "*" * len(phone)
+    return phone[:3] + "*" * (len(phone) - 6) + phone[-3:]
+
+
+# ---------- Auth ----------
+@api_router.post("/auth/login")
+async def login(body: LoginBody, response: Response, request: Request):
+    """
+    Sign in by either phone number (E.164, country-code prefix) or username.
+
+    Clients may submit `phone_number` (digits, optionally pre-combined with a
+    country code) and/or `username`. The phone path is preferred when both
+    are provided. We deliberately don't leak which lookup failed — the user
+    always sees the same "invalid phone/username or password" error.
+    """
+    phone_raw = (body.phone_number or "").strip()
+    username_raw = (body.username or "").strip()
+
+    if not phone_raw and not username_raw:
+        raise HTTPException(status_code=400, detail="Enter your phone number or username")
+
+    user = None
+    audit_meta: dict = {"ip": _client_ip(request)}
+
+    if phone_raw:
+        try:
+            phone = normalize_phone(phone_raw)
+        except HTTPException:
+            # Phone format invalid → keep the response generic.
+            await log_audit(
+                actor_user_id=None,
+                action="auth.login_failed",
+                metadata={"reason": "phone_format", **audit_meta},
             )
+            raise HTTPException(status_code=401, detail="Invalid phone/username or password")
+        audit_meta["phone_masked"] = _mask_phone(phone)
+        user = await db.users.find_one({"phone_number": phone})
+
+    if not user and username_raw:
+        # Username lookup is case-insensitive (usernames are stored lower-cased
+        # by `_create_user_internal`, but be defensive in case of legacy rows).
+        username_norm = username_raw.lower()
+        audit_meta["username"] = username_norm
+        user = await db.users.find_one({"username": username_norm})
+        if not user:
+            user = await db.users.find_one({"username": username_raw})
+
+    if not user or not verify_password(body.password, user.get("password_hash", "")):
+        await log_audit(
+            actor_user_id=None,
+            action="auth.login_failed",
+            metadata=audit_meta,
+        )
+        raise HTTPException(status_code=401, detail="Invalid phone/username or password")
+
+    # Inactive accounts can't sign in (admin keeps their data but they lose access).
+    if user.get("is_active") is False:
+        await log_audit(
+            actor_user_id=user["id"],
+            action="auth.login_blocked_inactive",
+            metadata={"role": user.get("role"), "ip": _client_ip(request)},
+        )
         raise HTTPException(
-            status_code=503,
-            detail="We could not deliver the verification email. Check your email provider configuration and try again.",
+            status_code=403,
+            detail="Your account is inactive. Please contact your administrator.",
         )
 
-    return {
-        "message": "OTP sent to your email.",
-        "sent_via_email": sent,
-        "expires_in_minutes": OTP_EXPIRY_MINUTES,
-        "email_masked": mask_email(email),
-    }
+    token = create_access_token(user["id"], user.get("username") or "", user["role"])
+    _set_auth_cookie(response, token)
 
-
-@api_router.post("/auth/email/verify-otp")
-async def verify_email_otp(body: EmailOtpVerifyBody):
-    email = normalize_email(body.email)
-    if not email:
-        raise HTTPException(status_code=400, detail="Email required")
-
-    rec = await db.email_verifications.find_one({"email": email}, {"_id": 0})
-    if not rec:
-        raise HTTPException(status_code=400, detail="No OTP requested for this email")
-
-    if datetime.fromisoformat(rec["expires_at"]) < datetime.now(timezone.utc):
-        raise HTTPException(status_code=400, detail="OTP expired. Please request again.")
-
-    if not _verify_otp(body.otp.strip(), rec.get("otp_hash", "")):
-        raise HTTPException(status_code=400, detail="Invalid OTP")
-
-    token = uuid.uuid4().hex
-    await db.email_verifications.update_one(
-        {"email": email},
-        {"$set": {"verified": True, "token": token, "verified_at": now_iso()}},
+    await log_audit(
+        actor_user_id=user["id"],
+        action="auth.login",
+        metadata={"role": user.get("role"), "ip": _client_ip(request)},
     )
-    return {"message": "Email verified", "email_verification_token": token}
+
+    return {"user": clean_user(user)}
+
+
+@api_router.post("/auth/logout")
+async def logout(response: Response, request: Request):
+    # best-effort audit (no current user required for clearing cookie)
+    try:
+        token = _extract_jwt_from_request(request)
+        if token:
+            payload = decode_token(token)
+            await log_audit(actor_user_id=payload.get("sub"), action="auth.logout")
+    except Exception:
+        pass
+    _clear_auth_cookie(response)
+    return {"message": "Logged out"}
+
+
+@api_router.get("/auth/verify")
+async def verify_session(user: dict = Depends(get_current_user)):
+    return {"user": user}
 
 
 @api_router.get("/auth/me")
@@ -492,81 +765,11 @@ async def me(user: dict = Depends(get_current_user)):
     return clean_user(user)
 
 
-@api_router.post("/auth/forgot-password")
-async def forgot_password(body: ForgotBody):
-    ident = body.identifier.strip().lower()
-    user = await db.users.find_one({"$or": [{"username": ident}, {"email": ident}]})
-    if not user:
-        raise HTTPException(status_code=404, detail="No account found with that username/email")
-
-    email = normalize_email(user.get("email"))
-    if not email:
-        raise HTTPException(status_code=400, detail="No email address is associated with this account")
-
-    otp = f"{random.randint(100000, 999999)}"
-    await db.password_otps.update_one(
-        {"user_id": user["id"]},
-        {"$set": {
-            "user_id": user["id"],
-            "otp": otp,
-            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)).isoformat(),
-            "used": False,
-            "updated_at": now_iso(),
-        }},
-        upsert=True,
-    )
-
-    subject = "ChatFlow password reset code"
-    body_text = f"Your ChatFlow password reset code is: {otp}\n\nThis code expires in {OTP_EXPIRY_MINUTES} minutes."
-    try:
-        sent = _email_send(email, subject, body_text)
-    except Exception as e:
-        logger.warning("Password reset email send failed for %s: %s", mask_email(email), e)
-        sent = False
-
-    if sent:
-        return {
-            "message": "OTP sent to your email.",
-            "sent_via_email": True,
-            "expires_in_minutes": OTP_EXPIRY_MINUTES,
-            "email_masked": mask_email(email),
-        }
-
-    logger.warning("Password reset OTP could not be sent for user_id=%s", user["id"])
-    if not _email_configured():
-        raise HTTPException(
-            status_code=503,
-            detail="Email is not configured. Set BREVO_API_KEY and SENDER_EMAIL on the server so reset codes are delivered by email.",
-        )
-    raise HTTPException(
-        status_code=503,
-        detail="We could not deliver the reset email. Check your email provider configuration and try again.",
-    )
-
-
-@api_router.post("/auth/reset-password")
-async def reset_password(body: ResetBody):
-    ident = body.identifier.strip().lower()
-    user = await db.users.find_one({"$or": [{"username": ident}, {"email": ident}]})
-    if not user:
-        raise HTTPException(status_code=404, detail="Account not found")
-
-    rec = await db.password_otps.find_one({"user_id": user["id"]})
-    if not rec or rec.get("used"):
-        raise HTTPException(status_code=400, detail="No active OTP. Please request again.")
-
-    if rec["otp"] != body.otp.strip():
-        raise HTTPException(status_code=400, detail="Invalid OTP")
-
-    if datetime.fromisoformat(rec["expires_at"]) < datetime.now(timezone.utc):
-        raise HTTPException(status_code=400, detail="OTP expired. Please request again.")
-
-    if len(body.new_password) < 4:
-        raise HTTPException(status_code=400, detail="Password must be at least 4 chars")
-
-    await db.users.update_one({"id": user["id"]}, {"$set": {"password_hash": hash_password(body.new_password)}})
-    await db.password_otps.update_one({"user_id": user["id"]}, {"$set": {"used": True}})
-    return {"message": "Password updated. You can now sign in."}
+def _client_ip(request: Request) -> Optional[str]:
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else None
 
 
 # ---------- Users / Profile ----------
@@ -576,89 +779,12 @@ async def list_users(user: dict = Depends(get_current_user)):
     return users
 
 
-# ---------- Public registration metadata ----------
-@api_router.get("/public/employees")
-async def public_employees():
-    employees = await db.users.find(
-        {"role": "employee"},
-        {"_id": 0, "password_hash": 0},
-    ).sort("full_name", 1).to_list(1000)
-    return employees
-
-
-@api_router.get("/public/batches")
-async def public_batches(employee_id: Optional[str] = None):
-    query = {}
-    if employee_id:
-        query["employee_id"] = employee_id
-    batches = await db.batches.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
-
-    emp_ids = list({b.get("employee_id") for b in batches if b.get("employee_id")})
-    emp_map = {}
-    if emp_ids:
-        async for e in db.users.find({"id": {"$in": emp_ids}}, {"_id": 0, "password_hash": 0}):
-            emp_map[e["id"]] = e
-
-    out = []
-    for b in batches:
-        client_count = len(b.get("client_ids") or [])
-        max_clients = int(b.get("max_clients") or 20)
-        out.append({
-            **b,
-            "client_count": client_count,
-            "max_clients": max_clients,
-            "employee": clean_user(emp_map.get(b.get("employee_id")) or {}),
-            "is_full": client_count >= max_clients,
-        })
-    return out
-
-
-# ---------- Batches (employee) ----------
-@api_router.get("/batches/me")
-async def my_batches(user: dict = Depends(get_current_user)):
-    if user.get("role") != "employee":
-        raise HTTPException(status_code=403, detail="Employee access required")
-    batches = await db.batches.find({"employee_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(2000)
-    for b in batches:
-        b["client_count"] = len(b.get("client_ids") or [])
-        b["max_clients"] = int(b.get("max_clients") or 20)
-    return batches
-
-
-@api_router.post("/batches")
-async def create_batch(body: CreateBatchBody, user: dict = Depends(get_current_user)):
-    if user.get("role") != "employee":
-        raise HTTPException(status_code=403, detail="Employee access required")
-    name = (body.name or "").strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Batch name required")
-
-    batch = {
-        "id": f"batch_{uuid.uuid4().hex}",
-        "name": name[:80],
-        "employee_id": user["id"],
-        "client_ids": [],
-        "max_clients": 20,
-        "created_at": now_iso(),
-    }
-    await db.batches.insert_one(dict(batch))
-    return batch
-
-
 @api_router.put("/users/me")
 async def update_profile(body: ProfileBody, user: dict = Depends(get_current_user)):
-    update = {}
+    update: Dict[str, object] = {}
 
     if body.full_name is not None:
         update["full_name"] = body.full_name.strip()[:80]
-
-    if body.email is not None:
-        new_email = normalize_email(body.email)
-        if new_email:
-            existing = await db.users.find_one({"email": new_email, "id": {"$ne": user["id"]}})
-            if existing:
-                raise HTTPException(status_code=400, detail="Email already in use")
-        update["email"] = new_email
 
     if body.bio is not None:
         update["bio"] = body.bio[:200]
@@ -683,13 +809,964 @@ async def update_profile(body: ProfileBody, user: dict = Depends(get_current_use
 async def change_password(body: ChangePasswordBody, user: dict = Depends(get_current_user)):
     full = await db.users.find_one({"id": user["id"]})
     if not full or not verify_password(body.current_password, full["password_hash"]):
-        raise HTTPException(status_code=400, detail="Current password incorrect")
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
 
-    if len(body.new_password) < 4:
-        raise HTTPException(status_code=400, detail="Password must be at least 4 chars")
+    if len(body.new_password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
+        )
 
-    await db.users.update_one({"id": user["id"]}, {"$set": {"password_hash": hash_password(body.new_password)}})
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"password_hash": hash_password(body.new_password)}},
+    )
+    await log_audit(actor_user_id=user["id"], action="password.self_change")
     return {"message": "Password updated"}
+
+
+# ---------- Account creation (admin & permitted employee) ----------
+@api_router.post("/accounts")
+async def create_account(body: CreateAccountBody, actor: dict = Depends(require_account_creator)):
+    """Create an employee or client account.
+
+    Authorization:
+    - Admins: may create employees and clients.
+    - Employees with `account_creation_access`: may create clients only.
+    """
+    new_user = await _create_user_internal(actor, body)
+    return {"user": new_user}
+
+
+@api_router.get("/me/permissions")
+async def my_permissions(user: dict = Depends(get_current_user)):
+    return {
+        "role": user.get("role"),
+        "account_creation_access": bool(user.get("account_creation_access")) or user.get("role") == "admin",
+    }
+
+
+# ---------- Admin: account & permission management ----------
+@api_router.get("/admin/users")
+async def admin_users(user: dict = Depends(require_admin)):
+    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(2000)
+    return users
+
+
+@api_router.get("/admin/users/{user_id}")
+async def admin_user_detail(user_id: str, _: dict = Depends(require_admin)):
+    target = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    creator = None
+    if target.get("created_by"):
+        creator = await db.users.find_one(
+            {"id": target["created_by"]},
+            {"_id": 0, "password_hash": 0},
+        )
+    reset_by = None
+    if target.get("password_reset_by"):
+        reset_by = await db.users.find_one(
+            {"id": target["password_reset_by"]},
+            {"_id": 0, "password_hash": 0},
+        )
+    return {
+        "user": target,
+        "created_by_user": clean_user(creator) if creator else None,
+        "password_reset_by_user": clean_user(reset_by) if reset_by else None,
+    }
+
+
+@api_router.post("/admin/users/{user_id}/reset-password")
+async def admin_reset_password(
+    user_id: str,
+    body: AdminResetPasswordBody,
+    actor: dict = Depends(require_admin),
+):
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if target.get("role") == "admin" and target["id"] != actor["id"]:
+        # Prevent admins from resetting other admins via this endpoint.
+        raise HTTPException(status_code=403, detail="Cannot reset password of another admin")
+
+    await db.users.update_one(
+        {"id": user_id},
+        {
+            "$set": {
+                "password_hash": hash_password(body.new_password),
+                "password_reset_by": actor["id"],
+                "password_reset_at": now_iso(),
+            }
+        },
+    )
+    await log_audit(
+        actor_user_id=actor["id"],
+        action="password.admin_reset",
+        target_user_id=user_id,
+        metadata={"username": target.get("username")},
+    )
+    return {"message": "Password reset successfully"}
+
+
+@api_router.post("/admin/users/{user_id}/permissions")
+async def admin_set_permissions(
+    user_id: str,
+    body: PermissionUpdateBody,
+    actor: dict = Depends(require_admin),
+):
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("role") != "employee":
+        raise HTTPException(
+            status_code=400,
+            detail="Account creation permission can only be granted to employees",
+        )
+
+    await db.users.update_one(
+        {"id": user_id},
+        {
+            "$set": {
+                "account_creation_access": bool(body.account_creation_access),
+                "permissions_updated_by": actor["id"],
+                "permissions_updated_at": now_iso(),
+            }
+        },
+    )
+    await log_audit(
+        actor_user_id=actor["id"],
+        action="permissions.account_creation."
+        + ("grant" if body.account_creation_access else "revoke"),
+        target_user_id=user_id,
+        metadata={"username": target.get("username")},
+    )
+    return {"message": "Permissions updated"}
+
+
+@api_router.get("/users/{user_id}/medical-profile")
+async def get_medical_profile(user_id: str, viewer: dict = Depends(get_current_user)):
+    """Return a client's medical profile.
+
+    Access rules:
+      - Admins  → any client
+      - Clients → only themselves
+      - Employees → only clients in one of their batches
+    """
+    target = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("role") != "client":
+        raise HTTPException(status_code=400, detail="Medical profile is only available for clients")
+
+    viewer_role = viewer.get("role")
+    if viewer_role == "admin":
+        pass
+    elif viewer_role == "client":
+        if viewer["id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not allowed")
+    elif viewer_role == "employee":
+        # Employee can see the medical profile of clients in their batches OR
+        # their directly-assigned clients.
+        if target.get("employee_id") != viewer["id"]:
+            # Fall back to batch ownership check
+            batch_id = target.get("batch_id")
+            batch = await db.batches.find_one({"id": batch_id}) if batch_id else None
+            if not batch or batch.get("employee_id") != viewer["id"]:
+                raise HTTPException(status_code=403, detail="Not allowed")
+    else:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    updated_by_user = None
+    if target.get("medical_profile_updated_by"):
+        u = await db.users.find_one(
+            {"id": target["medical_profile_updated_by"]},
+            {"_id": 0, "password_hash": 0},
+        )
+        if u:
+            updated_by_user = clean_user(u)
+
+    return {
+        "user": {
+            "id": target["id"],
+            "username": target.get("username"),
+            "full_name": target.get("full_name"),
+            "phone_number": target.get("phone_number"),
+            "avatar_url": target.get("avatar_url"),
+        },
+        "medical_profile": target.get("medical_profile"),
+        "updated_at": target.get("medical_profile_updated_at"),
+        "updated_by": updated_by_user,
+        "editable": viewer_role == "admin",
+    }
+
+
+@api_router.put("/admin/users/{user_id}/medical-profile")
+async def admin_update_medical_profile(
+    user_id: str,
+    body: MedicalProfileBody,
+    actor: dict = Depends(require_admin),
+):
+    """Admin-only: create or update a client's medical profile."""
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("role") != "client":
+        raise HTTPException(status_code=400, detail="Medical profile is only available for clients")
+
+    profile = _serialize_medical_profile(body)
+    await db.users.update_one(
+        {"id": user_id},
+        {
+            "$set": {
+                "medical_profile": profile,
+                "medical_profile_updated_at": now_iso(),
+                "medical_profile_updated_by": actor["id"],
+            }
+        },
+    )
+
+    await log_audit(
+        actor_user_id=actor["id"],
+        action="medical_profile.update",
+        target_user_id=user_id,
+        metadata={"username": target.get("username")},
+    )
+    return {
+        "medical_profile": profile,
+        "updated_at": now_iso(),
+        "updated_by": clean_user(actor),
+    }
+
+
+@api_router.post("/admin/users/{user_id}/active")
+async def admin_set_active_status(
+    user_id: str,
+    body: ActiveStatusBody,
+    actor: dict = Depends(require_admin),
+):
+    """Activate / deactivate a client (or any non-admin user).
+
+    Deactivated users cannot sign in, but their data (messages, batch
+    membership) is preserved so an admin can review or re-activate later.
+    """
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.get("role") == "admin":
+        raise HTTPException(status_code=400, detail="Admin accounts cannot be deactivated this way")
+
+    is_active = bool(body.is_active)
+    update_fields: Dict[str, object] = {"is_active": is_active}
+    if is_active:
+        update_fields["inactive_at"] = None
+        update_fields["inactive_by"] = None
+        update_fields["reactivated_at"] = now_iso()
+        update_fields["reactivated_by"] = actor["id"]
+    else:
+        update_fields["inactive_at"] = now_iso()
+        update_fields["inactive_by"] = actor["id"]
+
+    await db.users.update_one({"id": user_id}, {"$set": update_fields})
+
+    await log_audit(
+        actor_user_id=actor["id"],
+        action="account.activate" if is_active else "account.deactivate",
+        target_user_id=user_id,
+        metadata={
+            "role": target.get("role"),
+            "username": target.get("username"),
+        },
+    )
+    return {"message": "Account activated" if is_active else "Account deactivated"}
+
+
+@api_router.get("/admin/clients")
+async def admin_clients(
+    _: dict = Depends(require_admin),
+    status_filter: Optional[str] = Query(None, alias="status", pattern="^(active|inactive)$"),
+):
+    """List clients, optionally filtered to only active or only inactive."""
+    query: Dict[str, object] = {"role": "client"}
+    if status_filter == "active":
+        query["is_active"] = {"$ne": False}
+    elif status_filter == "inactive":
+        query["is_active"] = False
+    clients = await db.users.find(query, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(2000)
+    return clients
+
+
+@api_router.get("/admin/audit-logs")
+async def admin_audit_logs(
+    _: dict = Depends(require_admin),
+    limit: int = Query(200, ge=1, le=1000),
+    action: Optional[str] = None,
+):
+    query: Dict[str, object] = {}
+    if action:
+        query["action"] = action
+    logs = await db.audit_logs.find(query, {"_id": 0}).sort("timestamp", -1).to_list(limit)
+
+    user_ids = set()
+    for log in logs:
+        for k in ("actor_user_id", "target_user_id"):
+            if log.get(k):
+                user_ids.add(log[k])
+
+    users_map: Dict[str, dict] = {}
+    if user_ids:
+        async for u in db.users.find({"id": {"$in": list(user_ids)}}, {"_id": 0, "password_hash": 0}):
+            users_map[u["id"]] = clean_user(u)
+
+    for log in logs:
+        log["actor"] = users_map.get(log.get("actor_user_id"))
+        log["target"] = users_map.get(log.get("target_user_id"))
+    return logs
+
+
+# ---------- Admin: existing dashboards ----------
+@api_router.get("/admin/stats")
+async def admin_stats(user: dict = Depends(require_admin)):
+    return {
+        "total_users": await db.users.count_documents({}),
+        "employees": await db.users.count_documents({"role": "employee"}),
+        "clients": await db.users.count_documents({"role": "client"}),
+        "active_clients": await db.users.count_documents(
+            {"role": "client", "is_active": {"$ne": False}}
+        ),
+        "inactive_clients": await db.users.count_documents(
+            {"role": "client", "is_active": False}
+        ),
+        "admins": await db.users.count_documents({"role": "admin"}),
+        "conversations": await db.conversations.count_documents({}),
+        "groups": await db.conversations.count_documents({"type": "group"}),
+        "messages": await db.messages.count_documents({}),
+        "employees_with_creation_access": await db.users.count_documents(
+            {"role": "employee", "account_creation_access": True}
+        ),
+        "complaints_pending": await db.complaints.count_documents({"status": "pending"}),
+        "complaints_solved": await db.complaints.count_documents({"status": "solved"}),
+    }
+
+
+@api_router.get("/admin/conversations")
+async def admin_all_conversations(user: dict = Depends(require_admin)):
+    convs = await db.conversations.find({}, {"_id": 0}).sort("last_message_at", -1).to_list(1000)
+    return await _enrich_conversations(convs, None)
+
+
+@api_router.get("/admin/users/{user_id}/activity")
+async def admin_user_activity(user_id: str, user: dict = Depends(require_admin)):
+    target = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    convs = await db.conversations.find(
+        {"participants": user_id}, {"_id": 0}
+    ).sort("last_message_at", -1).to_list(500)
+    enriched = await _enrich_conversations(convs, None)
+    msg_count = await db.messages.count_documents({"sender_id": user_id})
+
+    return {
+        "user": target,
+        "conversations": enriched,
+        "messages_sent": msg_count,
+    }
+
+
+@api_router.get("/admin/employees")
+async def admin_employees(user: dict = Depends(require_admin)):
+    employees = await db.users.find({"role": "employee"}, {"_id": 0, "password_hash": 0}).sort("full_name", 1).to_list(2000)
+    return employees
+
+
+@api_router.get("/admin/employees/{employee_id}/batches")
+async def admin_employee_batches(employee_id: str, user: dict = Depends(require_admin)):
+    employee = await db.users.find_one({"id": employee_id, "role": "employee"}, {"_id": 0, "password_hash": 0})
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    batches = await db.batches.find({"employee_id": employee_id}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    client_ids: Set[str] = set()
+    for b in batches:
+        for cid in (b.get("client_ids") or []):
+            client_ids.add(cid)
+
+    clients_map: Dict[str, dict] = {}
+    if client_ids:
+        async for c in db.users.find({"id": {"$in": list(client_ids)}}, {"_id": 0, "password_hash": 0}):
+            clients_map[c["id"]] = clean_user(c)
+
+    conv_ids = [direct_conv_id(employee_id, cid) for cid in client_ids]
+    conv_map: Dict[str, dict] = {}
+    if conv_ids:
+        async for conv in db.conversations.find({"id": {"$in": conv_ids}}, {"_id": 0}):
+            conv_map[conv["id"]] = conv
+
+    out_batches = []
+    for b in batches:
+        max_clients = int(b.get("max_clients") or 20)
+        client_list = []
+        for cid in (b.get("client_ids") or []):
+            conv_id = direct_conv_id(employee_id, cid)
+            conv = conv_map.get(conv_id)
+            client_list.append({
+                **(clients_map.get(cid) or {"id": cid}),
+                "conversation_id": conv_id,
+                "conversation_last_message": conv.get("last_message") if conv else None,
+                "conversation_last_message_at": conv.get("last_message_at") if conv else None,
+            })
+
+        out_batches.append({
+            **b,
+            "client_count": len(b.get("client_ids") or []),
+            "max_clients": max_clients,
+            "clients": client_list,
+        })
+
+    return {"employee": clean_user(employee), "batches": out_batches}
+
+
+# ---------- Batches ----------
+@api_router.get("/batches/me")
+async def my_batches(user: dict = Depends(get_current_user)):
+    """Employees see their own batches read-only. They no longer create batches."""
+    if user.get("role") != "employee":
+        raise HTTPException(status_code=403, detail="Employee access required")
+    batches = await db.batches.find({"employee_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    for b in batches:
+        b["client_count"] = len(b.get("client_ids") or [])
+        b["max_clients"] = int(b.get("max_clients") or 20)
+    return batches
+
+
+@api_router.post("/batches")
+async def create_batch(body: CreateBatchBody, actor: dict = Depends(require_admin)):
+    """Only admins can create batches. They pick which employee owns the batch."""
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Batch name required")
+
+    employee_id = (body.employee_id or "").strip()
+    if not employee_id:
+        raise HTTPException(status_code=400, detail="Employee is required")
+    employee = await db.users.find_one({"id": employee_id, "role": "employee"}, {"_id": 0})
+    if not employee:
+        raise HTTPException(status_code=400, detail="Selected employee not found")
+
+    max_clients = int(body.max_clients or 20)
+    if max_clients < 1 or max_clients > 500:
+        raise HTTPException(status_code=400, detail="max_clients must be between 1 and 500")
+
+    batch = {
+        "id": f"batch_{uuid.uuid4().hex}",
+        "name": name[:80],
+        "employee_id": employee_id,
+        "client_ids": [],
+        "max_clients": max_clients,
+        "created_at": now_iso(),
+        "created_by": actor["id"],
+    }
+    await db.batches.insert_one(dict(batch))
+
+    await log_audit(
+        actor_user_id=actor["id"],
+        action="batch.create",
+        metadata={"batch_id": batch["id"], "name": batch["name"], "employee_id": employee_id},
+    )
+    return batch
+
+
+@api_router.post("/admin/clients/{client_id}/assign")
+async def admin_assign_client(
+    client_id: str,
+    body: AssignClientBody,
+    actor: dict = Depends(require_admin),
+):
+    """Move a client to a different employee / batch.
+
+    Steps:
+      1. Validate client, target employee, target batch (and that batch belongs to target employee).
+      2. Remove client from the old batch's `client_ids`.
+      3. Add client to the new batch's `client_ids` (rejecting if full).
+      4. Update client document's `employee_id` and `batch_id`.
+      5. Make sure a direct conversation exists between the new employee and the client.
+    """
+    client = await db.users.find_one({"id": client_id, "role": "client"})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    new_employee_id = (body.employee_id or "").strip()
+    new_batch_id = (body.batch_id or "").strip()
+    if not new_employee_id or not new_batch_id:
+        raise HTTPException(status_code=400, detail="employee_id and batch_id are required")
+
+    new_employee = await db.users.find_one({"id": new_employee_id, "role": "employee"})
+    if not new_employee:
+        raise HTTPException(status_code=400, detail="Target employee not found")
+
+    new_batch = await db.batches.find_one({"id": new_batch_id})
+    if not new_batch:
+        raise HTTPException(status_code=400, detail="Target batch not found")
+    if new_batch.get("employee_id") != new_employee_id:
+        raise HTTPException(status_code=400, detail="Target batch does not belong to the chosen employee")
+
+    current_ids = new_batch.get("client_ids") or []
+    max_clients = int(new_batch.get("max_clients") or 20)
+    if client_id not in current_ids and len(current_ids) >= max_clients:
+        raise HTTPException(status_code=400, detail="Target batch is full")
+
+    old_batch_id = client.get("batch_id")
+    old_employee_id = client.get("employee_id")
+
+    # 1. Remove from old batch (if any and different).
+    if old_batch_id and old_batch_id != new_batch_id:
+        await db.batches.update_one(
+            {"id": old_batch_id},
+            {"$pull": {"client_ids": client_id}},
+        )
+
+    # 2. Add to new batch (idempotent).
+    await db.batches.update_one(
+        {"id": new_batch_id},
+        {"$addToSet": {"client_ids": client_id}},
+    )
+
+    # 3. Update the client document.
+    await db.users.update_one(
+        {"id": client_id},
+        {"$set": {"employee_id": new_employee_id, "batch_id": new_batch_id}},
+    )
+
+    # 4. Ensure a direct conversation exists between the new employee and client.
+    await _ensure_direct(new_employee_id, client_id)
+
+    await log_audit(
+        actor_user_id=actor["id"],
+        action="batch.assign_client",
+        target_user_id=client_id,
+        metadata={
+            "from_employee_id": old_employee_id,
+            "to_employee_id": new_employee_id,
+            "from_batch_id": old_batch_id,
+            "to_batch_id": new_batch_id,
+        },
+    )
+
+    return {"message": "Client moved", "client_id": client_id, "batch_id": new_batch_id, "employee_id": new_employee_id}
+
+
+@api_router.get("/admin/batches")
+async def admin_all_batches(user: dict = Depends(require_admin)):
+    """Batches across all employees, enriched with employee info (used by Create Account)."""
+    batches = await db.batches.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    emp_ids = list({b.get("employee_id") for b in batches if b.get("employee_id")})
+    emp_map: Dict[str, dict] = {}
+    if emp_ids:
+        async for e in db.users.find({"id": {"$in": emp_ids}}, {"_id": 0, "password_hash": 0}):
+            emp_map[e["id"]] = clean_user(e)
+
+    out = []
+    for b in batches:
+        client_count = len(b.get("client_ids") or [])
+        max_clients = int(b.get("max_clients") or 20)
+        out.append({
+            **b,
+            "client_count": client_count,
+            "max_clients": max_clients,
+            "employee": emp_map.get(b.get("employee_id")),
+            "is_full": client_count >= max_clients,
+        })
+    return out
+
+
+# ---------- Diet plan ----------
+def _empty_meal_slot() -> Dict[str, object]:
+    return {
+        "suggestion": None,
+        "suggestion_at": None,
+        "suggestion_by": None,
+        "photo_url": None,
+        "photo_uploaded_at": None,
+        "client_note": None,
+    }
+
+
+def _new_diet_day(
+    *,
+    client_id: str,
+    employee_id: str,
+    day_number: int,
+    date_str: str,
+    actor_id: str,
+) -> Dict[str, object]:
+    return {
+        "id": f"diet_{uuid.uuid4().hex}",
+        "client_id": client_id,
+        "employee_id": employee_id,
+        "day_number": day_number,
+        "date": date_str,
+        "created_at": now_iso(),
+        "created_by": actor_id,
+        "meals": {slot: _empty_meal_slot() for slot in MEAL_SLOTS},
+    }
+
+
+async def _diet_acl(viewer: dict, client_id: str) -> dict:
+    """Return the client doc if the viewer is allowed to interact with their diet plan.
+
+    Rules:
+      - admin: any client.
+      - the client themselves: own plan only.
+      - employee: only clients in their assigned batches (or directly assigned).
+    """
+    client = await db.users.find_one({"id": client_id, "role": "client"})
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    role = viewer.get("role")
+    if role == "admin":
+        return client
+    if role == "client":
+        if viewer["id"] != client_id:
+            raise HTTPException(status_code=403, detail="Not allowed")
+        return client
+    if role == "employee":
+        if client.get("employee_id") == viewer["id"]:
+            return client
+        bid = client.get("batch_id")
+        batch = await db.batches.find_one({"id": bid}) if bid else None
+        if batch and batch.get("employee_id") == viewer["id"]:
+            return client
+    raise HTTPException(status_code=403, detail="Not allowed")
+
+
+def _clean_diet_day(day: dict) -> dict:
+    d = dict(day)
+    d.pop("_id", None)
+    return d
+
+
+@api_router.get("/clients/{client_id}/diet-plans")
+async def list_diet_plans(client_id: str, viewer: dict = Depends(get_current_user)):
+    """Return every recorded day for a client in chronological order."""
+    await _diet_acl(viewer, client_id)
+    days = await db.diet_plans.find(
+        {"client_id": client_id}, {"_id": 0}
+    ).sort([("day_number", 1), ("date", 1)]).to_list(1000)
+    return {"client_id": client_id, "days": days}
+
+
+@api_router.post("/clients/{client_id}/diet-plans")
+async def create_diet_day(
+    client_id: str,
+    body: DietDayCreateBody,
+    viewer: dict = Depends(get_current_user),
+):
+    """Create a new day. Only admins and employees may seed days; clients cannot."""
+    if viewer.get("role") == "client":
+        raise HTTPException(status_code=403, detail="Clients cannot create diet days")
+    client = await _diet_acl(viewer, client_id)
+
+    if body.day_number is not None:
+        if body.day_number < 1:
+            raise HTTPException(status_code=400, detail="day_number must be >= 1")
+        if await db.diet_plans.find_one({"client_id": client_id, "day_number": body.day_number}):
+            raise HTTPException(status_code=409, detail=f"Day {body.day_number} already exists")
+        next_day = int(body.day_number)
+    else:
+        latest = await db.diet_plans.find({"client_id": client_id}).sort("day_number", -1).limit(1).to_list(1)
+        next_day = int(latest[0]["day_number"]) + 1 if latest else 1
+
+    date_str = body.date or now_iso()[:10]
+
+    day = _new_diet_day(
+        client_id=client_id,
+        employee_id=client.get("employee_id") or "",
+        day_number=next_day,
+        date_str=date_str,
+        actor_id=viewer["id"],
+    )
+
+    now = now_iso()
+    for slot in MEAL_SLOTS:
+        text = getattr(body, slot, None)
+        if text and text.strip():
+            day["meals"][slot]["suggestion"] = text.strip()
+            day["meals"][slot]["suggestion_at"] = now
+            day["meals"][slot]["suggestion_by"] = viewer["id"]
+
+    await db.diet_plans.insert_one(dict(day))
+    await log_audit(
+        actor_user_id=viewer["id"],
+        action="diet_plan.day_create",
+        target_user_id=client_id,
+        metadata={"day_number": next_day, "date": date_str},
+    )
+    return _clean_diet_day(day)
+
+
+@api_router.put("/diet-plans/{plan_id}/suggestions")
+async def update_diet_suggestions(
+    plan_id: str,
+    body: DietSuggestionBody,
+    viewer: dict = Depends(get_current_user),
+):
+    """Employee/admin updates the morning/afternoon/night suggestion text for a day.
+
+    Sending `null` for a slot clears that suggestion. Sending an unset value leaves it untouched.
+    """
+    if viewer.get("role") == "client":
+        raise HTTPException(status_code=403, detail="Clients cannot edit suggestions")
+
+    day = await db.diet_plans.find_one({"id": plan_id})
+    if not day:
+        raise HTTPException(status_code=404, detail="Diet day not found")
+    await _diet_acl(viewer, day["client_id"])
+
+    now = now_iso()
+    updates: Dict[str, object] = {}
+    payload = body.dict(exclude_unset=True)
+    for slot in MEAL_SLOTS:
+        if slot not in payload:
+            continue
+        value = payload[slot]
+        if value is None:
+            updates[f"meals.{slot}.suggestion"] = None
+            updates[f"meals.{slot}.suggestion_at"] = None
+            updates[f"meals.{slot}.suggestion_by"] = None
+        else:
+            text = (value or "").strip()
+            updates[f"meals.{slot}.suggestion"] = text or None
+            updates[f"meals.{slot}.suggestion_at"] = now if text else None
+            updates[f"meals.{slot}.suggestion_by"] = viewer["id"] if text else None
+
+    if not updates:
+        return _clean_diet_day(day)
+
+    updates["updated_at"] = now
+    await db.diet_plans.update_one({"id": plan_id}, {"$set": updates})
+    fresh = await db.diet_plans.find_one({"id": plan_id}, {"_id": 0})
+    await log_audit(
+        actor_user_id=viewer["id"],
+        action="diet_plan.suggestion_update",
+        target_user_id=day["client_id"],
+        metadata={"plan_id": plan_id, "slots": list(payload.keys())},
+    )
+    return fresh
+
+
+@api_router.put("/diet-plans/{plan_id}/meal/{slot}/photo")
+async def upload_diet_photo(
+    plan_id: str,
+    slot: str,
+    body: DietPhotoBody,
+    viewer: dict = Depends(get_current_user),
+):
+    """Client (or admin on behalf) records the photo they ate for `slot`.
+
+    The upload itself is handled by the existing `/api/upload` endpoint, which
+    returns a public URL — that URL is what gets passed here.
+    """
+    if slot not in MEAL_SLOTS:
+        raise HTTPException(status_code=400, detail=f"slot must be one of {MEAL_SLOTS}")
+
+    day = await db.diet_plans.find_one({"id": plan_id})
+    if not day:
+        raise HTTPException(status_code=404, detail="Diet day not found")
+    client_id = day["client_id"]
+
+    # Only the client themselves (or an admin) can mark a meal completed.
+    if viewer.get("role") == "client" and viewer["id"] != client_id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    if viewer.get("role") == "employee":
+        raise HTTPException(status_code=403, detail="Only the client (or admin) may upload meal photos")
+    await _diet_acl(viewer, client_id)
+
+    if not (body.photo_url or "").strip():
+        raise HTTPException(status_code=400, detail="photo_url is required")
+
+    now = now_iso()
+    note = (body.note or "").strip() or None
+    await db.diet_plans.update_one(
+        {"id": plan_id},
+        {
+            "$set": {
+                f"meals.{slot}.photo_url": body.photo_url.strip(),
+                f"meals.{slot}.photo_uploaded_at": now,
+                f"meals.{slot}.client_note": note,
+                "updated_at": now,
+            }
+        },
+    )
+    fresh = await db.diet_plans.find_one({"id": plan_id}, {"_id": 0})
+    await log_audit(
+        actor_user_id=viewer["id"],
+        action="diet_plan.photo_upload",
+        target_user_id=client_id,
+        metadata={"plan_id": plan_id, "slot": slot},
+    )
+    return fresh
+
+
+@api_router.delete("/diet-plans/{plan_id}/meal/{slot}/photo")
+async def clear_diet_photo(
+    plan_id: str,
+    slot: str,
+    viewer: dict = Depends(get_current_user),
+):
+    """Client can re-take their photo by clearing the previous one."""
+    if slot not in MEAL_SLOTS:
+        raise HTTPException(status_code=400, detail=f"slot must be one of {MEAL_SLOTS}")
+    day = await db.diet_plans.find_one({"id": plan_id})
+    if not day:
+        raise HTTPException(status_code=404, detail="Diet day not found")
+    client_id = day["client_id"]
+    if viewer.get("role") == "client" and viewer["id"] != client_id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    if viewer.get("role") == "employee":
+        raise HTTPException(status_code=403, detail="Only the client (or admin) may clear meal photos")
+    await _diet_acl(viewer, client_id)
+
+    await db.diet_plans.update_one(
+        {"id": plan_id},
+        {
+            "$set": {
+                f"meals.{slot}.photo_url": None,
+                f"meals.{slot}.photo_uploaded_at": None,
+                f"meals.{slot}.client_note": None,
+                "updated_at": now_iso(),
+            }
+        },
+    )
+    return await db.diet_plans.find_one({"id": plan_id}, {"_id": 0})
+
+
+# ---------- Complaint box ----------
+async def _hydrate_complaint(complaint: dict) -> dict:
+    """Attach denormalised client / employee / resolver labels for the UI."""
+    client = await db.users.find_one(
+        {"id": complaint.get("client_id")},
+        {"_id": 0, "id": 1, "full_name": 1, "username": 1, "phone_number": 1, "avatar_url": 1},
+    )
+    employee = None
+    if complaint.get("employee_id"):
+        employee = await db.users.find_one(
+            {"id": complaint["employee_id"]},
+            {"_id": 0, "id": 1, "full_name": 1, "username": 1, "phone_number": 1, "avatar_url": 1},
+        )
+    resolver = None
+    if complaint.get("resolved_by"):
+        resolver = await db.users.find_one(
+            {"id": complaint["resolved_by"]},
+            {"_id": 0, "id": 1, "full_name": 1},
+        )
+    out = {**complaint, "client": client, "employee": employee, "resolver": resolver}
+    out.pop("_id", None)
+    return out
+
+
+@api_router.post("/complaints")
+async def create_complaint(body: CreateComplaintBody, user: dict = Depends(get_current_user)):
+    """A client raises a complaint (typically against their assigned employee)."""
+    if user.get("role") != "client":
+        raise HTTPException(status_code=403, detail="Only clients can raise complaints")
+
+    # Default: complain about the assigned employee.
+    employee_id = body.employee_id or user.get("employee_id")
+    if employee_id:
+        emp = await db.users.find_one({"id": employee_id, "role": "employee"}, {"_id": 0, "id": 1})
+        if not emp:
+            raise HTTPException(status_code=400, detail="Employee not found")
+    else:
+        employee_id = None  # unassigned complaint — admin will still see it
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "client_id": user["id"],
+        "employee_id": employee_id,
+        "answers": [a.dict() for a in body.answers],
+        "description": body.description.strip(),
+        "status": "pending",
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+        "resolved_at": None,
+        "resolved_by": None,
+        "resolution_notes": None,
+    }
+    await db.complaints.insert_one(doc)
+    await log_audit(
+        actor_user_id=user["id"],
+        action="complaint.create",
+        target_user_id=employee_id,
+        metadata={"complaint_id": doc["id"]},
+    )
+    return await _hydrate_complaint(doc)
+
+
+@api_router.get("/complaints/me")
+async def list_my_complaints(user: dict = Depends(get_current_user)):
+    """Clients see their own complaint history (open + resolved)."""
+    if user.get("role") != "client":
+        raise HTTPException(status_code=403, detail="Only clients have a personal complaint feed")
+    rows = await db.complaints.find(
+        {"client_id": user["id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(500)
+    return [await _hydrate_complaint(r) for r in rows]
+
+
+@api_router.get("/admin/complaints")
+async def admin_list_complaints(
+    status: Optional[str] = None,
+    user: dict = Depends(require_admin),
+):
+    """Admin inbox. `status` may be 'pending' or 'solved' to filter."""
+    query: dict = {}
+    if status:
+        if status not in COMPLAINT_STATUSES:
+            raise HTTPException(status_code=400, detail=f"status must be one of {COMPLAINT_STATUSES}")
+        query["status"] = status
+    rows = await db.complaints.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return [await _hydrate_complaint(r) for r in rows]
+
+
+@api_router.patch("/admin/complaints/{complaint_id}")
+async def admin_update_complaint(
+    complaint_id: str,
+    body: UpdateComplaintBody,
+    admin: dict = Depends(require_admin),
+):
+    existing = await db.complaints.find_one({"id": complaint_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+
+    updates: dict = {
+        "status": body.status,
+        "updated_at": now_iso(),
+    }
+    if body.status == "solved":
+        updates["resolved_at"] = now_iso()
+        updates["resolved_by"] = admin["id"]
+        if body.resolution_notes is not None:
+            updates["resolution_notes"] = body.resolution_notes.strip() or None
+    else:
+        # Reopening a complaint clears the resolution metadata so the audit
+        # trail of when the issue was last reopened stays honest.
+        updates["resolved_at"] = None
+        updates["resolved_by"] = None
+        if body.resolution_notes is not None:
+            updates["resolution_notes"] = body.resolution_notes.strip() or None
+
+    await db.complaints.update_one({"id": complaint_id}, {"$set": updates})
+    await log_audit(
+        actor_user_id=admin["id"],
+        action=f"complaint.{body.status}",
+        target_user_id=existing.get("client_id"),
+        metadata={"complaint_id": complaint_id, "employee_id": existing.get("employee_id")},
+    )
+    fresh = await db.complaints.find_one({"id": complaint_id}, {"_id": 0})
+    return await _hydrate_complaint(fresh)
 
 
 # ---------- Conversations ----------
@@ -871,7 +1948,6 @@ async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_cur
     file_id = f"{uuid.uuid4().hex}{ext}"
     mime = (file.content_type or "").lower()
 
-    # Prefer S3 in production (Render) when configured; fallback to local disk for dev.
     if S3_BUCKET:
         key = f"uploads/{file_id}"
         try:
@@ -889,6 +1965,8 @@ async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_cur
         ftype = "image"
     elif mime.startswith("video/"):
         ftype = "video"
+    elif mime.startswith("audio/"):
+        ftype = "audio"
     else:
         ftype = "file"
 
@@ -905,105 +1983,6 @@ async def get_file(file_id: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(str(path))
-
-
-# ---------- Admin ----------
-@api_router.get("/admin/users")
-async def admin_users(user: dict = Depends(require_admin)):
-    users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(1000)
-    return users
-
-
-@api_router.get("/admin/stats")
-async def admin_stats(user: dict = Depends(require_admin)):
-    return {
-        "total_users": await db.users.count_documents({}),
-        "employees": await db.users.count_documents({"role": "employee"}),
-        "clients": await db.users.count_documents({"role": "client"}),
-        "admins": await db.users.count_documents({"role": "admin"}),
-        "conversations": await db.conversations.count_documents({}),
-        "groups": await db.conversations.count_documents({"type": "group"}),
-        "messages": await db.messages.count_documents({}),
-    }
-
-
-@api_router.get("/admin/conversations")
-async def admin_all_conversations(user: dict = Depends(require_admin)):
-    convs = await db.conversations.find({}, {"_id": 0}).sort("last_message_at", -1).to_list(1000)
-    return await _enrich_conversations(convs, None)
-
-
-@api_router.get("/admin/users/{user_id}/activity")
-async def admin_user_activity(user_id: str, user: dict = Depends(require_admin)):
-    target = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    convs = await db.conversations.find(
-        {"participants": user_id}, {"_id": 0}
-    ).sort("last_message_at", -1).to_list(500)
-    enriched = await _enrich_conversations(convs, None)
-    msg_count = await db.messages.count_documents({"sender_id": user_id})
-
-    return {
-        "user": target,
-        "conversations": enriched,
-        "messages_sent": msg_count,
-    }
-
-
-@api_router.get("/admin/employees")
-async def admin_employees(user: dict = Depends(require_admin)):
-    employees = await db.users.find({"role": "employee"}, {"_id": 0, "password_hash": 0}).sort("full_name", 1).to_list(2000)
-    return employees
-
-
-@api_router.get("/admin/employees/{employee_id}/batches")
-async def admin_employee_batches(employee_id: str, user: dict = Depends(require_admin)):
-    employee = await db.users.find_one({"id": employee_id, "role": "employee"}, {"_id": 0, "password_hash": 0})
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-
-    batches = await db.batches.find({"employee_id": employee_id}, {"_id": 0}).sort("created_at", -1).to_list(2000)
-    client_ids: Set[str] = set()
-    for b in batches:
-        for cid in (b.get("client_ids") or []):
-            client_ids.add(cid)
-
-    clients_map: Dict[str, dict] = {}
-    if client_ids:
-        async for c in db.users.find({"id": {"$in": list(client_ids)}}, {"_id": 0, "password_hash": 0}):
-            clients_map[c["id"]] = clean_user(c)
-
-    # Preload direct conversations for employee↔client pairs
-    conv_ids = [direct_conv_id(employee_id, cid) for cid in client_ids]
-    conv_map: Dict[str, dict] = {}
-    if conv_ids:
-        async for conv in db.conversations.find({"id": {"$in": conv_ids}}, {"_id": 0}):
-            conv_map[conv["id"]] = conv
-
-    out_batches = []
-    for b in batches:
-        max_clients = int(b.get("max_clients") or 20)
-        client_list = []
-        for cid in (b.get("client_ids") or []):
-            conv_id = direct_conv_id(employee_id, cid)
-            conv = conv_map.get(conv_id)
-            client_list.append({
-                **(clients_map.get(cid) or {"id": cid}),
-                "conversation_id": conv_id,
-                "conversation_last_message": conv.get("last_message") if conv else None,
-                "conversation_last_message_at": conv.get("last_message_at") if conv else None,
-            })
-
-        out_batches.append({
-            **b,
-            "client_count": len(b.get("client_ids") or []),
-            "max_clients": max_clients,
-            "clients": client_list,
-        })
-
-    return {"employee": clean_user(employee), "batches": out_batches}
 
 
 # ---------- WebSocket Manager ----------
@@ -1094,10 +2073,17 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+
 @app.websocket("/api/ws")
-async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
+async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(None)):
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        jwt_token = (token or "").strip() or (websocket.cookies.get(AUTH_COOKIE_NAME) or "").strip()
+        if not jwt_token:
+            logger.warning("WS reject: missing token (query or cookie)")
+            await websocket.close(code=4401)
+            return
+
+        payload = jwt.decode(jwt_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user_id = payload.get("sub")
         if not user_id:
             logger.warning("WS reject: token missing sub")
@@ -1158,21 +2144,132 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
 # ---------- Startup ----------
 ADMIN_USER_ID = "admin-user-id"
 
+
+# Seed users handled separately so the migration doesn't claim their canonical
+# phones with placeholders.
+_SEED_USERNAMES = {"admin", "employee1", "client1"}
+
+
+async def _migrate_user_documents() -> None:
+    """Make legacy documents compatible with the phone-based schema.
+
+    - Drops the old unique email index if present (email is now optional).
+    - Backfills phone_number for any user that doesn't have one (using a
+      deterministic placeholder so the admin can later edit them).
+    - Ensures account_creation_access / created_by fields exist.
+    """
+    try:
+        existing = await db.users.index_information()
+        for name, spec in list(existing.items()):
+            keys = spec.get("key") or []
+            if keys and keys[0][0] == "email" and spec.get("unique"):
+                try:
+                    await db.users.drop_index(name)
+                    logger.info("Dropped legacy unique email index: %s", name)
+                except Exception as e:
+                    logger.warning("Could not drop legacy email index %s: %s", name, e)
+    except Exception as e:
+        logger.warning("Could not inspect user indexes: %s", e)
+
+    seed_username = normalize_username(os.environ.get("ADMIN_USERNAME", "admin"))
+    skip_usernames = set(_SEED_USERNAMES) | {seed_username}
+
+    cursor = db.users.find({
+        "username": {"$nin": list(skip_usernames)},
+        "$or": [
+            {"phone_number": {"$exists": False}},
+            {"phone_number": None},
+            {"phone_number": ""},
+        ],
+    })
+    seq = 1
+    async for u in cursor:
+        # Deterministic placeholder for legacy users; admin should reset later.
+        suffix = (str(abs(hash(u.get("id", "")))) + "0000000000")[:10]
+        placeholder = f"+91{suffix}"
+        while await db.users.find_one({"phone_number": placeholder, "id": {"$ne": u["id"]}}):
+            seq += 1
+            placeholder = f"+91{(str(seq)).zfill(10)}"
+        await db.users.update_one({"id": u["id"]}, {"$set": {"phone_number": placeholder}})
+
+    await db.users.update_many(
+        {"account_creation_access": {"$exists": False}},
+        {"$set": {"account_creation_access": False}},
+    )
+    await db.users.update_many({"created_by": {"$exists": False}}, {"$set": {"created_by": None}})
+    await db.users.update_many({"password_reset_by": {"$exists": False}}, {"$set": {"password_reset_by": None}})
+    # Active-status lifecycle (everyone defaults to active; admins flip clients off later).
+    await db.users.update_many(
+        {"is_active": {"$exists": False}},
+        {"$set": {"is_active": True, "inactive_at": None, "inactive_by": None}},
+    )
+    # Medical profile defaults for existing client accounts (admin can populate later).
+    await db.users.update_many(
+        {"role": "client", "medical_profile": {"$exists": False}},
+        {
+            "$set": {
+                "medical_profile": None,
+                "medical_profile_updated_at": None,
+                "medical_profile_updated_by": None,
+            }
+        },
+    )
+
+
+async def _reconcile_phone(target_user_id: str, desired_phone: str) -> Optional[str]:
+    """Force a seeded user's phone_number to `desired_phone`, freeing it first
+    from any other row that happens to be squatting on it. Returns the phone
+    actually assigned (or None if reconciliation failed).
+    """
+    try:
+        squatter = await db.users.find_one({"phone_number": desired_phone, "id": {"$ne": target_user_id}})
+        if squatter:
+            # Move the squatter to a deterministic placeholder so the seeded user can claim its phone.
+            suffix = (str(abs(hash(squatter.get("id", "")))) + "0000000000")[:10]
+            placeholder = f"+91{suffix}"
+            n = 1
+            while await db.users.find_one({"phone_number": placeholder, "id": {"$ne": squatter["id"]}}):
+                n += 1
+                placeholder = f"+91{(str(n)).zfill(10)}"
+            await db.users.update_one(
+                {"id": squatter["id"]},
+                {"$set": {"phone_number": placeholder}},
+            )
+            logger.warning(
+                "Phone %s was held by user_id=%s; moved them to placeholder %s so the seeded account can use it.",
+                desired_phone, squatter.get("id"), placeholder,
+            )
+        await db.users.update_one({"id": target_user_id}, {"$set": {"phone_number": desired_phone}})
+        return desired_phone
+    except Exception as e:
+        logger.warning("Failed to reconcile phone for user_id=%s: %s", target_user_id, e)
+        return None
+
+
 @app.on_event("startup")
 async def on_startup():
     try:
         await client.admin.command("ping")
         logger.info("MongoDB connection established")
 
+        await _migrate_user_documents()
+
         await db.users.create_index("username", unique=True)
-        await db.users.create_index("email", unique=True, sparse=True)
+        await db.users.create_index("phone_number", unique=True)
         await db.conversations.create_index("participants")
         await db.messages.create_index("conversation_id")
         await db.messages.create_index("created_at")
-        await db.password_otps.create_index("user_id", unique=True)
-        await db.email_verifications.create_index("email", unique=True)
         await db.batches.create_index("employee_id")
         await db.batches.create_index([("employee_id", 1), ("name", 1)])
+        await db.audit_logs.create_index([("timestamp", -1)])
+        await db.audit_logs.create_index("actor_user_id")
+        await db.audit_logs.create_index("target_user_id")
+        await db.audit_logs.create_index("action")
+        await db.diet_plans.create_index([("client_id", 1), ("day_number", 1)], unique=True)
+        await db.diet_plans.create_index([("client_id", 1), ("date", 1)])
+        await db.complaints.create_index([("status", 1), ("created_at", -1)])
+        await db.complaints.create_index("client_id")
+        await db.complaints.create_index("employee_id")
     except Exception as e:
         logger.exception("Database startup failed")
         raise RuntimeError(
@@ -1182,13 +2279,14 @@ async def on_startup():
 
     admin_username = normalize_username(os.environ.get("ADMIN_USERNAME", "admin"))
     admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+    admin_phone = normalize_phone(os.environ.get("ADMIN_PHONE", "+910000000001"))
 
     existing = await db.users.find_one({"username": admin_username})
     if existing is None:
         await db.users.insert_one({
             "id": ADMIN_USER_ID,
             "username": admin_username,
-            "email": "admin@chatflow.local",
+            "phone_number": admin_phone,
             "full_name": "Administrator",
             "password_hash": hash_password(admin_password),
             "role": "admin",
@@ -1198,51 +2296,97 @@ async def on_startup():
             "created_at": now_iso(),
             "online": False,
             "last_seen": now_iso(),
+            "created_by": None,
+            "account_creation_access": True,
+            "password_reset_by": None,
+            "password_reset_at": None,
         })
-        logger.info(f"Seeded admin user: {admin_username}")
+        logger.info("Seeded admin user: %s (phone=%s)", admin_username, admin_phone)
     else:
+        updates: Dict[str, object] = {}
         if existing.get("id") != ADMIN_USER_ID:
-            await db.users.update_one(
-                {"username": admin_username},
-                {"$set": {"id": ADMIN_USER_ID}},
-            )
-            logger.info(f"Updated admin id to {ADMIN_USER_ID}")
+            updates["id"] = ADMIN_USER_ID
+        if not verify_password(admin_password, existing.get("password_hash", "")):
+            updates["password_hash"] = hash_password(admin_password)
+        updates["role"] = "admin"
+        updates["account_creation_access"] = True
+        if updates:
+            await db.users.update_one({"username": admin_username}, {"$set": updates})
 
-        if not verify_password(admin_password, existing["password_hash"]):
-            await db.users.update_one(
-                {"username": admin_username},
-                {"$set": {"password_hash": hash_password(admin_password), "role": "admin"}},
-            )
+        # Re-fetch with the canonical id then reconcile the phone unconditionally.
+        admin_doc = await db.users.find_one({"username": admin_username})
+        if admin_doc and admin_doc.get("phone_number") != admin_phone:
+            assigned = await _reconcile_phone(admin_doc["id"], admin_phone)
+            if assigned:
+                logger.info(
+                    "Reconciled admin phone: %s → %s",
+                    admin_doc.get("phone_number"), assigned,
+                )
 
-    for demo in [
-        {"username": "employee1", "password": "employee123", "full_name": "Emma Employee", "role": "employee", "email": "emma@chatflow.local"},
-        {"username": "client1", "password": "client123", "full_name": "Carl Client", "role": "client", "email": "carl@chatflow.local"},
-    ]:
+    # Demo seed accounts (also phone-based; admin can reset these later).
+    demo_seed = [
+        {"username": "employee1", "password": "employee123", "full_name": "Emma Employee", "role": "employee", "phone": "+910000000011"},
+        {"username": "client1", "password": "client123", "full_name": "Carl Client", "role": "client", "phone": "+910000000021"},
+    ]
+    for demo in demo_seed:
+        try:
+            phone = normalize_phone(demo["phone"])
+        except HTTPException:
+            continue
+
         ex = await db.users.find_one({"username": demo["username"]})
-        if not ex:
-            seed_doc = {
-                "id": str(uuid.uuid4()),
-                "username": demo["username"],
-                "full_name": demo["full_name"],
-                "password_hash": hash_password(demo["password"]),
-                "role": demo["role"],
-                "bio": "",
-                "status": "available",
-                "avatar_url": None,
-                "created_at": now_iso(),
-                "online": False,
-                "last_seen": now_iso(),
-            }
-            if demo.get("email"):
-                seed_doc["email"] = normalize_email(demo["email"])
-            await db.users.insert_one(seed_doc)
+        if ex:
+            # Reconcile the canonical phone for the seeded user (and warn if
+            # another row was sitting on it).
+            if ex.get("phone_number") != phone:
+                assigned = await _reconcile_phone(ex["id"], phone)
+                if assigned:
+                    logger.info(
+                        "Reconciled %s phone: %s → %s",
+                        demo["username"], ex.get("phone_number"), assigned,
+                    )
+            continue
+
+        # Brand-new seed: make sure the canonical phone is free.
+        squatter = await db.users.find_one({"phone_number": phone})
+        if squatter:
+            # Move squatter aside so the demo account can claim the canonical phone.
+            await _reconcile_phone(str(uuid.uuid4()), phone)  # no-op safety; just log
+            squatter = await db.users.find_one({"phone_number": phone})
+            if squatter:
+                logger.warning(
+                    "Skipping demo seed %s — phone %s is taken by another account",
+                    demo["username"], phone,
+                )
+                continue
+
+        seed_doc = {
+            "id": str(uuid.uuid4()),
+            "username": demo["username"],
+            "phone_number": phone,
+            "full_name": demo["full_name"],
+            "password_hash": hash_password(demo["password"]),
+            "role": demo["role"],
+            "bio": "",
+            "status": "available",
+            "avatar_url": None,
+            "created_at": now_iso(),
+            "online": False,
+            "last_seen": now_iso(),
+            "created_by": ADMIN_USER_ID,
+            "account_creation_access": False,
+            "password_reset_by": None,
+            "password_reset_at": None,
+        }
+        await db.users.insert_one(seed_doc)
+
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
 
 
 # ---------- CORS & router ----------
-# Configure as comma-separated list in env: CORS_ORIGINS="https://yourapp.vercel.app,http://localhost:3000"
 _cors_env = (os.environ.get("CORS_ORIGINS") or "").strip()
 if _cors_env:
     CORS_ORIGINS = [o.strip().rstrip("/") for o in _cors_env.split(",") if o.strip()]

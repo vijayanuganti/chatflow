@@ -1,21 +1,35 @@
 import React from "react";
-import { ArrowLeft, MessageCircle, MoreVertical, Settings, LogOut } from "lucide-react";
+import { ArrowLeft, MessageCircle, MoreVertical, Settings, LogOut, UserPlus, Sun, Moon, Monitor, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Avatar from "@/components/Avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/context/AuthContext";
+import { useTheme } from "@/context/ThemeContext";
 
-export default function TopBar({ onOpenSettings, onBack, title = "ChatFlow", unreadTotal = 0 }) {
+export default function TopBar({
+  onOpenSettings,
+  onBack,
+  title = "ChatFlow",
+  unreadTotal = 0,
+  onCreateAccount,
+  onRaiseComplaint,
+}) {
   const { user, logout } = useAuth();
+  const { theme, setTheme, toggleTheme, isDark } = useTheme();
+  const canCreateAccounts =
+    !!onCreateAccount &&
+    (user?.role === "admin" || (user?.role === "employee" && !!user?.account_creation_access));
+  const canRaiseComplaint = !!onRaiseComplaint && user?.role === "client";
 
   return (
-    <header className="h-14 bg-white/90 backdrop-blur-xl border-b border-gray-200 px-4 flex items-center justify-between sticky top-0 z-20" data-testid="topbar">
+    <header className="h-14 bg-white/90 dark:bg-gray-950/80 backdrop-blur-xl border-b border-gray-200 dark:border-gray-800 px-4 flex items-center justify-between sticky top-0 z-20" data-testid="topbar">
       <div className="flex items-center gap-2 min-w-0">
         {onBack && (
           <Button size="icon" variant="ghost" className="rounded-full" onClick={onBack} data-testid="topbar-back-btn" title="Back">
@@ -36,6 +50,31 @@ export default function TopBar({ onOpenSettings, onBack, title = "ChatFlow", unr
       </div>
 
       <div className="flex items-center gap-1.5 sm:gap-2">
+        {canCreateAccounts && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="rounded-full hidden sm:inline-flex border-emerald-200 text-emerald-900 hover:bg-emerald-50"
+            onClick={onCreateAccount}
+            data-testid="topbar-create-account-btn"
+            title="Create a new account"
+          >
+            <UserPlus className="h-4 w-4 mr-1.5" />
+            Create account
+          </Button>
+        )}
+        <Button
+          size="icon"
+          variant="ghost"
+          className="rounded-full"
+          onClick={toggleTheme}
+          data-testid="topbar-theme-toggle"
+          title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {isDark
+            ? <Sun className="h-5 w-5" strokeWidth={1.5} />
+            : <Moon className="h-5 w-5" strokeWidth={1.5} />}
+        </Button>
         <div className="hidden sm:block">
           <Avatar name={user?.full_name} avatarUrl={user?.avatar_url} status={user?.status || "available"} size={34} />
         </div>
@@ -46,11 +85,44 @@ export default function TopBar({ onOpenSettings, onBack, title = "ChatFlow", unr
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            {canCreateAccounts && (
+              <DropdownMenuItem onClick={() => onCreateAccount?.()} data-testid="topbar-create-account-item">
+                <UserPlus /> Create account
+              </DropdownMenuItem>
+            )}
+            {canRaiseComplaint && (
+              <DropdownMenuItem onClick={() => onRaiseComplaint?.()} data-testid="topbar-complaint-item">
+                <ShieldAlert /> Raise a complaint
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={() => onOpenSettings?.()} data-testid="topbar-settings-item">
               <Settings /> Profile & settings
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={logout} data-testid="topbar-logout-item">
+            <DropdownMenuLabel className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Appearance</DropdownMenuLabel>
+            <DropdownMenuItem
+              onClick={() => setTheme("light")}
+              data-testid="topbar-theme-light"
+              className={theme === "light" ? "bg-emerald-50 dark:bg-emerald-900/20" : ""}
+            >
+              <Sun /> Light
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setTheme("dark")}
+              data-testid="topbar-theme-dark"
+              className={theme === "dark" ? "bg-emerald-50 dark:bg-emerald-900/20" : ""}
+            >
+              <Moon /> Dark
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setTheme("system")}
+              data-testid="topbar-theme-system"
+              className={theme === "system" ? "bg-emerald-50 dark:bg-emerald-900/20" : ""}
+            >
+              <Monitor /> System
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => { logout(); }} data-testid="topbar-logout-item">
               <LogOut /> Logout
             </DropdownMenuItem>
           </DropdownMenuContent>

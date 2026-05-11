@@ -1,13 +1,9 @@
 import React, { useMemo, useState } from "react";
-import { Search, Plus, Users as UsersIcon, LayoutGrid, FolderPlus } from "lucide-react";
+import { Search, Plus, Users as UsersIcon, LayoutGrid } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import Avatar from "./Avatar";
 import { useAuth } from "@/context/AuthContext";
-import { api, formatApiError } from "@/lib/api";
-import { toast } from "sonner";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 
 function formatLastTime(iso) {
   if (!iso) return "";
@@ -30,13 +26,9 @@ export default function ChatSidebar({
   batches = [],
   selectedBatchId = null,
   onSelectBatch,
-  onBatchesChanged,
 }) {
   const { user } = useAuth();
   const [q, setQ] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
-  const [newBatchName, setNewBatchName] = useState("");
-  const [creating, setCreating] = useState(false);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -53,57 +45,33 @@ export default function ChatSidebar({
 
   const showBatches = !adminView && user?.role === "employee";
 
-  const createBatch = async () => {
-    const name = newBatchName.trim();
-    if (!name) return toast.error("Batch name required");
-    setCreating(true);
-    try {
-      await api.post("/batches", { name });
-      toast.success("Batch created");
-      setCreateOpen(false);
-      setNewBatchName("");
-      onBatchesChanged?.();
-    } catch (err) {
-      toast.error(formatApiError(err));
-    } finally {
-      setCreating(false);
-    }
-  };
-
   return (
     <aside
-      className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden border-r border-gray-200 bg-white md:h-full md:w-80 md:flex-none lg:w-96"
+      className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950 md:h-full md:w-80 md:flex-none lg:w-96"
       data-testid="chat-sidebar"
     >
       {/* Header / Profile */}
-      <div className="p-4 border-b border-gray-100 flex items-center gap-3">
+      <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center gap-3">
         <div data-testid="sidebar-profile" className="shrink-0">
           <Avatar name={user?.full_name} avatarUrl={user?.avatar_url} status={user?.status || "available"} size={40} />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="font-display font-semibold truncate">{user?.full_name}</div>
-          <div className="text-xs text-gray-500 capitalize">{user?.role}</div>
+          <div className="font-display font-semibold truncate dark:text-gray-100">{user?.full_name}</div>
+          <div className="text-xs text-gray-500 dark:text-gray-400 capitalize">{user?.role}</div>
         </div>
       </div>
 
-      {/* Batch boards (employee) */}
+      {/* Batch boards (employee, read-only — only admins manage batches) */}
       {showBatches && (
-        <div className="p-3 border-b border-gray-100" data-testid="batch-boards">
+        <div className="p-3 border-b border-gray-100 dark:border-gray-800" data-testid="batch-boards">
           <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
               <LayoutGrid className="h-4 w-4" />
               Batch boards
             </div>
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={() => setCreateOpen(true)}
-              className="rounded-full"
-              data-testid="add-batch-btn"
-              title="Add batch"
-            >
-              <FolderPlus className="h-5 w-5" strokeWidth={1.5} />
-            </Button>
+            <div className="text-[10px] text-gray-400" title="Batches are managed by an admin">
+              Managed by admin
+            </div>
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-1">
@@ -123,7 +91,9 @@ export default function ChatSidebar({
                 type="button"
                 onClick={() => onSelectBatch?.(b.id)}
                 className={`shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                  selectedBatchId === b.id ? "bg-emerald-900 text-white border-emerald-900" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
+                  selectedBatchId === b.id
+                    ? "bg-emerald-900 text-white border-emerald-900"
+                    : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
                 }`}
                 data-testid={`batch-chip-${b.id}`}
                 title={`${b.name} (${b.client_count || 0}/${b.max_clients || 20})`}
@@ -139,10 +109,16 @@ export default function ChatSidebar({
       )}
 
       {/* Search */}
-      <div className="p-3 border-b border-gray-100">
+      <div className="p-3 border-b border-gray-100 dark:border-gray-800">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input data-testid="chat-search-input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search conversations" className="pl-9 bg-gray-50 rounded-xl border-gray-200 h-10" />
+          <Input
+            data-testid="chat-search-input"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search conversations"
+            className="pl-9 bg-gray-50 dark:bg-gray-900 dark:text-gray-100 rounded-xl border-gray-200 dark:border-gray-700 h-10"
+          />
         </div>
       </div>
 
@@ -175,8 +151,10 @@ export default function ChatSidebar({
                 key={c.id}
                 onClick={() => onSelect(c)}
                 data-testid={`conversation-item-${c.id}`}
-                className={`w-full text-left px-4 py-3 flex gap-3 items-center hover:bg-gray-50 transition-colors border-b border-gray-50 ${
-                  selectedId === c.id ? "bg-emerald-50 hover:bg-emerald-50" : ""
+                className={`w-full text-left px-4 py-3 flex gap-3 items-center transition-colors border-b border-gray-50 dark:border-gray-800/60 ${
+                  selectedId === c.id
+                    ? "bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
+                    : "hover:bg-gray-50 dark:hover:bg-gray-900/50"
                 }`}
               >
                 {isGroup ? (
@@ -188,17 +166,17 @@ export default function ChatSidebar({
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <span className={`font-medium truncate ${unreadCount > 0 ? "text-gray-950" : "text-gray-900"}`}>{title}</span>
+                    <span className={`font-medium truncate ${unreadCount > 0 ? "text-gray-950 dark:text-white" : "text-gray-900 dark:text-gray-100"}`}>{title}</span>
                     <div className="flex items-center gap-2 shrink-0">
                       {unreadCount > 0 && (
                         <span className="h-5 min-w-[20px] px-1.5 rounded-full bg-emerald-600 text-white text-[10px] font-semibold flex items-center justify-center">
                           {unreadCount > 99 ? "99+" : unreadCount}
                         </span>
                       )}
-                      <span className={`text-[11px] ${unreadCount > 0 ? "text-emerald-700 font-medium" : "text-gray-400"}`}>{formatLastTime(c.last_message_at)}</span>
+                      <span className={`text-[11px] ${unreadCount > 0 ? "text-emerald-700 dark:text-emerald-300 font-medium" : "text-gray-400"}`}>{formatLastTime(c.last_message_at)}</span>
                     </div>
                   </div>
-                  <div className={`text-sm truncate ${unreadCount > 0 ? "text-gray-800 font-medium" : "text-gray-500"}`}>
+                  <div className={`text-sm truncate ${unreadCount > 0 ? "text-gray-800 dark:text-gray-200 font-medium" : "text-gray-500 dark:text-gray-400"}`}>
                     {c.last_message || (adminView ? "Monitoring" : "Say hello 👋")}
                   </div>
                 </div>
@@ -207,39 +185,10 @@ export default function ChatSidebar({
           })
         )}
       </div>
-      <div className="shrink-0 border-t border-gray-100 bg-white px-4 py-2 text-center text-[10px] text-gray-400">
+      <div className="shrink-0 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 px-4 py-2 text-center text-[10px] text-gray-400 dark:text-gray-500">
         ChatFlow · © {new Date().getFullYear()} vijay_anuganti
       </div>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-md max-h-[88dvh] overflow-y-auto p-4 sm:p-6" data-testid="create-batch-dialog">
-          <DialogHeader>
-            <DialogTitle className="font-display">Create batch</DialogTitle>
-            <DialogDescription>Add a new board for your clients.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <Label htmlFor="batch_name">Batch name</Label>
-              <Input
-                id="batch_name"
-                value={newBatchName}
-                onChange={(e) => setNewBatchName(e.target.value)}
-                placeholder="Batch 1"
-                className="h-11 rounded-xl"
-                data-testid="create-batch-name-input"
-              />
-            </div>
-            <Button
-              onClick={createBatch}
-              disabled={creating}
-              className="w-full h-11 rounded-full bg-emerald-900 hover:bg-emerald-950"
-              data-testid="create-batch-submit"
-            >
-              {creating ? "Creating..." : "Create batch"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </aside>
   );
 }
