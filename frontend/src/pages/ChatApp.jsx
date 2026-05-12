@@ -8,6 +8,7 @@ import ComplaintDialog from "@/components/ComplaintDialog";
 import TopBar from "@/components/TopBar";
 import useChatSocket from "@/hooks/useChatSocket";
 import useDoubleBackToExit from "@/hooks/useDoubleBackToExit";
+import useMobileChatViewport from "@/hooks/useMobileChatViewport";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -18,6 +19,7 @@ import { toast } from "sonner";
 import { Plus } from "lucide-react";
 
 export default function ChatApp() {
+  useMobileChatViewport();
   const { user } = useAuth();
   const [conversations, setConversations] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -427,7 +429,11 @@ export default function ChatApp() {
   });
 
   return (
-    <div className="flex h-dvh w-full min-h-0 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950" data-testid="chat-app">
+    <div
+      className="flex w-full min-h-0 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950"
+      style={{ height: "var(--visual-vh, 100dvh)" }}
+      data-testid="chat-app"
+    >
       <div className="shrink-0">
         <TopBar
           onOpenSettings={() => setProfileOpen(true)}

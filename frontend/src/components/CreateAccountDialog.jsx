@@ -201,8 +201,8 @@ export default function CreateAccountDialog({
         data-testid="create-account-dialog"
       >
         <DialogHeader>
-          <DialogTitle className="font-display flex items-center gap-2">
-            <UserPlus className="h-5 w-5 text-emerald-800" />
+          <DialogTitle className="font-display flex items-center gap-2 dark:text-gray-100">
+            <UserPlus className="h-5 w-5 text-emerald-800 dark:text-emerald-300" />
             Create account
           </DialogTitle>
           <DialogDescription>
@@ -253,7 +253,7 @@ export default function CreateAccountDialog({
             <div className="space-y-1.5">
               <Label htmlFor="ca-username">Username (optional)</Label>
               <div className="relative">
-                <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
                 <Input
                   id="ca-username"
                   data-testid="create-account-username"
@@ -269,7 +269,7 @@ export default function CreateAccountDialog({
           <div className="space-y-1.5">
             <Label htmlFor="ca-phone">Phone number</Label>
             <div className="relative">
-              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
               <Input
                 id="ca-phone"
                 data-testid="create-account-phone"
@@ -281,7 +281,7 @@ export default function CreateAccountDialog({
                 required
               />
             </div>
-            <p className="text-[11px] text-gray-400">
+            <p className="text-[11px] text-gray-400 dark:text-gray-500">
               Include the country code. Phone numbers must be unique across the platform.
             </p>
           </div>
@@ -297,14 +297,14 @@ export default function CreateAccountDialog({
               placeholder="At least 6 characters"
               required
             />
-            <p className="text-[11px] text-gray-400">
+            <p className="text-[11px] text-gray-400 dark:text-gray-500">
               Share this with the user securely. They can change it after signing in.
             </p>
           </div>
 
           {form.role === "client" && (
-            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-3 sm:p-4 space-y-3">
-              <div className="text-sm font-medium text-emerald-950">Client allocation</div>
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-3 sm:p-4 space-y-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+              <div className="text-sm font-medium text-emerald-950 dark:text-emerald-200">Client allocation</div>
               <div className="grid md:grid-cols-2 gap-3">
                 {me?.role === "admin" ? (
                   <div className="space-y-1.5">
@@ -317,7 +317,7 @@ export default function CreateAccountDialog({
                       }}
                       disabled={loadingMeta}
                     >
-                      <SelectTrigger className="h-11 rounded-xl bg-white" data-testid="create-account-employee-select">
+                      <SelectTrigger className="h-11 rounded-xl bg-white dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100" data-testid="create-account-employee-select">
                         <SelectValue placeholder={loadingMeta ? "Loading…" : "Select employee"} />
                       </SelectTrigger>
                       <SelectContent>
@@ -337,7 +337,7 @@ export default function CreateAccountDialog({
                 ) : (
                   <div className="space-y-1.5">
                     <Label>Assigned to</Label>
-                    <div className="h-11 rounded-xl border border-gray-200 bg-white px-3 flex items-center text-sm text-gray-700">
+                    <div className="h-11 rounded-xl border border-gray-200 bg-white px-3 flex items-center text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
                       You ({me?.full_name})
                     </div>
                   </div>
@@ -349,7 +349,7 @@ export default function CreateAccountDialog({
                     onValueChange={(v) => update("batch_id", v)}
                     disabled={loadingMeta || (me?.role === "admin" && !form.employee_id)}
                   >
-                    <SelectTrigger className="h-11 rounded-xl bg-white" data-testid="create-account-batch-select">
+                    <SelectTrigger className="h-11 rounded-xl bg-white dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100" data-testid="create-account-batch-select">
                       <SelectValue
                         placeholder={
                           me?.role === "admin" && !form.employee_id
@@ -377,34 +377,36 @@ export default function CreateAccountDialog({
                   </Select>
                 </div>
               </div>
-              <p className="text-[11px] text-emerald-900/70">
+              <p className="text-[11px] text-emerald-900/70 dark:text-emerald-200/80">
                 A direct chat between the client and the assigned employee is created automatically.
               </p>
             </div>
           )}
 
           {form.role === "client" && (
-            <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden" data-testid="create-account-medical-section">
+            <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden dark:border-gray-700 dark:bg-gray-900" data-testid="create-account-medical-section">
               <button
                 type="button"
                 onClick={() => setMedOpen((v) => !v)}
-                className="w-full flex items-center gap-2 p-3 sm:p-4 text-left hover:bg-gray-50"
+                className="w-full flex items-center gap-2 p-3 sm:p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-800/60"
                 data-testid="create-account-medical-toggle"
                 aria-expanded={medOpen}
               >
-                <span className="h-8 w-8 rounded-xl bg-emerald-50 text-emerald-900 flex items-center justify-center">
+                <span className="h-8 w-8 rounded-xl bg-emerald-50 text-emerald-900 dark:bg-emerald-500/15 dark:text-emerald-300 flex items-center justify-center">
                   <Stethoscope className="h-4 w-4" />
                 </span>
                 <span className="flex-1 min-w-0">
-                  <span className="block text-sm font-medium">Medical profile (optional)</span>
-                  <span className="block text-[11px] text-gray-500">
+                  <span className="block text-sm font-medium dark:text-gray-100">Medical profile (optional)</span>
+                  <span className="block text-[11px] text-gray-500 dark:text-gray-400">
                     Add medical details now or let an admin fill them in later from the dashboard.
                   </span>
                 </span>
-                {medOpen ? <ChevronDown className="h-4 w-4 text-gray-500" /> : <ChevronRight className="h-4 w-4 text-gray-500" />}
+                {medOpen
+                  ? <ChevronDown className="h-4 w-4 text-gray-500 dark:text-gray-400" />
+                  : <ChevronRight className="h-4 w-4 text-gray-500 dark:text-gray-400" />}
               </button>
               {medOpen && (
-                <div className="border-t border-gray-100 p-3 sm:p-4">
+                <div className="border-t border-gray-100 dark:border-gray-800 p-3 sm:p-4">
                   <MedicalProfileFields value={medForm} onChange={updateMed} disabled={submitting} />
                 </div>
               )}
@@ -432,18 +434,22 @@ function RolePill({ active, onClick, icon: Icon, label, desc, testId }) {
       onClick={onClick}
       data-testid={testId}
       className={`p-3 rounded-2xl border-2 text-left transition-colors ${
-        active ? "border-emerald-900 bg-emerald-50" : "border-gray-200 bg-white hover:border-gray-300"
+        active
+          ? "border-emerald-900 bg-emerald-50 dark:border-emerald-500/50 dark:bg-emerald-500/15"
+          : "border-gray-200 bg-white hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600"
       }`}
     >
       <div
         className={`h-9 w-9 rounded-xl flex items-center justify-center mb-2 ${
-          active ? "bg-emerald-900 text-white" : "bg-gray-100 text-gray-600"
+          active
+            ? "bg-emerald-900 text-white dark:bg-emerald-500/30 dark:text-emerald-100"
+            : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
         }`}
       >
         <Icon className="h-4 w-4" strokeWidth={1.5} />
       </div>
-      <div className="font-display font-semibold text-sm">{label}</div>
-      <div className="text-[11px] text-gray-500">{desc}</div>
+      <div className="font-display font-semibold text-sm dark:text-gray-100">{label}</div>
+      <div className="text-[11px] text-gray-500 dark:text-gray-400">{desc}</div>
     </button>
   );
 }

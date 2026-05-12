@@ -7,6 +7,7 @@ import ProfileDialog from "@/components/ProfileDialog";
 import TopBar from "@/components/TopBar";
 import useChatSocket from "@/hooks/useChatSocket";
 import useDoubleBackToExit from "@/hooks/useDoubleBackToExit";
+import useMobileChatViewport from "@/hooks/useMobileChatViewport";
 import { api, formatApiError } from "@/lib/api";
 import {
   ensureNotificationPermission,
@@ -58,6 +59,7 @@ function StatCard({ icon: Icon, label, value, testId, accent }) {
 }
 
 export default function AdminDashboard() {
+  useMobileChatViewport();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { section } = useParams();
@@ -600,7 +602,11 @@ export default function AdminDashboard() {
   });
 
   return (
-    <div className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100" data-testid="admin-dashboard">
+    <div
+      className="flex min-h-0 w-full flex-col overflow-hidden bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100"
+      style={{ height: "var(--visual-vh, 100dvh)" }}
+      data-testid="admin-dashboard"
+    >
       <div className={`shrink-0 ${mobileInChat ? "hidden md:block" : ""}`}>
         <TopBar
           onOpenSettings={() => setProfileOpen(true)}

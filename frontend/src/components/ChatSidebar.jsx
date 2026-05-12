@@ -50,8 +50,9 @@ export default function ChatSidebar({
       className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950 md:h-full md:w-80 md:flex-none lg:w-96"
       data-testid="chat-sidebar"
     >
-      {/* Header / Profile */}
-      <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center gap-3">
+      {/* Header / Profile — hidden on mobile to save vertical space; the topbar
+          already shows who you're logged in as. */}
+      <div className="hidden md:flex p-4 border-b border-gray-100 dark:border-gray-800 items-center gap-3">
         <div data-testid="sidebar-profile" className="shrink-0">
           <Avatar name={user?.full_name} avatarUrl={user?.avatar_url} status={user?.status || "available"} size={40} />
         </div>
@@ -185,7 +186,7 @@ export default function ChatSidebar({
           })
         )}
       </div>
-      <div className="shrink-0 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 px-4 py-2 text-center text-[10px] text-gray-400 dark:text-gray-500">
+      <div className="hidden md:block shrink-0 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 px-4 py-2 text-center text-[10px] text-gray-400 dark:text-gray-500">
         ChatFlow · © {new Date().getFullYear()} vijay_anuganti
       </div>
 
