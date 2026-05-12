@@ -89,15 +89,15 @@ export default function MedicalProfileDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="w-[calc(100vw-1rem)] sm:max-w-3xl max-h-[90dvh] overflow-y-auto p-4 sm:p-6"
+        className="w-[calc(100vw-1rem)] sm:max-w-3xl max-h-[90dvh] overflow-y-auto p-4 sm:p-6 bg-white dark:bg-gray-950"
         data-testid="medical-profile-dialog"
       >
         <DialogHeader>
-          <DialogTitle className="font-display flex items-center gap-2">
-            <Stethoscope className="h-5 w-5 text-emerald-800" />
+          <DialogTitle className="font-display flex items-center gap-2 dark:text-gray-100">
+            <Stethoscope className="h-5 w-5 text-emerald-800 dark:text-emerald-300" />
             Medical profile
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="dark:text-gray-400">
             {mode === "edit"
               ? `Update the medical record for ${headerSubject}. Changes are audit-logged.`
               : `Medical record for ${headerSubject}.`}
@@ -105,20 +105,20 @@ export default function MedicalProfileDialog({
         </DialogHeader>
 
         {loading ? (
-          <div className="py-10 flex items-center justify-center text-gray-400">
+          <div className="py-10 flex items-center justify-center text-gray-400 dark:text-gray-500">
             <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading…
           </div>
         ) : (
           <div className="space-y-4">
             {data?.updated_at && (
-              <p className="text-xs text-gray-500" data-testid="med-updated-meta">
+              <p className="text-xs text-gray-500 dark:text-gray-400" data-testid="med-updated-meta">
                 Last updated {new Date(data.updated_at).toLocaleString()}
                 {data.updated_by ? ` by ${data.updated_by.full_name}` : ""}
               </p>
             )}
 
             {!editable && (
-              <div className="rounded-xl bg-amber-50 border border-amber-200 px-3 py-2 text-[12px] text-amber-900 inline-flex items-center gap-2">
+              <div className="rounded-xl bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 px-3 py-2 text-[12px] text-amber-900 dark:text-amber-200 inline-flex items-center gap-2">
                 <ShieldAlert className="h-4 w-4" />
                 This profile is maintained by your administrator and cannot be changed here.
               </div>

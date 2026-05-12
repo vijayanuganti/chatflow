@@ -239,18 +239,54 @@ WDS_SOCKET_PORT=0
 
 ---
 
-## Production deployment (Vercel + Render + Atlas + S3)
+## Production deployment — Render
 
-- Frontend: Vercel (`REACT_APP_BACKEND_URL=https://your-api.example.com`).
-- Backend: Render (Web Service, build `pip install -r requirements.txt`, start
-  `uvicorn server:app --host 0.0.0.0 --port $PORT`).
-- DB: MongoDB Atlas (set `MONGO_URL`).
-- Uploads: AWS S3 (`S3_BUCKET`, `S3_REGION`, `AWS_ACCESS_KEY_ID`,
-  `AWS_SECRET_ACCESS_KEY`, optional `S3_PUBLIC_BASE_URL`).
-- Cookies: set `COOKIE_SECURE=true`. Use `COOKIE_SAMESITE=none` when frontend
-  and backend are on different sites.
-- Set `CORS_ORIGINS` to a comma-separated list of your Vercel domains.
+End-to-end recipe: backend on **Render Web Service**, frontend on **Render
+Static Site** (or Vercel), database on **MongoDB Atlas**, uploads on **AWS S3**.
 
-After first deploy: sign in as `admin` / `admin123` (via the admin phone),
-**reset the admin password** immediately, then create real accounts via the
-admin panel.
+### 1. Backend — Render Web Service
+
+| Setting              | Value                                                     |
+| -------------------- | --------------------------------------------------------- |
+| Environment          | `Python 3`                                                |
+| Root Directory       | `backend`                                                 |
+| Build Command        | `pip install -r requirements.txt`                         |
+| Start Command        | `uvicorn server:app --host 0.0.0.0 --port $PORT`          |
+| Health Check Path    | `/api/auth/verify` (returns 401 unauth — that's expected) |
+| Instance Type        | `Starter` is enough to begin with                         |
+
+Then in **Environment → Add Environment Variable**, paste the values from
+[`backend/.env.example`](./backend/.env.example) one row at a time (or use the
+"Add from .env" bulk editor). At minimum you must set:
+
+- `MONGO_URL`, `DB_NAME`
+- `JWT_SECRET` (generate with `openssl rand -hex 48`)
+- `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_PHONE`
+- `CORS_ORIGINS` = your frontend URL (e.g. `https://chatflow.vercel.app`)
+- `COOKIE_SECURE=true`, `COOKIE_SAMESITE=none`  (cross-site cookie over HTTPS)
+- `S3_BUCKET`, `S3_REGION`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`,
+  `AWS_SECRET_ACCESS_KEY`, `S3_PUBLIC_BASE_URL`
+
+> **Cookies gotcha.** Render gives the backend `*.onrender.com`. If your
+> frontend lives on a *different* domain (Vercel, Render Static Site, your own
+> domain) the browser treats the session cookie as cross-site, so you **must**
+> use `COOKIE_SECURE=true` + `COOKIE_SAMESITE=none`. With those settings the
+> cookie only works over HTTPS (which Render gives you for free).
+
+### 2. Frontend — Render Static Site (or Vercel)
+
+| Setting           | Value                                |
+| ----------------- | ------------------------------------ |
+| Root Directory    | `frontend`                           |
+| Build Command     | `yarn install && yarn build`         |
+| Publish Directory | `build`                              |
+
+Build-time environment variables (from [`frontend/.env.example`](./frontend/.env.example)):
+
+- `REACT_APP_BACKEND_URL` = your Render backend URL, e.g. `https://chatflow-api.onrender.com`
+
+After the first deploy:
+
+1. Visit the frontend, sign in with `ADMIN_PHONE` + `ADMIN_PASSWORD` from your env.
+2. Open **Profile → Change password** and set a strong password.
+3. Use the admin panel to create real employee / client accounts.

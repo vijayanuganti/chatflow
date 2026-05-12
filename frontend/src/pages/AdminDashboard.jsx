@@ -522,7 +522,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden pb-14 md:pb-0">
+      <div className="flex min-h-0 flex-1 overflow-hidden pb-[calc(56px+env(safe-area-inset-bottom))] md:pb-0">
         {/* Admin Nav */}
         <nav className="hidden md:flex w-20 lg:w-60 bg-emerald-950 text-emerald-100 flex-col py-6 px-3">
           <div className="flex items-center gap-3 px-2 mb-8">
@@ -648,10 +648,10 @@ export default function AdminDashboard() {
         {tab === "batches" && (
           <div className="flex min-h-0 flex-1 overflow-hidden" data-testid="admin-batches-pane">
             {/* Employees */}
-            <div className={`flex min-h-0 w-full flex-col border-r border-gray-200 bg-white md:w-72 ${mobileBatchesStep !== "employees" ? "hidden md:flex" : ""}`}>
-              <div className="p-4 border-b border-gray-200">
-                <h2 className="font-display font-semibold">Employees</h2>
-                <p className="text-xs text-gray-500">Pick an employee to view their batches.</p>
+            <div className={`flex min-h-0 w-full flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 md:w-72 ${mobileBatchesStep !== "employees" ? "hidden md:flex" : ""}`}>
+              <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+                <h2 className="font-display font-semibold dark:text-gray-100">Employees</h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Pick an employee to view their batches.</p>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {(employees || []).map((e) => (
@@ -663,29 +663,31 @@ export default function AdminDashboard() {
                       setMobileBatchesStep("batches");
                     }}
                     data-testid={`admin-employee-${e.id}`}
-                    className={`w-full flex items-center gap-3 p-3 hover:bg-gray-50 border-b border-gray-50 text-left ${
-                      selectedEmployee?.id === e.id ? "bg-emerald-50" : ""
+                    className={`w-full flex items-center gap-3 p-3 border-b border-gray-50 dark:border-gray-800/60 text-left transition-colors ${
+                      selectedEmployee?.id === e.id
+                        ? "bg-emerald-50 dark:bg-emerald-500/15"
+                        : "hover:bg-gray-50 dark:hover:bg-gray-800/60"
                     }`}
                   >
                     <Avatar name={e.full_name} avatarUrl={e.avatar_url} online={onlineUsers[e.id]} status={e.status} size={38} />
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{e.full_name}</div>
-                      <div className="text-xs text-gray-500">@{e.username}</div>
+                      <div className="font-medium text-sm truncate dark:text-gray-100">{e.full_name}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">@{e.username}</div>
                     </div>
                   </button>
                 ))}
                 {(employees || []).length === 0 && (
-                  <div className="p-6 text-sm text-gray-400">No employees found.</div>
+                  <div className="p-6 text-sm text-gray-400 dark:text-gray-500">No employees found.</div>
                 )}
               </div>
             </div>
 
             {/* Batches & clients */}
-            <div className={`flex min-h-0 w-full flex-col border-r border-gray-200 bg-white md:w-[420px] ${mobileBatchesStep !== "batches" ? "hidden md:flex" : ""}`}>
-              <div className="p-4 border-b border-gray-200 flex items-start justify-between gap-3">
+            <div className={`flex min-h-0 w-full flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 md:w-[420px] ${mobileBatchesStep !== "batches" ? "hidden md:flex" : ""}`}>
+              <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="font-display font-semibold">Batches</h2>
-                  <p className="text-xs text-gray-500 truncate">
+                  <h2 className="font-display font-semibold dark:text-gray-100">Batches</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                     {selectedEmployee ? `Batches for ${selectedEmployee.full_name}` : "Select an employee first."}
                   </p>
                 </div>
@@ -702,21 +704,21 @@ export default function AdminDashboard() {
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {!selectedEmployee ? (
-                  <div className="p-6 text-sm text-gray-400">Choose an employee to see batches.</div>
+                  <div className="p-6 text-sm text-gray-400 dark:text-gray-500">Choose an employee to see batches.</div>
                 ) : employeeBatches.length === 0 ? (
-                  <div className="p-6 text-sm text-gray-400">No batches for this employee.</div>
+                  <div className="p-6 text-sm text-gray-400 dark:text-gray-500">No batches for this employee.</div>
                 ) : (
                   employeeBatches.map((b) => (
-                    <div key={b.id} className="border-b border-gray-100">
+                    <div key={b.id} className="border-b border-gray-100 dark:border-gray-800/60">
                       <div className="px-4 py-3">
-                        <div className="font-medium">{b.name}</div>
-                        <div className="text-xs text-gray-500">{b.client_count || 0}/{b.max_clients || 20} clients</div>
+                        <div className="font-medium dark:text-gray-100">{b.name}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">{b.client_count || 0}/{b.max_clients || 20} clients</div>
                       </div>
                       <div className="pb-2">
                         {(b.clients || []).map((c) => (
                           <div
                             key={c.id}
-                            className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50"
+                            className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/60"
                             data-testid={`admin-batch-client-${b.id}-${c.id}`}
                           >
                             <button
@@ -729,8 +731,8 @@ export default function AdminDashboard() {
                             >
                               <Avatar name={c.full_name} avatarUrl={c.avatar_url} online={onlineUsers[c.id]} status={c.status} size={34} />
                               <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium truncate">{c.full_name}</div>
-                                <div className="text-xs text-gray-500 truncate">{c.conversation_last_message || "No messages yet"}</div>
+                                <div className="text-sm font-medium truncate dark:text-gray-100">{c.full_name}</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{c.conversation_last_message || "No messages yet"}</div>
                               </div>
                             </button>
                             <Button
@@ -754,7 +756,7 @@ export default function AdminDashboard() {
                           </div>
                         ))}
                         {(b.clients || []).length === 0 && (
-                          <div className="px-4 pb-3 text-xs text-gray-400">No clients yet.</div>
+                          <div className="px-4 pb-3 text-xs text-gray-400 dark:text-gray-500">No clients yet.</div>
                         )}
                       </div>
                     </div>
@@ -781,12 +783,12 @@ export default function AdminDashboard() {
 
         {(tab === "chats" || tab === "mychats") && (
           <div className="flex min-h-0 flex-1 overflow-hidden" data-testid={`admin-${tab}-pane`}>
-            <div className={`flex h-full min-h-0 w-full flex-col md:w-80 lg:w-96 ${mobileChatStep !== "list" ? "hidden md:flex" : ""}`}>
-              <div className="shrink-0 border-b border-gray-200 bg-white px-4 py-3">
-                <h2 className="font-display font-semibold">
+            <div className={`flex h-full min-h-0 w-full flex-col md:w-80 lg:w-96 bg-white dark:bg-gray-900 ${mobileChatStep !== "list" ? "hidden md:flex" : ""}`}>
+              <div className="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3">
+                <h2 className="font-display font-semibold dark:text-gray-100">
                   {tab === "chats" ? "Monitoring" : "My Chats"}
                 </h2>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
                   {tab === "chats" ? "Read-only view of all conversations" : "Conversations you're part of"}
                 </p>
               </div>
@@ -821,10 +823,10 @@ export default function AdminDashboard() {
 
         {tab === "activity" && (
           <div className="flex flex-1 overflow-hidden" data-testid="admin-activity-pane">
-            <div className={`w-full md:w-72 bg-white border-r border-gray-200 flex flex-col ${mobileActivityStep !== "list" ? "hidden md:flex" : ""}`}>
-              <div className="p-4 border-b border-gray-200">
-                <h2 className="font-display font-semibold">Employee activity</h2>
-                <p className="text-xs text-gray-500">Click a person to see their chats.</p>
+            <div className={`w-full md:w-72 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col ${mobileActivityStep !== "list" ? "hidden md:flex" : ""}`}>
+              <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+                <h2 className="font-display font-semibold dark:text-gray-100">Employee activity</h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Tap a person to see their chats.</p>
               </div>
               <div className="flex-1 overflow-y-auto">
                 {users.filter((u) => u.role !== "admin").map((u) => (
@@ -832,34 +834,36 @@ export default function AdminDashboard() {
                     key={u.id}
                     onClick={() => { loadActivity(u); setMobileActivityStep("detail"); }}
                     data-testid={`activity-user-${u.id}`}
-                    className={`w-full flex items-center gap-3 p-3 hover:bg-gray-50 border-b border-gray-50 text-left ${
-                      activityTarget?.id === u.id ? "bg-amber-50" : ""
+                    className={`w-full flex items-center gap-3 p-3 border-b border-gray-50 dark:border-gray-800/60 text-left transition-colors ${
+                      activityTarget?.id === u.id
+                        ? "bg-amber-50 dark:bg-amber-500/15"
+                        : "hover:bg-gray-50 dark:hover:bg-gray-800/60"
                     }`}
                   >
                     <Avatar name={u.full_name} avatarUrl={u.avatar_url} online={onlineUsers[u.id]} status={u.status} size={38} />
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{u.full_name}</div>
-                      <div className="text-xs text-gray-500 capitalize">{u.role}</div>
+                      <div className="font-medium text-sm truncate dark:text-gray-100">{u.full_name}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 capitalize">{u.role}</div>
                     </div>
                   </button>
                 ))}
               </div>
             </div>
-            <main className={`flex-1 overflow-y-auto ${mobileActivityStep !== "detail" ? "hidden md:block" : "block"}`}>
+            <main className={`flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 ${mobileActivityStep !== "detail" ? "hidden md:block" : "block"}`}>
               {!activityTarget ? (
-                <div className="h-full flex items-center justify-center text-gray-400 text-sm" data-testid="activity-empty">
+                <div className="h-full flex items-center justify-center text-gray-400 dark:text-gray-500 text-sm" data-testid="activity-empty">
                   Select a user from the left to view their activity.
                 </div>
               ) : !activityData ? (
-                <div className="p-10 text-gray-400">Loading activity...</div>
+                <div className="p-10 text-gray-400 dark:text-gray-500">Loading activity...</div>
               ) : (
                 <div className="p-4 sm:p-6 lg:p-10 space-y-6">
                   <div className="flex items-start gap-4">
                     <Avatar name={activityData.user.full_name} avatarUrl={activityData.user.avatar_url} online={onlineUsers[activityData.user.id]} status={activityData.user.status} size={64} />
-                    <div>
-                      <h1 className="font-display text-2xl font-semibold">{activityData.user.full_name}</h1>
-                      <div className="text-sm text-gray-500 capitalize">@{activityData.user.username} · {activityData.user.role}</div>
-                      {activityData.user.bio && <p className="mt-2 text-sm text-gray-600 max-w-md">{activityData.user.bio}</p>}
+                    <div className="min-w-0">
+                      <h1 className="font-display text-2xl font-semibold dark:text-gray-100 truncate">{activityData.user.full_name}</h1>
+                      <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">@{activityData.user.username} · {activityData.user.role}</div>
+                      {activityData.user.bio && <p className="mt-2 text-sm text-gray-600 dark:text-gray-300 max-w-md">{activityData.user.bio}</p>}
                     </div>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-lg">
@@ -867,17 +871,17 @@ export default function AdminDashboard() {
                     <StatCard icon={Activity} label="Messages sent" value={activityData.messages_sent} testId="activity-stat-msgs" accent="bg-amber-50 text-amber-900" />
                     <StatCard icon={Users} label="Groups" value={activityData.conversations.filter((c) => c.type === "group").length} testId="activity-stat-groups" accent="bg-violet-50 text-violet-900" />
                   </div>
-                  <div className="bg-white rounded-2xl border border-gray-200">
-                    <div className="px-5 py-4 border-b border-gray-100">
-                      <h3 className="font-display font-semibold">Conversations</h3>
+                  <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800">
+                    <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                      <h3 className="font-display font-semibold dark:text-gray-100">Conversations</h3>
                     </div>
-                    <div className="divide-y divide-gray-100">
+                    <div className="divide-y divide-gray-100 dark:divide-gray-800">
                       {activityData.conversations.map((c) => (
                         <button
                           key={c.id}
                           onClick={() => goToTab("chats", { selectedConv: c, mobileChatStep: "chat" })}
                           data-testid={`activity-conv-${c.id}`}
-                          className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50 text-left"
+                          className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/60 text-left"
                         >
                           <div className="flex -space-x-2">
                             {(c.participants_info || []).slice(0, 2).map((p) => (
@@ -885,16 +889,16 @@ export default function AdminDashboard() {
                             ))}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm truncate">
+                            <div className="font-medium text-sm truncate dark:text-gray-100">
                               {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(" ↔ ")}
                             </div>
-                            <div className="text-xs text-gray-500 truncate">{c.last_message || "No messages"}</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{c.last_message || "No messages"}</div>
                           </div>
                           <Eye className="h-4 w-4 text-gray-400" />
                         </button>
                       ))}
                       {activityData.conversations.length === 0 && (
-                        <div className="py-8 text-center text-sm text-gray-400">No conversations yet.</div>
+                        <div className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">No conversations yet.</div>
                       )}
                     </div>
                   </div>
@@ -1537,24 +1541,15 @@ export default function AdminDashboard() {
       />
       </div>
 
-      {/* Mobile bottom nav */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 h-14 bg-white border-t border-gray-200 flex items-center justify-around z-20" data-testid="admin-bottom-nav">
-        <button type="button" onClick={() => goToTab("batches", { mobileBatchesStep: "employees" })} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "batches" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-batches">
-          <Layers className="h-5 w-5" />
-          Batches
-        </button>
-        <button type="button" onClick={() => goToTab("chats", { mobileChatStep: "list" })} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "chats" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-monitor">
-          <Eye className="h-5 w-5" />
-          Monitor
-        </button>
-        <button type="button" onClick={() => goToTab("mychats", { mobileChatStep: "list" })} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "mychats" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-mychats">
-          <MessageSquare className="h-5 w-5" />
-          My chats
-        </button>
-        <button type="button" onClick={() => goToTab("users")} className={`flex-1 h-full text-[11px] flex flex-col items-center justify-center ${tab === "users" ? "text-emerald-900" : "text-gray-500"}`} data-testid="admin-nav-mobile-users">
-          <Users className="h-5 w-5" />
-          Users
-        </button>
+      {/* Mobile bottom nav (Flutter-style BottomNavigationBar) */}
+      <div
+        className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-950/95 backdrop-blur border-t border-gray-200 dark:border-gray-800 flex items-stretch justify-around z-20 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_18px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_18px_rgba(0,0,0,0.5)]"
+        data-testid="admin-bottom-nav"
+      >
+        <BottomNavButton icon={Layers} label="Batches" active={tab === "batches"} onClick={() => goToTab("batches", { mobileBatchesStep: "employees" })} testId="admin-nav-mobile-batches" />
+        <BottomNavButton icon={Eye} label="Monitor" active={tab === "chats"} onClick={() => goToTab("chats", { mobileChatStep: "list" })} testId="admin-nav-mobile-monitor" />
+        <BottomNavButton icon={MessageSquare} label="My chats" active={tab === "mychats"} onClick={() => goToTab("mychats", { mobileChatStep: "list" })} testId="admin-nav-mobile-mychats" />
+        <BottomNavButton icon={Users} label="Users" active={tab === "users"} onClick={() => goToTab("users")} testId="admin-nav-mobile-users" />
       </div>
     </div>
   );
@@ -1585,12 +1580,44 @@ function NavButton({ icon: Icon, label, active, onClick, testId, badge }) {
   );
 }
 
+function BottomNavButton({ icon: Icon, label, active, onClick, testId }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className="flex-1 h-14 min-h-[56px] flex flex-col items-center justify-center gap-0.5 select-none active:scale-[0.97] transition-transform"
+    >
+      <span
+        className={`flex items-center justify-center h-7 w-12 rounded-full transition-colors ${
+          active
+            ? "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300"
+            : "text-gray-500 dark:text-gray-400"
+        }`}
+      >
+        <Icon className="h-[18px] w-[18px]" strokeWidth={active ? 2.2 : 1.7} />
+      </span>
+      <span
+        className={`text-[10.5px] leading-none ${
+          active
+            ? "text-emerald-900 dark:text-emerald-300 font-semibold"
+            : "text-gray-500 dark:text-gray-400 font-medium"
+        }`}
+      >
+        {label}
+      </span>
+    </button>
+  );
+}
+
 function MobileTabButton({ label, active, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap border transition-colors ${
-        active ? "bg-emerald-900 border-emerald-900 text-white" : "bg-white border-gray-200 text-gray-700"
+      className={`px-3.5 py-1.5 rounded-full text-xs whitespace-nowrap border transition-all active:scale-[0.97] ${
+        active
+          ? "bg-emerald-900 border-emerald-900 text-white shadow-sm"
+          : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
       }`}
     >
       {label}
@@ -1925,20 +1952,20 @@ function NewBatchDialog({ open, onOpenChange, employee, onCreated }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-md p-4 sm:p-6" data-testid="admin-new-batch-dialog">
+      <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-md p-4 sm:p-6 bg-white dark:bg-gray-950" data-testid="admin-new-batch-dialog">
         <DialogHeader>
-          <DialogTitle className="font-display">Create batch</DialogTitle>
-          <DialogDescription>
+          <DialogTitle className="font-display dark:text-gray-100">Create batch</DialogTitle>
+          <DialogDescription className="dark:text-gray-400">
             New batch for {employee?.full_name || "this employee"}.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs text-gray-600" htmlFor="admin-new-batch-name">Batch name</label>
+            <label className="text-xs text-gray-600 dark:text-gray-300" htmlFor="admin-new-batch-name">Batch name</label>
             <input
               id="admin-new-batch-name"
               data-testid="admin-new-batch-name"
-              className="h-11 w-full rounded-xl border border-gray-200 px-3"
+              className="h-11 w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500 px-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Batch 1"
@@ -1946,14 +1973,14 @@ function NewBatchDialog({ open, onOpenChange, employee, onCreated }) {
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-gray-600" htmlFor="admin-new-batch-max">Max clients</label>
+            <label className="text-xs text-gray-600 dark:text-gray-300" htmlFor="admin-new-batch-max">Max clients</label>
             <input
               id="admin-new-batch-max"
               data-testid="admin-new-batch-max"
               type="number"
               min={1}
               max={500}
-              className="h-11 w-full rounded-xl border border-gray-200 px-3"
+              className="h-11 w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-100 px-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
               value={maxClients}
               onChange={(e) => setMaxClients(e.target.value)}
             />
@@ -2027,21 +2054,21 @@ function MoveClientDialog({ open, onOpenChange, client, currentEmployeeId, curre
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-md p-4 sm:p-6" data-testid="admin-move-client-dialog">
+      <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-md p-4 sm:p-6 bg-white dark:bg-gray-950" data-testid="admin-move-client-dialog">
         <DialogHeader>
-          <DialogTitle className="font-display">Move client</DialogTitle>
-          <DialogDescription>
+          <DialogTitle className="font-display dark:text-gray-100">Move client</DialogTitle>
+          <DialogDescription className="dark:text-gray-400">
             Reassign <span className="font-semibold">{client.full_name}</span> to another employee or batch.
             All chats and history follow them automatically.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs text-gray-600">Target employee</label>
+            <label className="text-xs text-gray-600 dark:text-gray-300">Target employee</label>
             <select
               value={targetEmployee}
               onChange={(e) => { setTargetEmployee(e.target.value); setTargetBatch(""); }}
-              className="h-11 w-full rounded-xl border border-gray-200 px-3 bg-white"
+              className="h-11 w-full rounded-xl border border-gray-200 dark:border-gray-700 px-3 bg-white dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
               data-testid="admin-move-employee-select"
             >
               <option value="">Select employee…</option>
@@ -2053,12 +2080,12 @@ function MoveClientDialog({ open, onOpenChange, client, currentEmployeeId, curre
             </select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-gray-600">Target batch</label>
+            <label className="text-xs text-gray-600 dark:text-gray-300">Target batch</label>
             <select
               value={targetBatch}
               onChange={(e) => setTargetBatch(e.target.value)}
               disabled={!targetEmployee || loadingBatches}
-              className="h-11 w-full rounded-xl border border-gray-200 px-3 bg-white disabled:bg-gray-50"
+              className="h-11 w-full rounded-xl border border-gray-200 dark:border-gray-700 px-3 bg-white dark:bg-gray-900 dark:text-gray-100 disabled:bg-gray-50 dark:disabled:bg-gray-800/60 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
               data-testid="admin-move-batch-select"
             >
               <option value="">

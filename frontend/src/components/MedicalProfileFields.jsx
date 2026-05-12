@@ -358,9 +358,9 @@ export function MedicalProfileReadOnly({ profile }) {
   );
   if (empty) {
     return (
-      <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-6 text-center" data-testid="med-empty">
-        <p className="text-sm font-medium text-gray-700">No medical profile on file yet</p>
-        <p className="text-xs text-gray-500 mt-1">
+      <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 p-6 text-center" data-testid="med-empty">
+        <p className="text-sm font-medium text-gray-700 dark:text-gray-200">No medical profile on file yet</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
           Your administrator will add your medical details. You'll see them here once they do.
         </p>
       </div>
@@ -389,11 +389,11 @@ export function MedicalProfileReadOnly({ profile }) {
   ];
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white divide-y divide-gray-100" data-testid="med-readonly">
+    <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800" data-testid="med-readonly">
       {rows.map(([label, key]) => (
         <div key={key} className="px-4 py-2.5 grid grid-cols-3 gap-3 items-start">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500 col-span-1">{label}</div>
-          <div className="text-sm text-gray-800 col-span-2 whitespace-pre-wrap break-words" data-testid={`med-ro-${key}`}>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400 col-span-1">{label}</div>
+          <div className="text-sm text-gray-800 dark:text-gray-200 col-span-2 whitespace-pre-wrap break-words" data-testid={`med-ro-${key}`}>
             {humanizeMedicalValue(key, profile[key])}
           </div>
         </div>
@@ -404,8 +404,8 @@ export function MedicalProfileReadOnly({ profile }) {
 
 function Section({ title, children }) {
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
-      <div className="text-[11px] uppercase tracking-[0.2em] text-emerald-900/70 font-medium">{title}</div>
+    <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
+      <div className="text-[11px] uppercase tracking-[0.2em] text-emerald-900/70 dark:text-emerald-300 font-medium">{title}</div>
       {children}
     </div>
   );
@@ -414,7 +414,7 @@ function Section({ title, children }) {
 function Field({ label, children }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs text-gray-600">{label}</Label>
+      <Label className="text-xs text-gray-600 dark:text-gray-300">{label}</Label>
       {children}
     </div>
   );
