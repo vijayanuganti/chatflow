@@ -7,8 +7,13 @@ import CreateAccountDialog from "@/components/CreateAccountDialog";
 import ComplaintDialog from "@/components/ComplaintDialog";
 import TopBar from "@/components/TopBar";
 import useChatSocket from "@/hooks/useChatSocket";
+import useDoubleBackToExit from "@/hooks/useDoubleBackToExit";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import {
+  ensureNotificationPermission,
+  showAppNotification,
+} from "@/lib/notify";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 
@@ -98,19 +103,26 @@ export default function ChatApp() {
   }, [selected?.id]);
 
   const maybeNotify = useCallback((msg) => {
-    if (!("Notification" in window)) return;
-    if (document.visibilityState === "visible") return;
-    if (Notification.permission !== "granted") return;
     if (!msg) return;
     // Only notify if I'm a recipient
     if (!Array.isArray(msg.recipient_ids) || !msg.recipient_ids.includes(user.id)) return;
-    const title = "New message";
-    const body = msg.message_type === "text" ? (msg.content || "") : `[${msg.message_type}]`;
-    try {
-      new Notification(title, { body });
-    } catch {
-      // ignore
-    }
+    // If the user is already looking at this conversation, no popup needed.
+    if (document.visibilityState === "visible" && selectedIdRef.current === msg.conversation_id) return;
+
+    const sender = msg.sender_name || "Someone";
+    const preview = msg.message_type === "text"
+      ? (msg.content || "")
+      : `[${msg.message_type}]`;
+    const title = msg.conversation_type === "group"
+      ? `${sender} (group)`
+      : sender;
+    showAppNotification({
+      title,
+      body: preview,
+      tag: `conv-${msg.conversation_id}`,
+      url: "/chat",
+      data: { conversation_id: msg.conversation_id },
+    });
   }, [user.id]);
 
   const handleIncomingMessage = useCallback((msg) => {
@@ -217,13 +229,29 @@ export default function ChatApp() {
     enabled: Boolean(user?.id),
   });
 
-  // Browser notifications (basic)
+  // Ask once for OS notification permission so Chrome can surface them like
+  // any other app would. Result is cached by the browser per origin.
   useEffect(() => {
-    if (!("Notification" in window)) return;
-    if (Notification.permission === "default") {
-      // Don't block; ask politely once
-      Notification.requestPermission().catch(() => {});
-    }
+    ensureNotificationPermission();
+  }, []);
+
+  // When the user clicks a notification, the SW asks us to focus the right
+  // conversation. The SW also focused the tab/opened a new one.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    const onMessage = (event) => {
+      const payload = event?.data;
+      if (!payload || payload.type !== "chatflow:notification-click") return;
+      const convId = payload.data?.conversation_id;
+      if (!convId) return;
+      setConversations((prev) => {
+        const target = prev.find((c) => c.id === convId);
+        if (target) setSelected(target);
+        return prev;
+      });
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
   }, []);
 
   const sendTyping = useCallback((conversationId, isTyping) => {
@@ -385,6 +413,18 @@ export default function ChatApp() {
   useEffect(() => {
     document.title = unreadTotal > 0 ? `(${unreadTotal}) ChatFlow` : "ChatFlow";
   }, [unreadTotal]);
+
+  // System back button: first press while a chat is open returns to the
+  // conversation list; otherwise the second press within 2 seconds exits.
+  useDoubleBackToExit({
+    onBeforeExitBack: () => {
+      if (selectedIdRef.current) {
+        setSelected(null);
+        return true;
+      }
+      return false;
+    },
+  });
 
   return (
     <div className="flex h-dvh w-full min-h-0 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950" data-testid="chat-app">

@@ -6,7 +6,12 @@ import NewChatDialog from "@/components/NewChatDialog";
 import ProfileDialog from "@/components/ProfileDialog";
 import TopBar from "@/components/TopBar";
 import useChatSocket from "@/hooks/useChatSocket";
+import useDoubleBackToExit from "@/hooks/useDoubleBackToExit";
 import { api, formatApiError } from "@/lib/api";
+import {
+  ensureNotificationPermission,
+  showAppNotification,
+} from "@/lib/notify";
 import { toast } from "sonner";
 import {
   Users, MessageSquare, Briefcase, UserCircle2, LayoutDashboard,
@@ -223,6 +228,33 @@ export default function AdminDashboard() {
 
   useEffect(() => { loadOverview(); }, [loadOverview]);
   useEffect(() => { loadEmployees(); }, [loadEmployees]);
+
+  // Ask once for OS notification permission so admins get Chrome-style alerts
+  // for messages in conversations they are part of.
+  useEffect(() => {
+    ensureNotificationPermission();
+  }, []);
+
+  // Service worker tells us when the admin taps a chat notification — jump to
+  // My Chats and focus that conversation.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    const onMessage = (event) => {
+      const payload = event?.data;
+      if (!payload || payload.type !== "chatflow:notification-click") return;
+      const convId = payload.data?.conversation_id;
+      if (!convId) return;
+      setMyConvs((prev) => {
+        const target = prev.find((c) => c.id === convId);
+        if (target) {
+          goToTab("mychats", { selectedConv: target, mobileChatStep: "chat" });
+        }
+        return prev;
+      });
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, [goToTab]);
   useEffect(() => {
     if (tab !== "complaints") return;
     loadComplaints();
@@ -342,6 +374,30 @@ export default function AdminDashboard() {
 
   const handleIncoming = useCallback((msg) => {
     const activeId = selectedIdRef.current;
+    // Surface a Chrome-style OS notification when the admin isn't already
+    // looking at this conversation. Admins are notified for chats they
+    // participate in (anything where they are a recipient).
+    if (
+      msg &&
+      Array.isArray(msg.recipient_ids) &&
+      msg.recipient_ids.includes(user.id) &&
+      !(document.visibilityState === "visible" && activeId === msg.conversation_id)
+    ) {
+      const sender = msg.sender_name || "Someone";
+      const preview = msg.message_type === "text"
+        ? (msg.content || "")
+        : `[${msg.message_type}]`;
+      const title = msg.conversation_type === "group"
+        ? `${sender} (group)`
+        : sender;
+      showAppNotification({
+        title,
+        body: preview,
+        tag: `conv-${msg.conversation_id}`,
+        url: "/admin/mychats",
+        data: { conversation_id: msg.conversation_id },
+      });
+    }
     setMessages((prev) => {
       if (activeId && msg.conversation_id === activeId && !prev.some((m) => m.id === msg.id)) {
         return [...prev, msg];
@@ -496,9 +552,56 @@ export default function AdminDashboard() {
     return undefined;
   })();
 
+  // True when the mobile UI is showing a full-screen chat: in that mode we
+  // hide the global topbar, the horizontal tab scroller and the bottom nav so
+  // only the chat header + composer is visible (WhatsApp-style).
+  const mobileInChat = (
+    ((tab === "chats" || tab === "mychats") && mobileChatStep === "chat") ||
+    (tab === "batches" && mobileBatchesStep === "chat")
+  );
+  const backToBatchesChat = useCallback(() => {
+    setSelected(null);
+    setMobileBatchesStep("batches");
+  }, []);
+  const backToChatList = useCallback(() => {
+    setSelected(null);
+    setMobileChatStep("list");
+  }, []);
+
+  // System back button on mobile / TWA: collapse any drill-down (chat view,
+  // employee panel, etc.) before falling through to the "press back again to
+  // exit" prompt.
+  useDoubleBackToExit({
+    onBeforeExitBack: () => {
+      if (mobileInChat) {
+        if (tab === "batches") {
+          backToBatchesChat();
+        } else {
+          backToChatList();
+        }
+        return true;
+      }
+      if (tab === "batches" && mobileBatchesStep === "batches") {
+        setMobileBatchesStep("employees");
+        return true;
+      }
+      if (tab === "activity" && mobileActivityStep === "detail") {
+        setActivityTarget(null);
+        setActivityData(null);
+        setMobileActivityStep("list");
+        return true;
+      }
+      if (tab !== "overview") {
+        goToTab("overview");
+        return true;
+      }
+      return false;
+    },
+  });
+
   return (
     <div className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100" data-testid="admin-dashboard">
-      <div className="shrink-0">
+      <div className={`shrink-0 ${mobileInChat ? "hidden md:block" : ""}`}>
         <TopBar
           onOpenSettings={() => setProfileOpen(true)}
           title={topbarTitle}
@@ -508,7 +611,7 @@ export default function AdminDashboard() {
         />
       </div>
 
-      <div className="shrink-0 overflow-x-auto border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-2 py-2 md:hidden" data-testid="admin-mobile-tabs">
+      <div className={`shrink-0 overflow-x-auto border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-2 py-2 md:hidden ${mobileInChat ? "hidden" : ""}`} data-testid="admin-mobile-tabs">
         <div className="flex gap-2 min-w-max">
           <MobileTabButton label="Overview" active={tab === "overview"} onClick={() => goToTab("overview")} />
           <MobileTabButton label="Accounts" active={tab === "accounts"} onClick={() => goToTab("accounts")} />
@@ -522,7 +625,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden pb-[calc(56px+env(safe-area-inset-bottom))] md:pb-0">
+      <div className={`flex min-h-0 flex-1 overflow-hidden ${mobileInChat ? "pb-0" : "pb-[calc(56px+env(safe-area-inset-bottom))]"} md:pb-0`}>
         {/* Admin Nav */}
         <nav className="hidden md:flex w-20 lg:w-60 bg-emerald-950 text-emerald-100 flex-col py-6 px-3">
           <div className="flex items-center gap-3 px-2 mb-8">
@@ -649,7 +752,7 @@ export default function AdminDashboard() {
           <div className="flex min-h-0 flex-1 overflow-hidden" data-testid="admin-batches-pane">
             {/* Employees */}
             <div className={`flex min-h-0 w-full flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 md:w-72 ${mobileBatchesStep !== "employees" ? "hidden md:flex" : ""}`}>
-              <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+              <div className="hidden md:block p-4 border-b border-gray-200 dark:border-gray-800">
                 <h2 className="font-display font-semibold dark:text-gray-100">Employees</h2>
                 <p className="text-xs text-gray-500 dark:text-gray-400">Pick an employee to view their batches.</p>
               </div>
@@ -776,6 +879,7 @@ export default function AdminDashboard() {
                 lastSeenByUser={lastSeenByUser}
                 sendTyping={sendTyping}
                 readOnly
+                onBack={backToBatchesChat}
               />
             </main>
           </div>
@@ -784,7 +888,7 @@ export default function AdminDashboard() {
         {(tab === "chats" || tab === "mychats") && (
           <div className="flex min-h-0 flex-1 overflow-hidden" data-testid={`admin-${tab}-pane`}>
             <div className={`flex h-full min-h-0 w-full flex-col md:w-80 lg:w-96 bg-white dark:bg-gray-900 ${mobileChatStep !== "list" ? "hidden md:flex" : ""}`}>
-              <div className="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3">
+              <div className="hidden md:block shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3">
                 <h2 className="font-display font-semibold dark:text-gray-100">
                   {tab === "chats" ? "Monitoring" : "My Chats"}
                 </h2>
@@ -815,7 +919,7 @@ export default function AdminDashboard() {
                 lastSeenByUser={lastSeenByUser}
                 sendTyping={sendTyping}
                 readOnly={tab === "chats" && !isSelectedAdminChat}
-                onBack={() => { setSelected(null); setMobileChatStep("list"); }}
+                onBack={backToChatList}
               />
             </main>
           </div>
@@ -824,7 +928,7 @@ export default function AdminDashboard() {
         {tab === "activity" && (
           <div className="flex flex-1 overflow-hidden" data-testid="admin-activity-pane">
             <div className={`w-full md:w-72 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col ${mobileActivityStep !== "list" ? "hidden md:flex" : ""}`}>
-              <div className="p-4 border-b border-gray-200 dark:border-gray-800">
+              <div className="hidden md:block p-4 border-b border-gray-200 dark:border-gray-800">
                 <h2 className="font-display font-semibold dark:text-gray-100">Employee activity</h2>
                 <p className="text-xs text-gray-500 dark:text-gray-400">Tap a person to see their chats.</p>
               </div>
@@ -1543,7 +1647,7 @@ export default function AdminDashboard() {
 
       {/* Mobile bottom nav (Flutter-style BottomNavigationBar) */}
       <div
-        className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-950/95 backdrop-blur border-t border-gray-200 dark:border-gray-800 flex items-stretch justify-around z-20 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_18px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_18px_rgba(0,0,0,0.5)]"
+        className={`md:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-950/95 backdrop-blur border-t border-gray-200 dark:border-gray-800 items-stretch justify-around z-20 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_18px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_18px_rgba(0,0,0,0.5)] ${mobileInChat ? "hidden" : "flex"}`}
         data-testid="admin-bottom-nav"
       >
         <BottomNavButton icon={Layers} label="Batches" active={tab === "batches"} onClick={() => goToTab("batches", { mobileBatchesStep: "employees" })} testId="admin-nav-mobile-batches" />
