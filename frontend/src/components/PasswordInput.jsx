@@ -12,7 +12,16 @@ import { cn } from "@/lib/utils";
  * - any other props (value, onChange, placeholder, ...) are forwarded
  */
 const PasswordInput = forwardRef(function PasswordInput(
-  { leftIcon: LeftIcon = Lock, className, ...rest },
+  {
+    leftIcon: LeftIcon = Lock,
+    className,
+    // Default to "new-password": tells Chrome / 1Password etc. this field
+    // is being filled in by the user, NOT autofilled from saved
+    // credentials. The Login form opts back in to "current-password" so
+    // password managers still autofill there.
+    autoComplete = "new-password",
+    ...rest
+  },
   ref,
 ) {
   const [visible, setVisible] = useState(false);
@@ -20,12 +29,13 @@ const PasswordInput = forwardRef(function PasswordInput(
   return (
     <div className="relative">
       {LeftIcon && (
-        <LeftIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+        <LeftIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500 pointer-events-none" />
       )}
       <Input
         ref={ref}
         type={visible ? "text" : "password"}
         className={cn(LeftIcon ? "pl-10 pr-11" : "pr-11", className)}
+        autoComplete={autoComplete}
         {...rest}
       />
       <button
@@ -35,7 +45,7 @@ const PasswordInput = forwardRef(function PasswordInput(
         aria-pressed={visible}
         onClick={() => setVisible((v) => !v)}
         data-testid="password-toggle-btn"
-        className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full flex items-center justify-center text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+        className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full flex items-center justify-center text-gray-500 hover:text-gray-800 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800"
       >
         {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
       </button>

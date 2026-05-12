@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Paperclip,
   Send,
@@ -49,6 +49,7 @@ export default function ChatWindow({
   const [recording, setRecording] = useState(false);
   const [attachOpen, setAttachOpen] = useState(false);
   const scrollRef = useRef(null);
+  const composerRef = useRef(null);
   const photoInputRef = useRef(null);
   const videoInputRef = useRef(null);
   const docInputRef = useRef(null);
@@ -58,11 +59,98 @@ export default function ChatWindow({
   const [medicalOpen, setMedicalOpen] = useState(false);
   const [dietOpen, setDietOpen] = useState(false);
 
+  /* Only show messages that actually belong to the currently-open
+     conversation. Without this, switching from chat A → chat B briefly
+     renders chat A's messages with chat B's header (because the parent
+     refetches asynchronously), which is what made some chats open in the
+     middle of an older thread. */
+  const visibleMessages = useMemo(
+    () => (messages || []).filter(
+      (m) => !conversation?.id || m.conversation_id === conversation.id,
+    ),
+    [messages, conversation?.id],
+  );
+
+  /* Track whether the user is "near the bottom" so we only auto-scroll when
+     it would feel natural. If they've scrolled up to read history we leave
+     them alone. */
+  const stickToBottomRef = useRef(true);
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, typingUsers]);
+    const el = scrollRef.current;
+    if (!el) return undefined;
+    const onScroll = () => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      stickToBottomRef.current = dist < 80;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  /* Helper: pin the scroll container to the bottom across multiple frames.
+     One write isn't enough on slow phones because images/videos finish
+     laying out a beat after React commits, which would otherwise leave the
+     user mid-conversation. */
+  const pinToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    requestAnimationFrame(() => {
+      const e2 = scrollRef.current;
+      if (e2) e2.scrollTop = e2.scrollHeight;
+      requestAnimationFrame(() => {
+        const e3 = scrollRef.current;
+        if (e3) e3.scrollTop = e3.scrollHeight;
+      });
+    });
+  }, []);
+
+  /* When the open conversation changes, jump straight to the latest message
+     (no smooth scroll). useLayoutEffect runs before paint so the user never
+     glimpses the middle of the thread. */
+  useLayoutEffect(() => {
+    stickToBottomRef.current = true;
+    pinToBottom();
+  }, [conversation?.id, pinToBottom]);
+
+  /* Once the new conversation's messages arrive, do a settle-pass to make
+     sure the latest bubble is fully in view even if the previous render
+     beat the data. We do this whenever the visible-messages count changes
+     so newly-arrived messages also keep the user at the bottom (when
+     anchored). */
+  useEffect(() => {
+    if (stickToBottomRef.current) pinToBottom();
+  }, [visibleMessages.length, typingUsers, pinToBottom]);
+
+  /* After the very last layout pass for the current conversation, force one
+     more pin on a short timer to defeat images that finish loading slightly
+     later. Cheap and bounded. */
+  useEffect(() => {
+    if (!conversation?.id) return undefined;
+    const timeouts = [80, 250, 700].map((ms) => setTimeout(() => {
+      if (stickToBottomRef.current) pinToBottom();
+    }, ms));
+    return () => timeouts.forEach(clearTimeout);
+  }, [conversation?.id, visibleMessages.length, pinToBottom]);
+
+  /* Images / videos / audio in the thread grow the scroll height once they
+     finish loading. If the user is still at the bottom we keep them pinned;
+     this is the WhatsApp behaviour where late-loading media doesn't strand
+     you mid-conversation. */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return undefined;
+    const reanchor = () => {
+      if (stickToBottomRef.current && scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    };
+    el.addEventListener("load", reanchor, true);
+    el.addEventListener("loadedmetadata", reanchor, true);
+    return () => {
+      el.removeEventListener("load", reanchor, true);
+      el.removeEventListener("loadedmetadata", reanchor, true);
+    };
+  }, []);
 
   useEffect(() => {
     lastTypingPingRef.current = 0;
@@ -120,6 +208,14 @@ export default function ChatWindow({
     });
     setText("");
     flushTypingStop();
+    // Keep the keyboard open after send (WhatsApp-style). Refocus on the
+    // next frame so the click that triggered us has fully settled — without
+    // this Android Chrome occasionally hides the keyboard between the
+    // button activation and the textarea re-render.
+    requestAnimationFrame(() => {
+      const el = composerRef.current;
+      if (el && document.activeElement !== el) el.focus();
+    });
   };
 
   const handleKey = (e) => {
@@ -378,12 +474,12 @@ export default function ChatWindow({
 
       {/* Messages */}
       <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5" data-testid="messages-container">
-        {messages.length === 0 && (
+        {visibleMessages.length === 0 && (
           <div className="text-center text-sm text-gray-400 py-10" data-testid="empty-messages">
             No messages yet. {readOnly ? "Conversation is quiet." : "Say hi!"}
           </div>
         )}
-        {messages.map((m) => {
+        {visibleMessages.map((m) => {
           // In admin read-only view, we still show messages aligned by sender:
           // a fixed "left" participant and "right" participant based on ordering
           let mine;
@@ -408,23 +504,6 @@ export default function ChatWindow({
           );
         })}
       </div>
-
-      {/* Composer: typing strip stays fixed above input on mobile */}
-      {!readOnly && othersTypingCount > 0 && (
-        <div
-          className="flex shrink-0 items-center gap-1 border-t border-emerald-100/90 bg-emerald-50/95 px-3 py-2 text-xs text-emerald-900/90"
-          data-testid="composer-typing-strip"
-        >
-          <span className="min-w-0 truncate">
-            {isGroup ? groupTypingLabel : `${directTypingName || "Someone"} is typing`}
-          </span>
-          <span className="inline-flex shrink-0 translate-y-px items-center gap-0.5">
-            <span className="typing-dot typing-dot-header" />
-            <span className="typing-dot typing-dot-header" />
-            <span className="typing-dot typing-dot-header" />
-          </span>
-        </div>
-      )}
 
       {/* Input */}
       {!readOnly && (
@@ -546,6 +625,7 @@ export default function ChatWindow({
                   </PopoverContent>
                 </Popover>
                 <Textarea
+                  ref={composerRef}
                   value={text}
                   onChange={(e) => handleTyping(e.target.value)}
                   onKeyDown={handleKey}
@@ -574,7 +654,15 @@ export default function ChatWindow({
             {!recording && text.trim() ? (
               <Button
                 size="icon"
+                type="button"
                 onClick={handleSendText}
+                // Don't steal focus from the composer when the user taps
+                // Send — that's what was dismissing the keyboard after each
+                // message. Preventing the default mousedown / pointerdown
+                // keeps the textarea focused, so the keyboard stays open
+                // exactly like WhatsApp.
+                onMouseDown={(e) => e.preventDefault()}
+                onPointerDown={(e) => e.preventDefault()}
                 data-testid="chat-send-btn"
                 className="h-10 w-10 rounded-full bg-emerald-900 hover:bg-emerald-950"
                 title="Send"

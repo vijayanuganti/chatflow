@@ -74,6 +74,12 @@ export default function AdminDashboard() {
     }
   }, [section, navigate]);
 
+  // The back-navigation hook is mounted further down so it can close over
+  // the latest state; we mirror its `pushSentinel` callback into this ref so
+  // earlier code (goToTab, drill-down handlers) can re-anchor the history
+  // sentinel after every navigate / replaceState call.
+  const pushSentinelRef = useRef(() => {});
+
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -128,10 +134,14 @@ export default function AdminDashboard() {
     if (mobileChatStep != null) setMobileChatStep(mobileChatStep);
     if (selectedConv !== undefined) setSelected(selectedConv);
     else if (t !== "chats" && t !== "mychats") setSelected(null);
-    // Always REPLACE the history entry so the browser Back button doesn't
-    // walk through every admin tab the user has visited (it would otherwise
-    // feel like Back "goes back to login" because of accumulated entries).
+    // REPLACE the history entry so the browser Back button doesn't walk
+    // through every admin tab the user has visited. The `replaceState` that
+    // react-router issues here also overwrites the back-navigation
+    // sentinel — so we immediately re-anchor it. Without this the next
+    // system Back press would pop the *previous* URL instead of letting our
+    // handler drill up one in-app step.
     navigate(pathForAdminTab(t), { replace: true });
+    pushSentinelRef.current?.();
   }, [navigate]);
 
   const loadOverview = useCallback(async () => {
@@ -283,8 +293,12 @@ export default function AdminDashboard() {
   }, [myConvs]);
 
   useEffect(() => {
+    // Clear immediately on every conversation switch so the user never sees
+    // the previous chat's history under the new chat's header. ChatWindow's
+    // scroll-to-bottom hooks pin to the latest message once the new data
+    // arrives.
+    setMessages([]);
     if (selected) loadMessages(selected.id);
-    else setMessages([]);
   }, [selected, loadMessages]);
 
   useEffect(() => {
@@ -570,10 +584,11 @@ export default function AdminDashboard() {
     setMobileChatStep("list");
   }, []);
 
-  // System back button on mobile / TWA: collapse any drill-down (chat view,
-  // employee panel, etc.) before falling through to the "press back again to
-  // exit" prompt.
-  useDoubleBackToExit({
+  // System back button on mobile / TWA: collapse drill-downs one step at a
+  // time (chat → list → tab → overview). At overview the back press is a
+  // no-op — the hook still re-pushes its sentinel so we stay on the page
+  // and never accidentally fall through to /login.
+  const pushSentinel = useDoubleBackToExit({
     onBeforeExitBack: () => {
       if (mobileInChat) {
         if (tab === "batches") {
@@ -600,6 +615,13 @@ export default function AdminDashboard() {
       return false;
     },
   });
+
+  // Make `pushSentinel` available to `goToTab` and to the drill-down setters
+  // declared above. The hook returns a stable callback, so wiring it into a
+  // ref keeps the layout-effect dependency lists clean.
+  useEffect(() => {
+    pushSentinelRef.current = pushSentinel;
+  }, [pushSentinel]);
 
   return (
     <div
@@ -770,6 +792,7 @@ export default function AdminDashboard() {
                       setSelectedEmployee(e);
                       loadEmployeeBatches(e.id);
                       setMobileBatchesStep("batches");
+                      pushSentinelRef.current?.();
                     }}
                     data-testid={`admin-employee-${e.id}`}
                     className={`w-full flex items-center gap-3 p-3 border-b border-gray-50 dark:border-gray-800/60 text-left transition-colors ${
@@ -835,6 +858,7 @@ export default function AdminDashboard() {
                               onClick={() => {
                                 setSelected({ id: c.conversation_id, type: "direct", participants: [selectedEmployee.id, c.id], other_user: c });
                                 setMobileBatchesStep("chat");
+                                pushSentinelRef.current?.();
                               }}
                               className="flex-1 flex items-center gap-3 text-left min-w-0"
                             >
@@ -906,7 +930,11 @@ export default function AdminDashboard() {
                 conversations={currentConvs}
                 onlineUsers={onlineUsers}
                 selectedId={selected?.id}
-                onSelect={(c) => { setSelected(c); setMobileChatStep("chat"); }}
+                onSelect={(c) => {
+                  setSelected(c);
+                  setMobileChatStep("chat");
+                  pushSentinelRef.current?.();
+                }}
                 onNewChat={() => setNewChatOpen(true)}
                 adminView={tab === "chats"}
                 batches={[]}
@@ -942,7 +970,7 @@ export default function AdminDashboard() {
                 {users.filter((u) => u.role !== "admin").map((u) => (
                   <button
                     key={u.id}
-                    onClick={() => { loadActivity(u); setMobileActivityStep("detail"); }}
+                    onClick={() => { loadActivity(u); setMobileActivityStep("detail"); pushSentinelRef.current?.(); }}
                     data-testid={`activity-user-${u.id}`}
                     className={`w-full flex items-center gap-3 p-3 border-b border-gray-50 dark:border-gray-800/60 text-left transition-colors ${
                       activityTarget?.id === u.id
@@ -1650,6 +1678,20 @@ export default function AdminDashboard() {
         }}
       />
       </div>
+
+      {/* Mobile "+" FAB for starting a new chat from My Chats list view.
+          Sits above the bottom nav. Hidden once a chat is opened. */}
+      {tab === "mychats" && mobileChatStep === "list" && (
+        <button
+          type="button"
+          onClick={() => setNewChatOpen(true)}
+          data-testid="admin-mychats-fab"
+          className="md:hidden fixed right-4 bottom-[calc(56px+env(safe-area-inset-bottom)+1rem)] h-12 w-12 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white shadow-lg flex items-center justify-center z-30"
+          title="New chat"
+        >
+          <Plus className="h-5 w-5" />
+        </button>
+      )}
 
       {/* Mobile bottom nav (Flutter-style BottomNavigationBar) */}
       <div

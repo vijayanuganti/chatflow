@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MessageCircle, Phone, User as UserIcon, Loader2, ShieldCheck, Search, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,13 +30,22 @@ function digitsOnly(value) {
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, user, loading } = useAuth();
   const [countryCode, setCountryCode] = useState(DEFAULT_COUNTRY_CODE);
   const [identifier, setIdentifier] = useState(""); // either phone digits or username
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [countryOpen, setCountryOpen] = useState(false);
   const [countryQuery, setCountryQuery] = useState("");
+
+  // If the user is already authenticated (e.g. they pressed the system Back
+  // button from inside the app and somehow landed here), bounce them right
+  // back to their dashboard instead of asking them to log in again.
+  useEffect(() => {
+    if (loading || !user) return;
+    const target = user.role === "admin" ? "/admin" : "/chat";
+    navigate(target, { replace: true });
+  }, [loading, user, navigate]);
 
   const country = getCountry(countryCode);
   const isUsername = useMemo(() => looksLikeUsername(identifier), [identifier]);
@@ -174,14 +183,16 @@ export default function LoginPage() {
                     data-testid="login-country-menu"
                   >
                     <div className="p-2 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2">
-                      <Search className="h-4 w-4 text-gray-400" />
+                      <Search className="h-4 w-4 text-gray-400 dark:text-gray-500" />
                       <input
                         autoFocus
                         value={countryQuery}
                         onChange={(e) => setCountryQuery(e.target.value)}
                         placeholder="Search country or code"
-                        className="flex-1 bg-transparent text-sm outline-none placeholder:text-gray-400 dark:text-gray-100"
+                        className="flex-1 bg-transparent text-sm outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500 dark:text-gray-100"
                         data-testid="login-country-search"
+                        autoComplete="off"
+                        spellCheck={false}
                       />
                     </div>
                     <div className="overflow-y-auto flex-1">

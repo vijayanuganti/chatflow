@@ -93,8 +93,12 @@ export default function ChatApp() {
   useEffect(() => { loadBatches(); }, [loadBatches]);
 
   useEffect(() => {
+    // Clear immediately on every conversation switch so the user never sees
+    // the previous chat's history under the new chat's header. ChatWindow's
+    // scroll-to-bottom hooks pin to the latest message once the new data
+    // arrives.
+    setMessages([]);
     if (selected) loadMessages(selected.id);
-    else setMessages([]);
   }, [selected, loadMessages]);
 
   useEffect(() => {
@@ -416,9 +420,12 @@ export default function ChatApp() {
     document.title = unreadTotal > 0 ? `(${unreadTotal}) ChatFlow` : "ChatFlow";
   }, [unreadTotal]);
 
-  // System back button: first press while a chat is open returns to the
-  // conversation list; otherwise the second press within 2 seconds exits.
-  useDoubleBackToExit({
+  // System back button: when a chat is open it returns to the conversation
+  // list. At the list itself the back press is trapped (the hook re-pushes
+  // its sentinel) so the user never falls back onto /login or some stale
+  // browser entry — they leave the app via the system home / task switcher
+  // just like a native app.
+  const pushSentinel = useDoubleBackToExit({
     onBeforeExitBack: () => {
       if (selectedIdRef.current) {
         setSelected(null);
@@ -427,6 +434,14 @@ export default function ChatApp() {
       return false;
     },
   });
+
+  // Whenever a new conversation is selected we re-anchor the sentinel so a
+  // subsequent system Back press is guaranteed to land in our handler (and
+  // thus close the chat) rather than walk through the browser's accumulated
+  // history.
+  useEffect(() => {
+    if (selected?.id) pushSentinel();
+  }, [selected?.id, pushSentinel]);
 
   return (
     <div

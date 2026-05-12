@@ -74,26 +74,33 @@ export default function NewChatDialog({ open, onOpenChange, onSelectUser, onCrea
 
           <TabsContent value="direct" className="mt-4">
             <div className="relative mb-2">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people" className="pl-9 h-10 rounded-xl bg-gray-50" data-testid="new-chat-search-input" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500 pointer-events-none" />
+              <Input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search people"
+                className="pl-9 h-10 rounded-xl bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                data-testid="new-chat-search-input"
+                type="search"
+              />
             </div>
             <div className="max-h-72 overflow-y-auto -mx-2">
               {loading ? (
-                <div className="py-8 text-center text-sm text-gray-400"><Loader2 className="h-5 w-5 animate-spin inline" /></div>
+                <div className="py-8 text-center text-sm text-gray-400 dark:text-gray-500"><Loader2 className="h-5 w-5 animate-spin inline" /></div>
               ) : filtered.length === 0 ? (
-                <div className="py-8 text-center text-sm text-gray-400">No contacts available.</div>
+                <div className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">No contacts available.</div>
               ) : (
                 filtered.map((u) => (
                   <button
                     key={u.id}
                     onClick={() => onSelectUser(u)}
                     data-testid={`new-chat-user-${u.id}`}
-                    className="w-full px-3 py-2.5 flex items-center gap-3 hover:bg-gray-50 rounded-xl text-left"
+                    className="w-full px-3 py-2.5 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-800/60 rounded-xl text-left"
                   >
                     <Avatar name={u.full_name} avatarUrl={u.avatar_url} online={!!onlineUsers[u.id]} status={u.status} size={40} />
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate">{u.full_name}</div>
-                      <div className="text-xs text-gray-500 capitalize">@{u.username} · {u.role}</div>
+                      <div className="font-medium truncate dark:text-gray-100">{u.full_name}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 capitalize">@{u.username} · {u.role}</div>
                     </div>
                   </button>
                 ))
@@ -112,15 +119,22 @@ export default function NewChatDialog({ open, onOpenChange, onSelectUser, onCrea
               />
             </div>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search members to add" className="pl-9 h-10 rounded-xl bg-gray-50" data-testid="group-search-input" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500 pointer-events-none" />
+              <Input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search members to add"
+                className="pl-9 h-10 rounded-xl bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                data-testid="group-search-input"
+                type="search"
+              />
             </div>
             {Object.keys(selectedMembers).length > 0 && (
-              <div className="flex flex-wrap gap-1.5 p-2 bg-emerald-50/60 rounded-xl border border-emerald-100">
+              <div className="flex flex-wrap gap-1.5 p-2 bg-emerald-50/60 rounded-xl border border-emerald-100 dark:bg-emerald-500/10 dark:border-emerald-500/30">
                 {Object.values(selectedMembers).map((m) => (
-                  <span key={m.id} className="text-xs bg-white border border-emerald-200 rounded-full px-2 py-1 flex items-center gap-1">
+                  <span key={m.id} className="text-xs bg-white border border-emerald-200 rounded-full px-2 py-1 flex items-center gap-1 dark:bg-gray-900 dark:border-emerald-500/40 dark:text-emerald-100">
                     {m.full_name}
-                    <button onClick={() => toggleMember(m)} className="text-gray-400 hover:text-gray-700" data-testid={`remove-member-${m.id}`}>×</button>
+                    <button onClick={() => toggleMember(m)} className="text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-200" data-testid={`remove-member-${m.id}`}>×</button>
                   </span>
                 ))}
               </div>
@@ -133,14 +147,18 @@ export default function NewChatDialog({ open, onOpenChange, onSelectUser, onCrea
                     key={u.id}
                     onClick={() => toggleMember(u)}
                     data-testid={`group-member-${u.id}`}
-                    className={`w-full px-3 py-2 flex items-center gap-3 hover:bg-gray-50 rounded-xl text-left ${selected ? "bg-emerald-50" : ""}`}
+                    className={`w-full px-3 py-2 flex items-center gap-3 rounded-xl text-left ${
+                      selected
+                        ? "bg-emerald-50 dark:bg-emerald-500/15"
+                        : "hover:bg-gray-50 dark:hover:bg-gray-800/60"
+                    }`}
                   >
                     <Avatar name={u.full_name} avatarUrl={u.avatar_url} online={!!onlineUsers[u.id]} size={36} />
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium truncate text-sm">{u.full_name}</div>
-                      <div className="text-xs text-gray-500 capitalize">@{u.username} · {u.role}</div>
+                      <div className="font-medium truncate text-sm dark:text-gray-100">{u.full_name}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 capitalize">@{u.username} · {u.role}</div>
                     </div>
-                    {selected && <Check className="h-4 w-4 text-emerald-700" />}
+                    {selected && <Check className="h-4 w-4 text-emerald-700 dark:text-emerald-300" />}
                   </button>
                 );
               })}

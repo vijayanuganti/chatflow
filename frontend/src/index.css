@@ -84,6 +84,38 @@ h1, h2, h3, h4, h5, h6, .font-display {
     }
 }
 
+/*
+ * App-like UX: stop the browser from selecting labels / nav items / message
+ * metadata when the user just taps something. Inputs, textareas, and the
+ * actual chat-message body keep their selection (so editing still works and
+ * users can still long-press to copy a message, WhatsApp-style).
+ */
+html, body {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+}
+
+input,
+textarea,
+select,
+[contenteditable="true"],
+[contenteditable=""],
+.allow-select,
+.bubble-sent,
+.bubble-received,
+.bubble-sent *,
+.bubble-received * {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+}
+
 /* Keep scrolling behavior but make all scrollbars invisible */
 * {
     -ms-overflow-style: none;

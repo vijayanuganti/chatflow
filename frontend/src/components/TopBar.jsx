@@ -54,7 +54,7 @@ export default function TopBar({
           <Button
             size="sm"
             variant="outline"
-            className="rounded-full hidden sm:inline-flex border-emerald-200 text-emerald-900 hover:bg-emerald-50"
+            className="rounded-full hidden sm:inline-flex border-emerald-200 bg-white text-emerald-900 hover:bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/25"
             onClick={onCreateAccount}
             data-testid="topbar-create-account-btn"
             title="Create a new account"

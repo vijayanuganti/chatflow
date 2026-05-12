@@ -112,13 +112,14 @@ export default function ChatSidebar({
       {/* Search */}
       <div className="p-3 border-b border-gray-100 dark:border-gray-800">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500 pointer-events-none" />
           <Input
             data-testid="chat-search-input"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search conversations"
-            className="pl-9 bg-gray-50 dark:bg-gray-900 dark:text-gray-100 rounded-xl border-gray-200 dark:border-gray-700 h-10"
+            className="pl-9 h-10 rounded-xl bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+            type="search"
           />
         </div>
       </div>
