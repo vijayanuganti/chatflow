@@ -1,70 +1,50 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { api } from "../lib/api";
+import React, { useCallback, useContext, useEffect, useState } from "react";
+import {
+  api,
+  clearAuthSession,
+  getStoredAccessToken,
+  setStoredAccessToken,
+  setStoredUser,
+  AUTH_TOKEN_KEY,
+  AUTH_USER_KEY,
+  AUTH_REMEMBER_KEY,
+} from "../lib/api";
 
-const AuthContext = createContext(null);
+const AuthContext = React.createContext(null);
 
 /**
- * Per-tab session marker.
- *
- * ChatFlow authenticates via an HttpOnly cookie. Cookies are shared between
- * tabs / windows on the same browser, so a user who copies their URL and
- * pastes it in another tab would normally appear logged in.
- *
- * To stop that, we gate every page load on a `sessionStorage` marker that
- * was set during the explicit `login()` flow. `sessionStorage` is per-tab:
- *   - a refresh (F5) of the same tab keeps the marker → user stays logged in
- *   - opening a new tab gets an empty `sessionStorage` → we force a logout
- *     (clear the server cookie) and bounce to /login
- *
- * The marker also doubles as cross-tab logout: if one tab logs out, others
- * detect the change via the `storage` event and drop their session too.
+ * JWT is kept in `sessionStorage` for every tab. When "Stay signed in" is on
+ * (default), a copy is also kept in `localStorage` so new tabs in the same
+ * Chrome profile stay signed in. Each Chrome **profile** has its own storage;
+ * switching Gmail inside one Chrome user does not create a new profile.
  */
-const TAB_SESSION_KEY = "cf_tab_session";
-
-function startTabSession() {
-  try {
-    sessionStorage.setItem(TAB_SESSION_KEY, "1");
-  } catch {
-    // ignore (private browsing edge cases)
-  }
-}
-
-function hasTabSession() {
-  try {
-    return sessionStorage.getItem(TAB_SESSION_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function clearTabSession() {
-  try {
-    sessionStorage.removeItem(TAB_SESSION_KEY);
-  } catch {
-    // ignore
-  }
-}
-
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  const [user, setUserState] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Boot-time: only trust the cookie if this tab has been authenticated.
+  /** Updates React state and mirrors the user into storage when non-null. */
+  const setUser = useCallback((next) => {
+    setUserState(next);
+    const remember = (() => {
+      try {
+        const r = (localStorage.getItem(AUTH_REMEMBER_KEY) || "").trim();
+        if (r === "0") return false;
+        return true;
+      } catch {
+        return true;
+      }
+    })();
+    if (next) setStoredUser(next, remember);
+    else clearAuthSession();
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
     async function boot() {
-      if (!hasTabSession()) {
-        // New tab / URL pasted: pre-emptively clear any inherited cookie so the
-        // user must sign in again here. Failure is fine — the cookie might
-        // already be invalid / missing.
-        try {
-          await api.post("/auth/logout");
-        } catch {
-          // ignore
-        }
+      if (!getStoredAccessToken()) {
         if (!cancelled) {
-          setUser(null);
+          setUserState(null);
           setLoading(false);
         }
         return;
@@ -72,11 +52,25 @@ export function AuthProvider({ children }) {
 
       try {
         const res = await api.get("/auth/verify");
-        if (!cancelled) setUser(res.data?.user || null);
+        if (!cancelled) {
+          const u = res.data?.user || null;
+          setUserState(u);
+          if (u) {
+            const remember = (() => {
+              try {
+                const r = (localStorage.getItem(AUTH_REMEMBER_KEY) || "").trim();
+                if (r === "0") return false;
+                return true;
+              } catch {
+                return true;
+              }
+            })();
+            setStoredUser(u, remember);
+          }
+        }
       } catch {
-        // Cookie expired or invalid → drop the tab marker too.
-        clearTabSession();
-        if (!cancelled) setUser(null);
+        clearAuthSession();
+        if (!cancelled) setUserState(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -88,30 +82,69 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  // Cross-tab logout: if another tab logs out (clears the marker), drop here too.
+  // Cross-tab: shared `localStorage` changes (logout / login in another tab).
   useEffect(() => {
-    function onStorage(e) {
-      if (e.key === TAB_SESSION_KEY && !e.newValue) {
-        setUser(null);
+    function readRemember() {
+      try {
+        const r = (localStorage.getItem(AUTH_REMEMBER_KEY) || "").trim();
+        if (r === "0") return false;
+        return true;
+      } catch {
+        return true;
       }
+    }
+
+    function syncFromToken() {
+      const token = getStoredAccessToken();
+      if (!token) {
+        clearAuthSession();
+        setUserState(null);
+        return;
+      }
+      api
+        .get("/auth/verify")
+        .then((res) => {
+          const u = res.data?.user || null;
+          setUserState(u);
+          if (u) setStoredUser(u, readRemember());
+        })
+        .catch(() => {
+          clearAuthSession();
+          setUserState(null);
+        });
+    }
+
+    function onStorage(e) {
+      if (e.storageArea !== localStorage) return;
+      if (![AUTH_TOKEN_KEY, AUTH_USER_KEY, AUTH_REMEMBER_KEY].includes(e.key)) return;
+
+      if (e.key === AUTH_TOKEN_KEY && !(e.newValue || "").trim()) {
+        clearAuthSession();
+        setUserState(null);
+        return;
+      }
+
+      syncFromToken();
     }
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  const login = useCallback((userData) => {
-    if (userData) startTabSession();
-    setUser(userData || null);
+  const login = useCallback((userData, accessToken, staySignedIn = true) => {
+    if (accessToken) setStoredAccessToken(accessToken, staySignedIn);
+    if (userData) setStoredUser(userData, staySignedIn);
+    else clearAuthSession();
+    setUserState(userData || null);
   }, []);
 
   const logout = useCallback(async () => {
-    clearTabSession();
     try {
       await api.post("/auth/logout");
     } catch {
-      // ignore
+      /* ignore */
     }
-    setUser(null);
+    clearAuthSession();
+    setUserState(null);
   }, []);
 
   return (

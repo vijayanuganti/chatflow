@@ -5,13 +5,21 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Camera, Loader2, Phone, Stethoscope, ShieldAlert } from "lucide-react";
+import { Camera, Loader2, Phone, Stethoscope, ShieldAlert, Sun, Moon, Monitor, Bell, Volume2 } from "lucide-react";
 import Avatar from "./Avatar";
 import PasswordInput from "./PasswordInput";
 import { MedicalProfileReadOnly } from "./MedicalProfileFields";
 import { api, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
+import { useTheme, CHAT_THEMES } from "@/context/ThemeContext";
+import {
+  NOTIFICATION_TONES,
+  getNotificationTone,
+  setNotificationTone,
+  NOTIFICATION_TONE_EVENT,
+  playNotificationTone,
+} from "@/lib/notificationTone";
 
 const STATUS_OPTIONS = [
   { value: "available", label: "Available", color: "bg-emerald-500" },
@@ -20,8 +28,20 @@ const STATUS_OPTIONS = [
   { value: "dnd", label: "Do not disturb", color: "bg-gray-800" },
 ];
 
+/** Mini gradient swatches for chat theme cards (approximate; real chat uses `data-chat-theme` CSS). */
+const CHAT_THEME_SWATCH = {
+  default: "from-slate-200 via-gray-100 to-emerald-100/70",
+  plain: "from-gray-100 to-gray-300",
+  mint: "from-emerald-100 via-teal-50 to-green-50",
+  dusk: "from-violet-200 via-indigo-100 to-purple-50",
+  warm: "from-amber-50 via-orange-50/80 to-stone-100",
+  ocean: "from-cyan-100 via-sky-50 to-blue-50",
+  dots: "from-gray-200 to-slate-300",
+};
+
 export default function ProfileDialog({ open, onOpenChange }) {
   const { user, setUser } = useAuth();
+  const { theme, setTheme, chatTheme, setChatTheme } = useTheme();
   const [tab, setTab] = useState("profile");
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -35,8 +55,23 @@ export default function ProfileDialog({ open, onOpenChange }) {
   const fileRef = useRef(null);
   const [medical, setMedical] = useState(null);
   const [medicalLoading, setMedicalLoading] = useState(false);
+  const [notificationTone, setNotificationToneState] = useState(() => getNotificationTone());
 
   const isClient = user?.role === "client";
+
+  const tabTrig =
+    "shrink-0 min-w-[3.5rem] sm:min-w-[4.5rem] flex-1 h-10 rounded-xl px-1 sm:px-0 text-xs sm:text-sm leading-none whitespace-nowrap border border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-900 data-[state=active]:border-emerald-700 dark:data-[state=active]:bg-emerald-500/15 dark:data-[state=active]:text-emerald-200 dark:data-[state=active]:border-emerald-500/40 data-[state=active]:shadow-none";
+
+  useEffect(() => {
+    if (!open) return;
+    setNotificationToneState(getNotificationTone());
+  }, [open]);
+
+  useEffect(() => {
+    const onTone = () => setNotificationToneState(getNotificationTone());
+    window.addEventListener(NOTIFICATION_TONE_EVENT, onTone);
+    return () => window.removeEventListener(NOTIFICATION_TONE_EVENT, onTone);
+  }, []);
 
   useEffect(() => {
     if (!open || !isClient || tab !== "medical" || medical) return;
@@ -124,25 +159,42 @@ export default function ProfileDialog({ open, onOpenChange }) {
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={setTab} className="min-w-0">
-          <TabsList className="flex w-full gap-2 bg-transparent p-0 h-auto">
+          <TabsList className="flex w-full max-w-full gap-1.5 overflow-x-auto bg-transparent p-0 h-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <TabsTrigger
               value="profile"
               data-testid="profile-tab-profile"
-              className="flex-1 h-10 rounded-xl px-0 text-xs sm:text-sm leading-none whitespace-nowrap border border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-900 data-[state=active]:border-emerald-700 dark:data-[state=active]:bg-emerald-500/15 dark:data-[state=active]:text-emerald-200 dark:data-[state=active]:border-emerald-500/40 data-[state=active]:shadow-none"
+              className={tabTrig}
             >
               Profile
             </TabsTrigger>
             <TabsTrigger
               value="status"
               data-testid="profile-tab-status"
-              className="flex-1 h-10 rounded-xl px-0 text-xs sm:text-sm leading-none whitespace-nowrap border border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-900 data-[state=active]:border-emerald-700 dark:data-[state=active]:bg-emerald-500/15 dark:data-[state=active]:text-emerald-200 dark:data-[state=active]:border-emerald-500/40 data-[state=active]:shadow-none"
+              className={tabTrig}
             >
               Status
             </TabsTrigger>
             <TabsTrigger
+              value="themes"
+              data-testid="profile-tab-themes"
+              className={tabTrig}
+            >
+              Themes
+            </TabsTrigger>
+            <TabsTrigger
+              value="alerts"
+              data-testid="profile-tab-alerts"
+              className={tabTrig}
+            >
+              <span className="inline-flex items-center justify-center gap-1">
+                <Bell className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span>Alerts</span>
+              </span>
+            </TabsTrigger>
+            <TabsTrigger
               value="security"
               data-testid="profile-tab-security"
-              className="flex-1 h-10 rounded-xl px-0 text-xs sm:text-sm leading-none whitespace-nowrap border border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-900 data-[state=active]:border-emerald-700 dark:data-[state=active]:bg-emerald-500/15 dark:data-[state=active]:text-emerald-200 dark:data-[state=active]:border-emerald-500/40 data-[state=active]:shadow-none"
+              className={tabTrig}
             >
               Security
             </TabsTrigger>
@@ -150,7 +202,7 @@ export default function ProfileDialog({ open, onOpenChange }) {
               <TabsTrigger
                 value="medical"
                 data-testid="profile-tab-medical"
-                className="flex-1 h-10 rounded-xl px-0 text-xs sm:text-sm leading-none whitespace-nowrap border border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-900 data-[state=active]:border-emerald-700 dark:data-[state=active]:bg-emerald-500/15 dark:data-[state=active]:text-emerald-200 dark:data-[state=active]:border-emerald-500/40 data-[state=active]:shadow-none"
+                className={tabTrig}
               >
                 Medical
               </TabsTrigger>
@@ -221,6 +273,137 @@ export default function ProfileDialog({ open, onOpenChange }) {
             </div>
             <Button onClick={saveProfile} disabled={saving} data-testid="save-status-btn" className="w-full rounded-full bg-emerald-900 hover:bg-emerald-950 h-11">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save status"}
+            </Button>
+          </TabsContent>
+
+          <TabsContent value="themes" className="mt-4 space-y-8" data-testid="profile-themes-pane">
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">App theme</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Sidebar, top bar, dialogs, and the rest of the app follow this. Quick sun/moon in the header still toggles light and dark; choose System here to match your device.
+                </p>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  data-testid="theme-app-light"
+                  onClick={() => setTheme("light")}
+                  className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-xs font-medium transition-colors ${
+                    theme === "light"
+                      ? "border-emerald-700 bg-emerald-50 text-emerald-900 dark:border-emerald-500/50 dark:bg-emerald-500/15 dark:text-emerald-100"
+                      : "border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  <Sun className="h-5 w-5" strokeWidth={1.5} />
+                  Light
+                </button>
+                <button
+                  type="button"
+                  data-testid="theme-app-dark"
+                  onClick={() => setTheme("dark")}
+                  className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-xs font-medium transition-colors ${
+                    theme === "dark"
+                      ? "border-emerald-700 bg-emerald-50 text-emerald-900 dark:border-emerald-500/50 dark:bg-emerald-500/15 dark:text-emerald-100"
+                      : "border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  <Moon className="h-5 w-5" strokeWidth={1.5} />
+                  Dark
+                </button>
+                <button
+                  type="button"
+                  data-testid="theme-app-system"
+                  onClick={() => setTheme("system")}
+                  className={`flex flex-col items-center gap-2 rounded-xl border p-3 text-xs font-medium transition-colors ${
+                    theme === "system"
+                      ? "border-emerald-700 bg-emerald-50 text-emerald-900 dark:border-emerald-500/50 dark:bg-emerald-500/15 dark:text-emerald-100"
+                      : "border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  <Monitor className="h-5 w-5" strokeWidth={1.5} />
+                  System
+                </button>
+              </div>
+            </section>
+
+            <section className="space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Chat background</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Only the message area behind your conversation (header and composer stay solid for readability).
+                </p>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {CHAT_THEMES.map((opt) => {
+                  const active = chatTheme === opt.id;
+                  const swatch = CHAT_THEME_SWATCH[opt.id] || CHAT_THEME_SWATCH.default;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      data-testid={`theme-chat-${opt.id}`}
+                      onClick={() => setChatTheme(opt.id)}
+                      className={`rounded-xl border text-left overflow-hidden transition-colors ${
+                        active
+                          ? "border-emerald-700 ring-2 ring-emerald-700/30 dark:border-emerald-500/60 dark:ring-emerald-500/25"
+                          : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                      }`}
+                    >
+                      <div className={`h-14 w-full bg-gradient-to-br ${swatch}`} />
+                      <div className="px-2.5 py-2 bg-white dark:bg-gray-900">
+                        <div className="text-xs font-semibold text-gray-900 dark:text-gray-100">{opt.label}</div>
+                        <div className="text-[10px] text-gray-500 dark:text-gray-400 leading-snug">{opt.hint}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          </TabsContent>
+
+          <TabsContent value="alerts" className="mt-4 space-y-4" data-testid="profile-alerts-pane">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 inline-flex items-center gap-2">
+                <Bell className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                New message sound
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Plays when someone messages you and you are not already viewing that chat (same moment as the desktop / mobile notification, if allowed).
+                With a tone enabled, the browser notification stays silent so you do not get two sounds.
+              </p>
+            </div>
+            <div className="space-y-2">
+              {NOTIFICATION_TONES.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  data-testid={`notification-tone-${opt.id}`}
+                  onClick={() => {
+                    setNotificationTone(opt.id);
+                    setNotificationToneState(opt.id);
+                  }}
+                  className={`w-full p-3 rounded-xl border text-left transition-colors ${
+                    notificationTone === opt.id
+                      ? "border-emerald-800 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-100"
+                      : "border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  <div className="font-medium text-sm">{opt.label}</div>
+                  <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{opt.description}</div>
+                </button>
+              ))}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full rounded-full h-11 gap-2"
+              data-testid="notification-tone-preview"
+              disabled={notificationTone === "off"}
+              onClick={() => playNotificationTone(notificationTone)}
+            >
+              <Volume2 className="h-4 w-4" aria-hidden />
+              Preview selected tone
             </Button>
           </TabsContent>
 

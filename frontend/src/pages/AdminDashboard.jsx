@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import NewChatDialog from "@/components/NewChatDialog";
@@ -13,12 +13,17 @@ import {
   ensureNotificationPermission,
   showAppNotification,
 } from "@/lib/notify";
+import {
+  playInboundMessageTone,
+  notificationToneSuppressesOsSound,
+} from "@/lib/notificationTone";
 import { toast } from "sonner";
 import {
   Users, MessageSquare, Briefcase, UserCircle2, LayoutDashboard,
   MessageCircle, Eye, Activity, Plus, Layers, UserPlus, ShieldCheck,
   KeyRound, ShieldAlert, UserCheck, UserX, PowerOff, Power, Stethoscope,
   ArrowRightLeft, FolderPlus, Inbox, CheckCircle2, Clock, RotateCcw, Loader2,
+  HardDrive, Trash2,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -37,11 +42,53 @@ import {
 
 const ADMIN_TAB_IDS = new Set([
   "overview", "batches", "chats", "mychats", "activity", "users",
-  "accounts", "permissions", "inactive", "complaints",
+  "accounts", "permissions", "inactive", "complaints", "storage",
 ]);
 
 function pathForAdminTab(t) {
   return t === "overview" ? "/admin" : `/admin/${t}`;
+}
+
+function formatStorageBytes(n) {
+  if (n == null || Number.isNaN(Number(n))) return "—";
+  const v = Number(n);
+  if (v < 1024) return `${Math.round(v)} B`;
+  if (v < 1024 ** 2) return `${(v / 1024).toFixed(1)} KB`;
+  if (v < 1024 ** 3) return `${(v / 1024 ** 2).toFixed(2)} MB`;
+  return `${(v / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function StorageMeter({ title, usedBytes, quotaBytes, freeBytes, percentUsed, subtitle, testId }) {
+  const pct = percentUsed != null ? Math.min(100, Math.max(0, percentUsed)) : null;
+  return (
+    <div
+      className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 space-y-3"
+      data-testid={testId}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{title}</div>
+          <div className="font-display text-lg font-semibold dark:text-gray-100 mt-1">
+            {formatStorageBytes(usedBytes)} used
+            {quotaBytes != null && (
+              <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
+                {" "}· {formatStorageBytes(freeBytes)} free
+              </span>
+            )}
+          </div>
+          {subtitle && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{subtitle}</p>}
+        </div>
+      </div>
+      {pct != null && (
+        <div className="h-2 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+          <div
+            className="h-full rounded-full bg-emerald-600 dark:bg-emerald-500 transition-all"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function StatCard({ icon: Icon, label, value, testId, accent }) {
@@ -62,6 +109,7 @@ export default function AdminDashboard() {
   useMobileChatViewport();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { section } = useParams();
   const tab = useMemo(() => {
     if (!section) return "overview";
@@ -74,11 +122,36 @@ export default function AdminDashboard() {
     }
   }, [section, navigate]);
 
-  // The back-navigation hook is mounted further down so it can close over
-  // the latest state; we mirror its `pushSentinel` callback into this ref so
-  // earlier code (goToTab, drill-down handlers) can re-anchor the history
-  // sentinel after every navigate / replaceState call.
-  const pushSentinelRef = useRef(() => {});
+  /** When the URL section changes (nav, deep link, browser Back/Forward), drop pane state from the tab we left. */
+  const prevTabRef = useRef(null);
+  useEffect(() => {
+    const prev = prevTabRef.current;
+    prevTabRef.current = tab;
+    if (prev === null || prev === tab) return;
+    if (prev === "chats" || prev === "mychats") {
+      if (tab !== "chats" && tab !== "mychats") {
+        setMobileChatStep("list");
+        setSelected(null);
+      }
+    }
+    if (prev === "batches" && tab !== "batches") {
+      setMobileBatchesStep("employees");
+      setSelectedEmployee(null);
+      setEmployeeBatches([]);
+      setSelected(null);
+    }
+    if (prev === "activity" && tab !== "activity") {
+      setActivityTarget(null);
+      setActivityData(null);
+      setMobileActivityStep("list");
+    }
+    if (tab === "batches" && prev !== "batches") {
+      setMobileBatchesStep("employees");
+      setSelectedEmployee(null);
+      setEmployeeBatches([]);
+      setSelected(null);
+    }
+  }, [tab]);
 
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
@@ -117,6 +190,11 @@ export default function AdminDashboard() {
   const [complaintsLoading, setComplaintsLoading] = useState(false);
   const [complaintsFilter, setComplaintsFilter] = useState("pending"); // pending | solved | all
   const [complaintSavingId, setComplaintSavingId] = useState(null);
+  const [storage, setStorage] = useState(null);
+  const [storageLoading, setStorageLoading] = useState(false);
+  const [deleteUserTarget, setDeleteUserTarget] = useState(null);
+  const [deleteConvTarget, setDeleteConvTarget] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const goToTab = useCallback((t, opts = {}) => {
     const {
@@ -134,15 +212,11 @@ export default function AdminDashboard() {
     if (mobileChatStep != null) setMobileChatStep(mobileChatStep);
     if (selectedConv !== undefined) setSelected(selectedConv);
     else if (t !== "chats" && t !== "mychats") setSelected(null);
-    // REPLACE the history entry so the browser Back button doesn't walk
-    // through every admin tab the user has visited. The `replaceState` that
-    // react-router issues here also overwrites the back-navigation
-    // sentinel — so we immediately re-anchor it. Without this the next
-    // system Back press would pop the *previous* URL instead of letting our
-    // handler drill up one in-app step.
-    navigate(pathForAdminTab(t), { replace: true });
-    pushSentinelRef.current?.();
-  }, [navigate]);
+    const path = pathForAdminTab(t);
+    if (location.pathname !== path) {
+      navigate(path);
+    }
+  }, [navigate, location.pathname]);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -175,6 +249,18 @@ export default function AdminDashboard() {
       setEmployees(res.data || []);
     } catch (err) {
       toast.error(formatApiError(err));
+    }
+  }, []);
+
+  const loadStorage = useCallback(async () => {
+    setStorageLoading(true);
+    try {
+      const res = await api.get("/admin/storage");
+      setStorage(res.data);
+    } catch (err) {
+      toast.error(formatApiError(err));
+    } finally {
+      setStorageLoading(false);
     }
   }, []);
 
@@ -272,34 +358,39 @@ export default function AdminDashboard() {
     loadComplaints();
   }, [tab, complaintsFilter, loadComplaints]);
   useEffect(() => {
-    if (tab !== "batches") setMobileBatchesStep("employees");
-    if (tab !== "chats" && tab !== "mychats") {
-      setMobileChatStep("list");
-      setSelected(null);
-    }
-    if (tab !== "activity") setMobileActivityStep("list");
-  }, [tab]);
+    if (tab !== "storage") return;
+    loadStorage();
+  }, [tab, loadStorage]);
+
+  const myConvsRef = useRef(myConvs);
+  useEffect(() => {
+    myConvsRef.current = myConvs;
+  }, [myConvs]);
 
   const loadMessages = useCallback(async (convId) => {
     try {
       const res = await api.get(`/conversations/${convId}/messages`);
       setMessages(res.data);
       // If admin is a participant, mark as read
-      const isMyChat = myConvs.find((c) => c.id === convId);
+      const isMyChat = myConvsRef.current.find((c) => c.id === convId);
       if (isMyChat) api.post(`/conversations/${convId}/read`).catch(() => {});
     } catch (err) {
       toast.error(formatApiError(err));
     }
-  }, [myConvs]);
+  }, []);
 
   useEffect(() => {
-    // Clear immediately on every conversation switch so the user never sees
-    // the previous chat's history under the new chat's header. ChatWindow's
-    // scroll-to-bottom hooks pin to the latest message once the new data
-    // arrives.
+    // Clear only when the *conversation id* changes — not when `selected` is
+    // replaced by a new object for the same chat (sidebar) or when
+    // `loadMessages` is recreated after `myConvs` updates (that was clearing the
+    // thread after every send).
+    if (!selected?.id) {
+      setMessages([]);
+      return;
+    }
     setMessages([]);
-    if (selected) loadMessages(selected.id);
-  }, [selected, loadMessages]);
+    loadMessages(selected.id);
+  }, [selected?.id, loadMessages]);
 
   useEffect(() => {
     if (!selected?.id) return;
@@ -406,12 +497,14 @@ export default function AdminDashboard() {
       const title = msg.conversation_type === "group"
         ? `${sender} (group)`
         : sender;
+      playInboundMessageTone();
       showAppNotification({
         title,
         body: preview,
         tag: `conv-${msg.conversation_id}`,
         url: "/admin/mychats",
         data: { conversation_id: msg.conversation_id },
+        silent: notificationToneSuppressesOsSound(),
       });
     }
     setMessages((prev) => {
@@ -473,11 +566,22 @@ export default function AdminDashboard() {
     }
   }, [user.id]);
 
+  const handleConversationRemoved = useCallback((data) => {
+    const id = data?.conversation_id;
+    if (!id) return;
+    setAllConvs((prev) => prev.filter((c) => c.id !== id));
+    setMyConvs((prev) => prev.filter((c) => c.id !== id));
+    setSelected((s) => (s?.id === id ? null : s));
+    if (selectedIdRef.current === id) setMessages([]);
+    api.get("/admin/stats").then((r) => setStats(r.data)).catch(() => {});
+  }, []);
+
   const { sendTyping } = useChatSocket({
     onMessage: handleIncoming,
     onTyping: handleTypingEvent,
     onPresence: handlePresence,
     onReadReceipt: handleReadReceipt,
+    onConversationRemoved: handleConversationRemoved,
     enabled: Boolean(user?.id),
   });
 
@@ -537,6 +641,7 @@ export default function AdminDashboard() {
     if (tab === "permissions") return "Admin · Permissions";
     if (tab === "inactive") return "Admin · Inactive clients";
     if (tab === "complaints") return "Admin · Complaint box";
+    if (tab === "storage") return "Admin · Storage";
     return "Admin";
   })();
 
@@ -545,6 +650,47 @@ export default function AdminDashboard() {
     users.forEach((u) => { m[u.id] = u; });
     return m;
   }, [users]);
+
+  const adminCount = useMemo(() => users.filter((u) => u.role === "admin").length, [users]);
+
+  const submitDeleteUser = useCallback(async () => {
+    const t = deleteUserTarget;
+    if (!t) return;
+    setDeleteBusy(true);
+    try {
+      await api.delete(`/admin/users/${t.id}`, { params: { confirm_user_id: t.id } });
+      toast.success("Account removed");
+      setDeleteUserTarget(null);
+      setUsers((prev) => prev.filter((u) => u.id !== t.id));
+      await loadOverview();
+      await loadStorage();
+    } catch (err) {
+      toast.error(formatApiError(err));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteUserTarget, loadOverview, loadStorage]);
+
+  const submitDeleteConversation = useCallback(async () => {
+    const t = deleteConvTarget;
+    if (!t) return;
+    setDeleteBusy(true);
+    try {
+      await api.delete(`/admin/conversations/${t.id}`, { params: { confirm_conversation_id: t.id } });
+      setAllConvs((prev) => prev.filter((c) => c.id !== t.id));
+      setMyConvs((prev) => prev.filter((c) => c.id !== t.id));
+      setSelected((s) => (s?.id === t.id ? null : s));
+      if (selectedIdRef.current === t.id) setMessages([]);
+      toast.success("Conversation deleted");
+      setDeleteConvTarget(null);
+      await loadOverview();
+      await loadStorage();
+    } catch (err) {
+      toast.error(formatApiError(err));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteConvTarget, loadOverview, loadStorage]);
 
   const unreadTotal = myConvs.reduce((sum, c) => sum + Number(c.unread_count || 0), 0);
 
@@ -584,44 +730,32 @@ export default function AdminDashboard() {
     setMobileChatStep("list");
   }, []);
 
-  // System back button on mobile / TWA: collapse drill-downs one step at a
-  // time (chat → list → tab → overview). At overview the back press is a
-  // no-op — the hook still re-pushes its sentinel so we stay on the page
-  // and never accidentally fall through to /login.
-  const pushSentinel = useDoubleBackToExit({
+  const drillDownBackActive =
+    mobileInChat ||
+    (tab === "batches" && mobileBatchesStep === "batches") ||
+    (tab === "activity" && mobileActivityStep === "detail");
+
+  useDoubleBackToExit({
+    enabled: drillDownBackActive,
     onBeforeExitBack: () => {
       if (mobileInChat) {
-        if (tab === "batches") {
-          backToBatchesChat();
-        } else {
-          backToChatList();
-        }
-        return true;
+        if (tab === "batches") backToBatchesChat();
+        else backToChatList();
+        return { repushSentinel: false };
       }
       if (tab === "batches" && mobileBatchesStep === "batches") {
         setMobileBatchesStep("employees");
-        return true;
+        return { repushSentinel: false };
       }
       if (tab === "activity" && mobileActivityStep === "detail") {
         setActivityTarget(null);
         setActivityData(null);
         setMobileActivityStep("list");
-        return true;
-      }
-      if (tab !== "overview") {
-        goToTab("overview");
-        return true;
+        return { repushSentinel: false };
       }
       return false;
     },
   });
-
-  // Make `pushSentinel` available to `goToTab` and to the drill-down setters
-  // declared above. The hook returns a stable callback, so wiring it into a
-  // ref keeps the layout-effect dependency lists clean.
-  useEffect(() => {
-    pushSentinelRef.current = pushSentinel;
-  }, [pushSentinel]);
 
   return (
     <div
@@ -650,6 +784,7 @@ export default function AdminDashboard() {
           <MobileTabButton label="Activity" active={tab === "activity"} onClick={() => goToTab("activity", { resetActivityList: true })} />
           <MobileTabButton label="Users" active={tab === "users"} onClick={() => goToTab("users")} />
           <MobileTabButton label="Complaints" active={tab === "complaints"} onClick={() => goToTab("complaints")} />
+          <MobileTabButton label="Storage" active={tab === "storage"} onClick={() => goToTab("storage")} />
         </div>
       </div>
 
@@ -671,6 +806,7 @@ export default function AdminDashboard() {
         <NavButton icon={Activity} label="Activity" active={tab === "activity"} onClick={() => goToTab("activity")} testId="admin-nav-activity" />
         <NavButton icon={Users} label="Users" active={tab === "users"} onClick={() => goToTab("users")} testId="admin-nav-users" />
         <NavButton icon={Inbox} label="Complaints" active={tab === "complaints"} onClick={() => goToTab("complaints")} testId="admin-nav-complaints" badge={stats?.complaints_pending || 0} />
+        <NavButton icon={HardDrive} label="Storage" active={tab === "storage"} onClick={() => goToTab("storage")} testId="admin-nav-storage" />
         <div className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-[0.2em] text-emerald-200/50 hidden lg:block">Archive</div>
         <NavButton icon={UserX} label="Inactive" active={tab === "inactive"} onClick={() => goToTab("inactive")} testId="admin-nav-inactive" />
         <div className="mt-auto px-2 py-2 text-[10px] text-emerald-200/70 hidden lg:block">
@@ -792,7 +928,6 @@ export default function AdminDashboard() {
                       setSelectedEmployee(e);
                       loadEmployeeBatches(e.id);
                       setMobileBatchesStep("batches");
-                      pushSentinelRef.current?.();
                     }}
                     data-testid={`admin-employee-${e.id}`}
                     className={`w-full flex items-center gap-3 p-3 border-b border-gray-50 dark:border-gray-800/60 text-left transition-colors ${
@@ -858,7 +993,6 @@ export default function AdminDashboard() {
                               onClick={() => {
                                 setSelected({ id: c.conversation_id, type: "direct", participants: [selectedEmployee.id, c.id], other_user: c });
                                 setMobileBatchesStep("chat");
-                                pushSentinelRef.current?.();
                               }}
                               className="flex-1 flex items-center gap-3 text-left min-w-0"
                             >
@@ -933,7 +1067,6 @@ export default function AdminDashboard() {
                 onSelect={(c) => {
                   setSelected(c);
                   setMobileChatStep("chat");
-                  pushSentinelRef.current?.();
                 }}
                 onNewChat={() => setNewChatOpen(true)}
                 adminView={tab === "chats"}
@@ -970,7 +1103,7 @@ export default function AdminDashboard() {
                 {users.filter((u) => u.role !== "admin").map((u) => (
                   <button
                     key={u.id}
-                    onClick={() => { loadActivity(u); setMobileActivityStep("detail"); pushSentinelRef.current?.(); }}
+                    onClick={() => { loadActivity(u); setMobileActivityStep("detail"); }}
                     data-testid={`activity-user-${u.id}`}
                     className={`w-full flex items-center gap-3 p-3 border-b border-gray-50 dark:border-gray-800/60 text-left transition-colors ${
                       activityTarget?.id === u.id
@@ -1322,6 +1455,111 @@ export default function AdminDashboard() {
           </div>
         )}
 
+        {tab === "storage" && (
+          <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-storage-pane">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin · Storage</div>
+                <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Storage & cleanup</h1>
+                <p className="text-gray-500 dark:text-gray-400 mt-1 max-w-2xl">
+                  Database footprint (MongoDB) and chat uploads bucket (S3 <code className="text-xs">uploads/</code>).
+                  Set <code className="text-xs">MONGO_STORAGE_QUOTA_BYTES</code> and <code className="text-xs">S3_STORAGE_QUOTA_BYTES</code> on the server to show free space.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="rounded-full self-start"
+                onClick={() => loadStorage()}
+                disabled={storageLoading}
+                data-testid="storage-refresh-btn"
+              >
+                {storageLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <RotateCcw className="h-4 w-4 mr-1.5" />}
+                Refresh
+              </Button>
+            </div>
+
+            {storageLoading && !storage && (
+              <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Loading storage…</div>
+            )}
+
+            {storage && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-4xl">
+                <StorageMeter
+                  title="Database (MongoDB)"
+                  usedBytes={storage.database?.used_bytes}
+                  quotaBytes={storage.database?.quota_bytes}
+                  freeBytes={storage.database?.free_bytes}
+                  percentUsed={storage.database?.percent_used}
+                  subtitle={
+                    storage.database?.error
+                      ? storage.database.error
+                      : `${storage.database?.collections ?? "—"} collections · ${storage.database?.objects ?? "—"} objects`
+                  }
+                  testId="storage-meter-db"
+                />
+                <StorageMeter
+                  title="Object storage (S3)"
+                  usedBytes={storage.object_storage?.used_bytes}
+                  quotaBytes={storage.object_storage?.quota_bytes}
+                  freeBytes={storage.object_storage?.free_bytes}
+                  percentUsed={storage.object_storage?.percent_used}
+                  subtitle={
+                    storage.object_storage?.error
+                      ? storage.object_storage.error
+                      : (storage.object_storage?.configured
+                        ? `${storage.object_storage?.object_count ?? 0} objects under ${storage.object_storage?.prefix || "uploads/"} in ${storage.object_storage?.bucket || "bucket"}`
+                        : "S3 not configured — uploads are stored on the server disk (not counted here).")
+                  }
+                  testId="storage-meter-s3"
+                />
+              </div>
+            )}
+
+            <div className="rounded-2xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/50 dark:bg-rose-950/20 p-4 sm:p-6 space-y-4 max-w-4xl">
+              <div className="flex items-center gap-2 text-rose-900 dark:text-rose-200 font-display font-semibold">
+                <Trash2 className="h-5 w-5" />
+                Free space — delete data
+              </div>
+              <p className="text-sm text-rose-900/90 dark:text-rose-200/90">
+                Deleting a user removes their account, complaints, diet days, and chat they participated in (direct chats are removed entirely; in groups their messages are removed).
+                Deleting a conversation removes all messages and S3 attachments for that thread.
+              </p>
+              <div className="space-y-2">
+                <div className="text-xs font-medium text-gray-600 dark:text-gray-300 uppercase tracking-wider">
+                  Conversations (first 80 — use Monitor for full list)
+                </div>
+                <div className="max-h-64 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
+                  {(allConvs || []).slice(0, 80).map((c) => (
+                    <div key={c.id} className="px-3 py-2 flex items-center justify-between gap-2 text-sm">
+                      <div className="min-w-0">
+                        <div className="font-medium truncate dark:text-gray-100">
+                          {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(" ↔ ")}
+                        </div>
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400 font-mono truncate">{c.id}</div>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="rounded-full shrink-0 text-rose-700 border-rose-200 dark:text-rose-300 dark:border-rose-800"
+                        onClick={() => setDeleteConvTarget(c)}
+                        data-testid={`storage-delete-conv-${c.id}`}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  ))}
+                  {(!allConvs || allConvs.length === 0) && (
+                    <div className="px-3 py-6 text-center text-xs text-gray-400">No conversations loaded.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {tab === "users" && (
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto" data-testid="admin-users-pane">
             <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1446,6 +1684,18 @@ export default function AdminDashboard() {
                     {u.id !== user.id && (
                       <Button size="sm" variant="outline" className="rounded-full" onClick={() => handleStartDirect(u)} data-testid={`users-chat-mobile-${u.id}`}>
                         Chat
+                      </Button>
+                    )}
+                    {u.id !== user.id && (u.role !== "admin" || adminCount > 1) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-full text-rose-700 border-rose-200 dark:text-rose-300 dark:border-rose-800"
+                        onClick={() => setDeleteUserTarget(u)}
+                        data-testid={`users-delete-mobile-${u.id}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1" />
+                        Delete
                       </Button>
                     )}
                   </div>
@@ -1589,6 +1839,18 @@ export default function AdminDashboard() {
                               Chat
                             </Button>
                           )}
+                          {u.id !== user.id && (u.role !== "admin" || adminCount > 1) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-full text-rose-700 border-rose-200 hover:bg-rose-50 dark:text-rose-300 dark:border-rose-800 dark:hover:bg-rose-950/40"
+                              onClick={() => setDeleteUserTarget(u)}
+                              data-testid={`users-delete-${u.id}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5 mr-1" />
+                              Delete
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1621,6 +1883,55 @@ export default function AdminDashboard() {
         onOpenChange={(v) => !v && setResetPwdTarget(null)}
         targetUser={resetPwdTarget}
       />
+      <Dialog open={!!deleteUserTarget} onOpenChange={(v) => !v && !deleteBusy && setDeleteUserTarget(null)}>
+        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-md bg-white dark:bg-gray-950" data-testid="delete-user-dialog">
+          <DialogHeader>
+            <DialogTitle className="dark:text-gray-100">Delete account permanently?</DialogTitle>
+            <DialogDescription className="dark:text-gray-400">
+              {deleteUserTarget ? (
+                <>
+                  This removes <span className="font-semibold text-gray-900 dark:text-gray-200">{deleteUserTarget.full_name}</span>
+                  {" "}(@{deleteUserTarget.username}, {deleteUserTarget.phone_number || "no phone"}) and their data from the database,
+                  and deletes matching files from S3 where possible. This cannot be undone.
+                </>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" className="rounded-full" onClick={() => setDeleteUserTarget(null)} disabled={deleteBusy}>
+              Cancel
+            </Button>
+            <Button type="button" className="rounded-full bg-rose-600 hover:bg-rose-700" onClick={submitDeleteUser} disabled={deleteBusy} data-testid="delete-user-confirm">
+              {deleteBusy ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
+              Delete account
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!deleteConvTarget} onOpenChange={(v) => !v && !deleteBusy && setDeleteConvTarget(null)}>
+        <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-md bg-white dark:bg-gray-950" data-testid="delete-conv-dialog">
+          <DialogHeader>
+            <DialogTitle className="dark:text-gray-100">Delete entire conversation?</DialogTitle>
+            <DialogDescription className="dark:text-gray-400">
+              {deleteConvTarget ? (
+                <>
+                  All messages in this thread will be removed and media files deleted from object storage.
+                  Conversation ID: <span className="font-mono text-xs">{deleteConvTarget.id}</span>
+                </>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-wrap justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" className="rounded-full" onClick={() => setDeleteConvTarget(null)} disabled={deleteBusy}>
+              Cancel
+            </Button>
+            <Button type="button" className="rounded-full bg-rose-600 hover:bg-rose-700" onClick={submitDeleteConversation} disabled={deleteBusy} data-testid="delete-conv-confirm">
+              {deleteBusy ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <Trash2 className="h-4 w-4 mr-1.5" />}
+              Delete chat
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <UserDetailDialog
         open={!!userDetail}
         loading={userDetailLoading}

@@ -15,6 +15,10 @@ import {
   ensureNotificationPermission,
   showAppNotification,
 } from "@/lib/notify";
+import {
+  playInboundMessageTone,
+  notificationToneSuppressesOsSound,
+} from "@/lib/notificationTone";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 
@@ -93,13 +97,15 @@ export default function ChatApp() {
   useEffect(() => { loadBatches(); }, [loadBatches]);
 
   useEffect(() => {
-    // Clear immediately on every conversation switch so the user never sees
-    // the previous chat's history under the new chat's header. ChatWindow's
-    // scroll-to-bottom hooks pin to the latest message once the new data
-    // arrives.
+    // Depend on conversation id only — `selected` is often a fresh object from
+    // the sidebar for the same chat, which must not wipe messages mid-thread.
+    if (!selected?.id) {
+      setMessages([]);
+      return;
+    }
     setMessages([]);
-    if (selected) loadMessages(selected.id);
-  }, [selected, loadMessages]);
+    loadMessages(selected.id);
+  }, [selected?.id, loadMessages]);
 
   useEffect(() => {
     if (!selected?.id) return;
@@ -122,12 +128,14 @@ export default function ChatApp() {
     const title = msg.conversation_type === "group"
       ? `${sender} (group)`
       : sender;
+    playInboundMessageTone();
     showAppNotification({
       title,
       body: preview,
       tag: `conv-${msg.conversation_id}`,
       url: "/chat",
       data: { conversation_id: msg.conversation_id },
+      silent: notificationToneSuppressesOsSound(),
     });
   }, [user.id]);
 
@@ -151,7 +159,8 @@ export default function ChatApp() {
           ));
           if (idx !== -1) {
             const next = prev.slice();
-            next[idx] = msg;
+            const old = next[idx];
+            next[idx] = old?.__tempId ? { ...msg, __tempId: old.__tempId } : msg;
             return next;
           }
         }
@@ -227,11 +236,20 @@ export default function ChatApp() {
     }
   }, [user.id]);
 
+  const handleConversationRemoved = useCallback((data) => {
+    const id = data?.conversation_id;
+    if (!id) return;
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    setSelected((s) => (s?.id === id ? null : s));
+    setMessages((prev) => (selectedIdRef.current === id ? [] : prev));
+  }, []);
+
   const { sendTyping: wsSendTyping } = useChatSocket({
     onMessage: handleIncomingMessage,
     onTyping: handleTyping,
     onPresence: handlePresence,
     onReadReceipt: handleReadReceipt,
+    onConversationRemoved: handleConversationRemoved,
     enabled: Boolean(user?.id),
   });
 
@@ -327,7 +345,8 @@ export default function ChatApp() {
             return prev.some((m) => m.id === res.data.id) ? prev : [...prev, res.data];
           }
           const next = prev.slice();
-          next[idx] = res.data;
+          const old = next[idx];
+          next[idx] = { ...res.data, __tempId: old.__tempId };
           return next;
         });
         setConversations((prev) => {

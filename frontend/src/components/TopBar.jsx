@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowLeft, MessageCircle, MoreVertical, Settings, LogOut, UserPlus, Sun, Moon, Monitor, ShieldAlert } from "lucide-react";
+import { ArrowLeft, MessageCircle, MoreVertical, Settings, LogOut, UserPlus, Sun, Moon, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Avatar from "@/components/Avatar";
 import {
@@ -22,7 +22,7 @@ export default function TopBar({
   onRaiseComplaint,
 }) {
   const { user, logout } = useAuth();
-  const { theme, setTheme, toggleTheme, isDark } = useTheme();
+  const { toggleTheme, isDark } = useTheme();
   const canCreateAccounts =
     !!onCreateAccount &&
     (user?.role === "admin" || (user?.role === "employee" && !!user?.account_creation_access));
@@ -97,29 +97,6 @@ export default function TopBar({
             )}
             <DropdownMenuItem onClick={() => onOpenSettings?.()} data-testid="topbar-settings-item">
               <Settings /> Profile & settings
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[11px] uppercase tracking-[0.18em] text-gray-500">Appearance</DropdownMenuLabel>
-            <DropdownMenuItem
-              onClick={() => setTheme("light")}
-              data-testid="topbar-theme-light"
-              className={theme === "light" ? "bg-emerald-50 dark:bg-emerald-900/20" : ""}
-            >
-              <Sun /> Light
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => setTheme("dark")}
-              data-testid="topbar-theme-dark"
-              className={theme === "dark" ? "bg-emerald-50 dark:bg-emerald-900/20" : ""}
-            >
-              <Moon /> Dark
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => setTheme("system")}
-              data-testid="topbar-theme-system"
-              className={theme === "system" ? "bg-emerald-50 dark:bg-emerald-900/20" : ""}
-            >
-              <Monitor /> System
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => { logout(); }} data-testid="topbar-logout-item">

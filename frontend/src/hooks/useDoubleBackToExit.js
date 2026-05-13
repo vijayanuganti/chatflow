@@ -8,11 +8,15 @@ import { useCallback, useEffect, useRef } from "react";
  *    URL React Router currently shows. When the user presses the system Back
  *    button (Android nav gesture, browser back, etc.) the sentinel is popped
  *    and `popstate` fires.
- *  - We call the host `onBack` handler. If it consumes the back press
- *    (returns truthy) we re-push the sentinel so the user stays exactly where
- *    they were — and the *next* back press can drill up one more level.
- *  - If the handler returns falsy (e.g. we're already at the app's "root"
- *    screen), we *still* re-push the sentinel. That intentionally traps the
+ *  - We call the host `onBack` handler. If it returns `{ repushSentinel: false }`,
+ *    we do **not** re-push the sentinel so the next Back press can use normal
+ *    browser history (e.g. admin drill-down then tab stack).
+ *  - If it returns `true` (or other truthy values that are not that object),
+ *    we re-push the sentinel so the user stays on the same URL while the
+ *    handler performs one drill-up step.
+ *  - If the handler returns other falsy (e.g. we're already at the app's
+ *    "root" screen for ChatApp), we *still* re-push the sentinel. That
+ *    intentionally traps the
  *    back press at the root so the user never accidentally lands on the
  *    login page or some stale tab URL still hanging in the browser's
  *    forward/back history. To actually leave the app the user uses the
@@ -66,19 +70,23 @@ export default function useDoubleBackToExit({
 
     const onPopState = () => {
       const handler = handlerRef.current;
+      let shouldRepush = true;
       if (typeof handler === "function") {
         try {
-          handler();
+          const r = handler();
+          if (
+            r &&
+            typeof r === "object" &&
+            Object.prototype.hasOwnProperty.call(r, "repushSentinel") &&
+            r.repushSentinel === false
+          ) {
+            shouldRepush = false;
+          }
         } catch (err) {
           console.warn("[useDoubleBackToExit] handler threw:", err);
         }
       }
-      // Always re-push the sentinel so back stays trapped to in-app
-      // navigation. The host handler is expected to perform whatever
-      // drill-up step is appropriate (close a chat, return to overview,
-      // etc.). When already at the root screen the handler should be a
-      // no-op and the user simply stays put.
-      pushSentinel();
+      if (shouldRepush) pushSentinel();
     };
 
     window.addEventListener("popstate", onPopState);

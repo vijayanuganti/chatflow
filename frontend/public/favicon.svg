@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="ChatFlow">
+  <!-- Matches in-app brand: emerald-900 tile + MessageCircle (lucide) -->
+  <rect width="32" height="32" rx="9" fill="#064e3b"/>
+  <g transform="translate(4,4)" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>
+  </g>
+</svg>

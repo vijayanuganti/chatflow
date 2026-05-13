@@ -13,7 +13,7 @@
  *   showAppNotification({ title: "New message", body: "Hi!", tag: "conv-123", url: "/chat" });
  */
 
-const ICON_URL = "/favicon.ico";
+const ICON_URL = "/favicon.svg";
 
 let _registration = null;
 let _registrationPromise = null;

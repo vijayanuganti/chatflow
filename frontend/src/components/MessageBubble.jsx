@@ -26,11 +26,7 @@ export default function MessageBubble({ message, mine, showSenderName, totalReci
   const readByOthers = (message.read_by || []).filter((uid) => uid !== message.sender_id);
   const readByAll = totalRecipients > 0 && readByOthers.length >= totalRecipients;
 
-  const wrapperClass = message.__error
-    ? "opacity-90"
-    : message.__pending
-      ? "opacity-80"
-      : "";
+  const wrapperClass = message.__error ? "opacity-90" : "";
 
   return (
     <div

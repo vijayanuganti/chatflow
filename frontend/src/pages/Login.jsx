@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MessageCircle, Phone, User as UserIcon, Loader2, ShieldCheck, Search, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -10,7 +11,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import PasswordInput from "@/components/PasswordInput";
-import { api, formatApiError } from "@/lib/api";
+import { api, formatApiError, BROWSER_ID_KEY } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 import COUNTRIES, { DEFAULT_COUNTRY_CODE, getCountry } from "@/lib/countries";
@@ -37,6 +38,8 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [countryOpen, setCountryOpen] = useState(false);
   const [countryQuery, setCountryQuery] = useState("");
+  /** When false, session is tab-only (no token in localStorage); new tabs in this profile start logged out. */
+  const [staySignedIn, setStaySignedIn] = useState(true);
 
   // If the user is already authenticated (e.g. they pressed the system Back
   // button from inside the app and somehow landed here), bounce them right
@@ -86,7 +89,15 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const res = await api.post("/auth/login", payload);
-      login(res.data.user);
+      const installId = res.data?.browser_install_id;
+      if (installId && typeof installId === "string") {
+        try {
+          localStorage.setItem(BROWSER_ID_KEY, installId.trim());
+        } catch {
+          /* ignore */
+        }
+      }
+      login(res.data.user, res.data.access_token, staySignedIn);
       toast.success(`Welcome back, ${res.data.user.full_name}!`);
       if (res.data.user.role === "admin") navigate("/admin", { replace: true });
       else navigate("/chat", { replace: true });
@@ -260,6 +271,28 @@ export default function LoginPage() {
                 autoComplete="current-password"
                 required
               />
+            </div>
+
+            <div className="flex items-start gap-3 rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-900/50 px-3 py-3">
+              <Checkbox
+                id="stay-signed-in"
+                checked={staySignedIn}
+                onCheckedChange={(v) => setStaySignedIn(v === true)}
+                data-testid="login-stay-signed-in"
+                className="mt-0.5"
+              />
+              <div className="space-y-1 min-w-0">
+                <Label htmlFor="stay-signed-in" className="text-sm font-medium cursor-pointer leading-snug">
+                  Stay signed in on this browser
+                </Label>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+                  If unchecked, only this tab stays signed in. When checked, new tabs in this Chrome
+                  profile stay signed in. Each Chrome <span className="font-medium">Person</span>{" "}
+                  (or another browser app) has its own storage — you must sign in there separately;
+                  a saved link alone cannot reuse this profile&apos;s session. Switching Gmail inside
+                  the same Chrome user is not a separate Person.
+                </p>
+              </div>
             </div>
 
             <Button

@@ -170,18 +170,103 @@ html.dark .bubble-received {
     40% { transform: scale(1); opacity: 1; }
 }
 
-/* Chat background subtle pattern */
+/* Chat message-area wallpaper (html[data-chat-theme] from ThemeContext; see CHAT_THEMES) */
 .chat-bg {
+    min-height: 0;
+}
+
+/* ----- default (classic) ----- */
+html:not(.dark)[data-chat-theme="default"] .chat-bg,
+html:not(.dark):not([data-chat-theme]) .chat-bg {
     background-color: #F3F4F6;
     background-image:
         radial-gradient(circle at 20% 30%, rgba(16, 185, 129, 0.04) 0, transparent 40%),
         radial-gradient(circle at 80% 70%, rgba(6, 78, 59, 0.03) 0, transparent 40%);
 }
-html.dark .chat-bg {
+html.dark[data-chat-theme="default"] .chat-bg,
+html.dark:not([data-chat-theme]) .chat-bg {
     background-color: #0b0f14;
     background-image:
         radial-gradient(circle at 20% 30%, rgba(16, 185, 129, 0.08) 0, transparent 40%),
         radial-gradient(circle at 80% 70%, rgba(6, 78, 59, 0.10) 0, transparent 40%);
+}
+
+/* ----- plain ----- */
+html:not(.dark)[data-chat-theme="plain"] .chat-bg {
+    background-color: #f9fafb;
+    background-image: none;
+}
+html.dark[data-chat-theme="plain"] .chat-bg {
+    background-color: #111827;
+    background-image: none;
+}
+
+/* ----- mint ----- */
+html:not(.dark)[data-chat-theme="mint"] .chat-bg {
+    background-color: #ecfdf5;
+    background-image:
+        radial-gradient(ellipse 120% 80% at 10% 20%, rgba(16, 185, 129, 0.12) 0, transparent 55%),
+        radial-gradient(ellipse 100% 60% at 90% 80%, rgba(5, 150, 105, 0.08) 0, transparent 50%);
+}
+html.dark[data-chat-theme="mint"] .chat-bg {
+    background-color: #022c22;
+    background-image:
+        radial-gradient(ellipse 120% 80% at 15% 25%, rgba(52, 211, 153, 0.14) 0, transparent 55%),
+        radial-gradient(ellipse 100% 50% at 85% 75%, rgba(6, 95, 70, 0.35) 0, transparent 50%);
+}
+
+/* ----- dusk ----- */
+html:not(.dark)[data-chat-theme="dusk"] .chat-bg {
+    background-color: #f5f3ff;
+    background-image:
+        radial-gradient(circle at 15% 25%, rgba(99, 102, 241, 0.10) 0, transparent 45%),
+        radial-gradient(circle at 85% 75%, rgba(139, 92, 246, 0.08) 0, transparent 45%);
+}
+html.dark[data-chat-theme="dusk"] .chat-bg {
+    background-color: #0f0a1a;
+    background-image:
+        radial-gradient(circle at 20% 30%, rgba(129, 140, 248, 0.12) 0, transparent 42%),
+        radial-gradient(circle at 80% 70%, rgba(76, 29, 149, 0.35) 0, transparent 48%);
+}
+
+/* ----- warm ----- */
+html:not(.dark)[data-chat-theme="warm"] .chat-bg {
+    background-color: #faf7f2;
+    background-image:
+        radial-gradient(circle at 25% 35%, rgba(245, 158, 11, 0.06) 0, transparent 50%),
+        radial-gradient(circle at 75% 65%, rgba(180, 83, 9, 0.05) 0, transparent 48%);
+}
+html.dark[data-chat-theme="warm"] .chat-bg {
+    background-color: #1c1917;
+    background-image:
+        radial-gradient(circle at 30% 40%, rgba(251, 191, 36, 0.06) 0, transparent 45%),
+        radial-gradient(circle at 70% 60%, rgba(120, 53, 15, 0.25) 0, transparent 50%);
+}
+
+/* ----- ocean ----- */
+html:not(.dark)[data-chat-theme="ocean"] .chat-bg {
+    background-color: #ecfeff;
+    background-image:
+        radial-gradient(ellipse 100% 70% at 20% 30%, rgba(6, 182, 212, 0.11) 0, transparent 55%),
+        radial-gradient(ellipse 80% 50% at 85% 75%, rgba(14, 165, 233, 0.08) 0, transparent 50%);
+}
+html.dark[data-chat-theme="ocean"] .chat-bg {
+    background-color: #0c1929;
+    background-image:
+        radial-gradient(ellipse 100% 70% at 25% 35%, rgba(34, 211, 238, 0.10) 0, transparent 55%),
+        radial-gradient(ellipse 90% 55% at 80% 70%, rgba(8, 145, 178, 0.22) 0, transparent 50%);
+}
+
+/* ----- dots ----- */
+html:not(.dark)[data-chat-theme="dots"] .chat-bg {
+    background-color: #f3f4f6;
+    background-image: radial-gradient(rgba(15, 23, 42, 0.06) 1px, transparent 1px);
+    background-size: 14px 14px;
+}
+html.dark[data-chat-theme="dots"] .chat-bg {
+    background-color: #0b0f14;
+    background-image: radial-gradient(rgba(248, 250, 252, 0.05) 1px, transparent 1px);
+    background-size: 14px 14px;
 }
 
 .animate-in-up {

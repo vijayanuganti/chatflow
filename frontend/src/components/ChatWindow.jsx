@@ -300,13 +300,15 @@ export default function ChatWindow({
 
   if (!conversation) {
     return (
-      <div className="chat-bg flex min-h-0 flex-1 items-center justify-center" data-testid="no-conversation-placeholder">
-        <div className="text-center max-w-sm p-8">
-          <div className="mx-auto h-20 w-20 rounded-2xl bg-white dark:bg-gray-900 shadow-sm flex items-center justify-center mb-4 border border-gray-100 dark:border-gray-800">
-            <Send className="h-9 w-9 text-emerald-800 dark:text-emerald-300" strokeWidth={1.3} />
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950">
+        <div className="chat-bg flex min-h-0 flex-1 items-center justify-center" data-testid="no-conversation-placeholder">
+          <div className="text-center max-w-sm p-8">
+            <div className="mx-auto h-20 w-20 rounded-2xl bg-white dark:bg-gray-900 shadow-sm flex items-center justify-center mb-4 border border-gray-100 dark:border-gray-800">
+              <Send className="h-9 w-9 text-emerald-800 dark:text-emerald-300" strokeWidth={1.3} />
+            </div>
+            <h3 className="font-display text-2xl font-semibold mb-1 dark:text-gray-100">Your conversations</h3>
+            <p className="text-gray-500 dark:text-gray-400 text-sm">Select a chat on the left, or start a new one.</p>
           </div>
-          <h3 className="font-display text-2xl font-semibold mb-1 dark:text-gray-100">Your conversations</h3>
-          <p className="text-gray-500 dark:text-gray-400 text-sm">Select a chat on the left, or start a new one.</p>
         </div>
       </div>
     );
@@ -346,7 +348,7 @@ export default function ChatWindow({
   const showSenderNames = isGroup || readOnly;
 
   return (
-    <div className="chat-bg flex h-full min-h-0 flex-1 flex-col overflow-hidden" data-testid="chat-window">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950" data-testid="chat-window">
       {/* Header */}
       <div className="z-10 flex shrink-0 items-center gap-2 border-b border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-gray-950/80 px-3 py-3 backdrop-blur-xl sm:gap-3 sm:px-4">
         {onBack && (
@@ -473,7 +475,7 @@ export default function ChatWindow({
       )}
 
       {/* Messages */}
-      <div ref={scrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5" data-testid="messages-container">
+      <div ref={scrollRef} className="chat-bg min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5" data-testid="messages-container">
         {visibleMessages.length === 0 && (
           <div className="text-center text-sm text-gray-400 py-10" data-testid="empty-messages">
             No messages yet. {readOnly ? "Conversation is quiet." : "Say hi!"}
@@ -494,7 +496,7 @@ export default function ChatWindow({
           }
           return (
             <MessageBubble
-              key={m.id}
+              key={m.__tempId || m.id}
               message={m}
               mine={mine}
               showSenderName={showSenderNames}

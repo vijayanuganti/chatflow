@@ -12,10 +12,11 @@ import uuid
 import json
 import logging
 import shutil
+import asyncio
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Set
+from typing import List, Optional, Dict, Set, Tuple
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -34,7 +35,7 @@ from fastapi import (
     WebSocketDisconnect,
     Query,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, validator
@@ -55,6 +56,9 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24 * 7
 MIN_PASSWORD_LENGTH = int(os.environ.get("MIN_PASSWORD_LENGTH", "6"))
 
+
+# ---------- Browser binding (SPA sends per-profile id; JWT may include `bid`) ----------
+BROWSER_ID_HEADER = "x-chatflow-browser-id"
 
 # ---------- Auth cookies ----------
 AUTH_COOKIE_NAME = "chatflow_token"
@@ -87,6 +91,132 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 S3_BUCKET = (os.environ.get("S3_BUCKET") or "").strip()
 S3_REGION = (os.environ.get("S3_REGION") or os.environ.get("AWS_REGION") or "").strip()
 S3_PUBLIC_BASE_URL = (os.environ.get("S3_PUBLIC_BASE_URL") or "").rstrip("/")
+
+
+def _parse_optional_bytes_env(name: str) -> Optional[int]:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        return max(0, int(float(raw)))
+    except ValueError:
+        return None
+
+
+MONGO_STORAGE_QUOTA_BYTES = _parse_optional_bytes_env("MONGO_STORAGE_QUOTA_BYTES")
+S3_STORAGE_QUOTA_BYTES = _parse_optional_bytes_env("S3_STORAGE_QUOTA_BYTES")
+
+
+def _public_url_to_s3_key(url: Optional[str]) -> Optional[str]:
+    if not url or not isinstance(url, str):
+        return None
+    u = url.strip()
+    if not u or u.startswith("/api/files/") or u.startswith("/"):
+        return None
+    base = (S3_PUBLIC_BASE_URL or "").rstrip("/")
+    if base and u.startswith(base + "/"):
+        return u[len(base) + 1 :].split("?", 1)[0]
+    if S3_BUCKET and S3_REGION:
+        needle = f"{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/"
+        idx = u.find(needle)
+        if idx != -1:
+            return u[idx + len(needle) :].split("?", 1)[0]
+        needle2 = f"{S3_BUCKET}.s3.dualstack.{S3_REGION}.amazonaws.com/"
+        idx = u.find(needle2)
+        if idx != -1:
+            return u[idx + len(needle2) :].split("?", 1)[0]
+    if S3_BUCKET:
+        needle = f"{S3_BUCKET}.s3.amazonaws.com/"
+        idx = u.find(needle)
+        if idx != -1:
+            return u[idx + len(needle) :].split("?", 1)[0]
+    return None
+
+
+def _urls_to_s3_keys(urls: List[Optional[str]]) -> Set[str]:
+    keys: Set[str] = set()
+    for url in urls:
+        k = _public_url_to_s3_key(url)
+        if k and ".." not in k:
+            keys.add(k)
+    return keys
+
+
+def _delete_s3_keys_blocking(keys: Set[str]) -> int:
+    if not keys or not S3_BUCKET:
+        return 0
+    session = boto3.session.Session(region_name=S3_REGION or None)
+    s3 = session.client("s3")
+    deleted = 0
+    batch: List[dict] = []
+    for key in sorted(keys):
+        batch.append({"Key": key})
+        if len(batch) >= 1000:
+            s3.delete_objects(Bucket=S3_BUCKET, Delete={"Objects": batch, "Quiet": True})
+            deleted += len(batch)
+            batch = []
+    if batch:
+        s3.delete_objects(Bucket=S3_BUCKET, Delete={"Objects": batch, "Quiet": True})
+        deleted += len(batch)
+    return deleted
+
+
+async def _delete_s3_keys(keys: Set[str]) -> int:
+    if not keys:
+        return 0
+    try:
+        return int(await asyncio.to_thread(_delete_s3_keys_blocking, keys))
+    except Exception as e:
+        logger.warning("S3 bulk delete failed: %s", e)
+        return 0
+
+
+def _list_s3_uploads_prefix_blocking(prefix: str = "uploads/") -> Tuple[int, int]:
+    """Return (total_bytes, object_count) for objects under prefix."""
+    if not S3_BUCKET:
+        return 0, 0
+    session = boto3.session.Session(region_name=S3_REGION or None)
+    s3 = session.client("s3")
+    total = 0
+    count = 0
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=S3_BUCKET, Prefix=prefix):
+        for obj in page.get("Contents") or []:
+            total += int(obj.get("Size") or 0)
+            count += 1
+    return total, count
+
+
+async def _collect_message_file_keys(conversation_id: str) -> Set[str]:
+    keys: Set[str] = set()
+    async for m in db.messages.find({"conversation_id": conversation_id}, {"file_url": 1, "_id": 0}):
+        if m.get("file_url"):
+            keys |= _urls_to_s3_keys([m["file_url"]])
+    return keys
+
+
+async def _diet_photo_urls_for_client(client_id: str) -> Set[str]:
+    urls: Set[str] = set()
+    slots = ("morning", "afternoon", "night")
+    async for doc in db.diet_plans.find({"client_id": client_id}, {"meals": 1, "_id": 0}):
+        meals = doc.get("meals") or {}
+        for slot in slots:
+            slot_doc = meals.get(slot) or {}
+            u = slot_doc.get("photo_url")
+            if u:
+                urls.add(str(u))
+    return urls
+
+
+async def _emit_conversation_removed(conv_id: str, participant_ids: List[str]) -> None:
+    event = {"type": "conversation_removed", "conversation_id": conv_id}
+    seen: Set[str] = set(participant_ids)
+    for uid in participant_ids:
+        await manager.send_event(uid, event)
+    async for a in db.users.find({"role": "admin"}, {"id": 1, "_id": 0}):
+        aid = a["id"]
+        if aid not in seen:
+            await manager.send_event(aid, event)
 
 
 client = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=10000)
@@ -160,12 +290,14 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(user_id: str, username: str, role: str) -> str:
+def create_access_token(user_id: str, username: str, role: str, browser_id: str) -> str:
+    bid = (browser_id or "").strip()[:128] or str(uuid.uuid4())
     payload = {
         "sub": user_id,
         "username": username,
         "role": role,
         "exp": datetime.now(timezone.utc) + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS),
+        "bid": bid,
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
@@ -177,6 +309,40 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Session expired. Please sign in again.")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid session token")
+
+
+def _browser_id_from_request(request: Request) -> str:
+    return (request.headers.get(BROWSER_ID_HEADER) or "").strip()[:128]
+
+
+def _assert_jwt_browser_binding(request: Request, payload: dict) -> None:
+    """Every session JWT carries `bid`; the same id must be sent on every request."""
+    hdr = _browser_id_from_request(request)
+    bid_claim = payload.get("bid")
+    if bid_claim is None or str(bid_claim).strip() == "":
+        raise HTTPException(
+            status_code=401,
+            detail="Please sign in again (session update required).",
+        )
+    if not hdr:
+        raise HTTPException(
+            status_code=401,
+            detail="Please sign in again (missing browser session).",
+        )
+    if hdr != str(bid_claim).strip():
+        raise HTTPException(
+            status_code=401,
+            detail="Session is not valid on this browser. Please sign in again.",
+        )
+
+
+def _assert_jwt_browser_binding_ws(payload: dict, browser_id_query: Optional[str]) -> None:
+    bid_claim = payload.get("bid")
+    if bid_claim is None or str(bid_claim).strip() == "":
+        raise HTTPException(status_code=401, detail="WebSocket session update required.")
+    q = (browser_id_query or "").strip()[:128]
+    if not q or q != str(bid_claim).strip():
+        raise HTTPException(status_code=401, detail="WebSocket browser binding mismatch.")
 
 
 def now_iso() -> str:
@@ -219,6 +385,7 @@ async def get_current_user(request: Request) -> dict:
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     payload = decode_token(token)
+    _assert_jwt_browser_binding(request, payload)
     user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
@@ -668,7 +835,7 @@ def _mask_phone(phone: Optional[str]) -> Optional[str]:
 
 # ---------- Auth ----------
 @api_router.post("/auth/login")
-async def login(body: LoginBody, response: Response, request: Request):
+async def login(body: LoginBody, request: Request):
     """
     Sign in by either phone number (E.164, country-code prefix) or username.
 
@@ -729,8 +896,15 @@ async def login(body: LoginBody, response: Response, request: Request):
             detail="Your account is inactive. Please contact your administrator.",
         )
 
-    token = create_access_token(user["id"], user.get("username") or "", user["role"])
-    _set_auth_cookie(response, token)
+    browser_id = _browser_id_from_request(request) or str(uuid.uuid4())
+    token = create_access_token(
+        user["id"],
+        user.get("username") or "",
+        user["role"],
+        browser_id,
+    )
+    # Web SPA stores the JWT in sessionStorage (per tab). Do not set a shared
+    # HttpOnly cookie here — last-writer cookie was overwriting other tabs.
 
     await log_audit(
         actor_user_id=user["id"],
@@ -738,7 +912,15 @@ async def login(body: LoginBody, response: Response, request: Request):
         metadata={"role": user.get("role"), "ip": _client_ip(request)},
     )
 
-    return {"user": clean_user(user)}
+    response = JSONResponse(
+        content={
+            "user": clean_user(user),
+            "access_token": token,
+            "browser_install_id": browser_id,
+        }
+    )
+    _clear_auth_cookie(response)
+    return response
 
 
 @api_router.post("/auth/logout")
@@ -1147,6 +1329,215 @@ async def admin_stats(user: dict = Depends(require_admin)):
         ),
         "complaints_pending": await db.complaints.count_documents({"status": "pending"}),
         "complaints_solved": await db.complaints.count_documents({"status": "solved"}),
+    }
+
+
+def _pack_storage_used_free(used: Optional[int], quota: Optional[int]) -> Dict[str, Optional[float]]:
+    out: Dict[str, Optional[float]] = {
+        "used_bytes": float(used) if used is not None else None,
+        "quota_bytes": float(quota) if quota is not None else None,
+        "free_bytes": None,
+        "percent_used": None,
+    }
+    if used is None:
+        return out
+    if quota is not None and quota > 0:
+        out["free_bytes"] = float(max(0, quota - int(used)))
+        out["percent_used"] = round(100.0 * min(int(used), int(quota)) / int(quota), 2)
+    return out
+
+
+@api_router.get("/admin/storage")
+async def admin_storage_overview(_: dict = Depends(require_admin)):
+    """Approximate MongoDB footprint + S3 `uploads/` usage. Optional quotas via env."""
+    mongo_used: Optional[int] = None
+    mongo_detail: Dict[str, object] = {}
+    try:
+        st = await db.command({"dbStats": 1})
+        mongo_detail = {
+            "data_size_bytes": int(st.get("dataSize") or 0),
+            "storage_size_bytes": int(st.get("storageSize") or 0),
+            "index_size_bytes": int(st.get("indexSize") or 0),
+            "objects": int(st.get("objects") or 0),
+            "collections": int(st.get("collections") or 0),
+        }
+        mongo_used = int(st.get("storageSize") or 0)
+    except Exception as e:
+        logger.warning("dbStats failed: %s", e)
+        mongo_detail = {"error": str(e)}
+
+    s3_used_int: Optional[int] = None
+    s3_objects = 0
+    s3_error: Optional[str] = None
+    if S3_BUCKET:
+        try:
+            s3_used_int, s3_objects = await asyncio.to_thread(_list_s3_uploads_prefix_blocking, "uploads/")
+        except Exception as e:
+            logger.warning("S3 list failed: %s", e)
+            s3_error = str(e)
+
+    s3_pack = _pack_storage_used_free(s3_used_int, S3_STORAGE_QUOTA_BYTES)
+
+    return {
+        "database": {
+            **mongo_detail,
+            **_pack_storage_used_free(mongo_used, MONGO_STORAGE_QUOTA_BYTES),
+        },
+        "object_storage": {
+            "configured": bool(S3_BUCKET),
+            "bucket": S3_BUCKET or None,
+            "prefix": "uploads/",
+            "object_count": s3_objects,
+            "used_bytes": float(s3_used_int) if s3_used_int is not None else None,
+            **({"error": s3_error} if s3_error else {}),
+            **s3_pack,
+        },
+        "quota_hint": (
+            "Set MONGO_STORAGE_QUOTA_BYTES and/or S3_STORAGE_QUOTA_BYTES (bytes) to show free space, "
+            "e.g. Atlas 512MB → 536870912."
+        ),
+    }
+
+
+@api_router.delete("/admin/conversations/{conv_id}")
+async def admin_delete_conversation(
+    conv_id: str,
+    confirm_conversation_id: str = Query(..., description="Must match conv_id"),
+    actor: dict = Depends(require_admin),
+):
+    if confirm_conversation_id != conv_id:
+        raise HTTPException(status_code=400, detail="Confirmation does not match conversation id")
+    conv = await db.conversations.find_one({"id": conv_id}, {"_id": 0})
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    participants = list(conv.get("participants") or [])
+    keys = await _collect_message_file_keys(conv_id)
+    deleted_s3 = await _delete_s3_keys(keys)
+    dr = await db.messages.delete_many({"conversation_id": conv_id})
+    await db.conversations.delete_one({"id": conv_id})
+    await log_audit(
+        actor_user_id=actor["id"],
+        action="conversation.delete",
+        metadata={"conversation_id": conv_id, "messages_deleted": dr.deleted_count, "s3_objects_deleted": deleted_s3},
+    )
+    await _emit_conversation_removed(conv_id, participants)
+    return {
+        "ok": True,
+        "conversation_id": conv_id,
+        "messages_deleted": dr.deleted_count,
+        "s3_objects_deleted": deleted_s3,
+    }
+
+
+@api_router.delete("/admin/users/{user_id}")
+async def admin_delete_user(
+    user_id: str,
+    confirm_user_id: str = Query(..., description="Must match user_id"),
+    actor: dict = Depends(require_admin),
+):
+    if confirm_user_id != user_id:
+        raise HTTPException(status_code=400, detail="Confirmation does not match user id")
+    if user_id == actor["id"]:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if target.get("role") == "admin":
+        admin_n = await db.users.count_documents({"role": "admin"})
+        if admin_n <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the last administrator account")
+
+    if target.get("role") == "employee":
+        linked_clients = await db.users.count_documents({"role": "client", "employee_id": user_id})
+        if linked_clients > 0:
+            raise HTTPException(
+                status_code=409,
+                detail="This employee still has clients assigned. Reassign or delete those clients first.",
+            )
+        batches = await db.batches.find({"employee_id": user_id}).to_list(500)
+        for b in batches:
+            if len(b.get("client_ids") or []) > 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Employee still has clients in batch “{b.get('name', b.get('id'))}”. Remove clients first.",
+                )
+        await db.batches.delete_many({"employee_id": user_id})
+
+    all_keys: Set[str] = set()
+    all_keys |= _urls_to_s3_keys([target.get("avatar_url")])
+
+    if target.get("role") == "client":
+        diet_urls = await _diet_photo_urls_for_client(user_id)
+        all_keys |= _urls_to_s3_keys(list(diet_urls))
+        await db.diet_plans.delete_many({"client_id": user_id})
+        await db.batches.update_many({"client_ids": user_id}, {"$pull": {"client_ids": user_id}})
+
+    convs = await db.conversations.find({"participants": user_id}, {"_id": 0}).to_list(5000)
+    conv_events: List[Tuple[str, List[str]]] = []
+
+    for conv in convs:
+        cid = conv["id"]
+        ctype = conv.get("type")
+        parts = list(conv.get("participants") or [])
+
+        if ctype == "direct" and user_id in parts:
+            all_keys |= await _collect_message_file_keys(cid)
+            await db.messages.delete_many({"conversation_id": cid})
+            await db.conversations.delete_one({"id": cid})
+            conv_events.append((cid, parts))
+        elif ctype == "group" and user_id in parts:
+            async for m in db.messages.find({"conversation_id": cid, "sender_id": user_id}, {"file_url": 1, "_id": 0}):
+                if m.get("file_url"):
+                    all_keys |= _urls_to_s3_keys([m["file_url"]])
+            await db.messages.delete_many({"conversation_id": cid, "sender_id": user_id})
+            new_parts = [p for p in parts if p != user_id]
+            if len(new_parts) <= 1:
+                all_keys |= await _collect_message_file_keys(cid)
+                await db.messages.delete_many({"conversation_id": cid})
+                await db.conversations.delete_one({"id": cid})
+                conv_events.append((cid, parts))
+            else:
+                await db.conversations.update_one({"id": cid}, {"$set": {"participants": new_parts}})
+
+    await db.complaints.delete_many(
+        {"$or": [{"client_id": user_id}, {"employee_id": user_id}, {"resolved_by": user_id}]}
+    )
+
+    await db.users.update_many({"created_by": user_id}, {"$set": {"created_by": None}})
+    await db.users.update_many({"password_reset_by": user_id}, {"$set": {"password_reset_by": None}})
+    await db.users.update_many({"permissions_updated_by": user_id}, {"$set": {"permissions_updated_by": None}})
+    await db.users.update_many({"inactive_by": user_id}, {"$set": {"inactive_by": None}})
+    await db.batches.update_many({"created_by": user_id}, {"$set": {"created_by": None}})
+
+    await db.audit_logs.delete_many({"$or": [{"actor_user_id": user_id}, {"target_user_id": user_id}]})
+
+    await manager.force_disconnect_user(user_id)
+
+    await db.users.delete_one({"id": user_id})
+
+    deleted_s3 = await _delete_s3_keys(all_keys)
+
+    for cid, parts in conv_events:
+        await _emit_conversation_removed(cid, parts)
+
+    await log_audit(
+        actor_user_id=actor["id"],
+        action="user.delete",
+        target_user_id=user_id,
+        metadata={
+            "username": target.get("username"),
+            "role": target.get("role"),
+            "s3_objects_deleted": deleted_s3,
+            "conversations_removed": len(conv_events),
+        },
+    )
+    return {
+        "ok": True,
+        "deleted_user_id": user_id,
+        "s3_objects_deleted": deleted_s3,
+        "conversations_removed": len(conv_events),
     }
 
 
@@ -2070,12 +2461,31 @@ class ConnectionManager:
         for uid in list(self.active.keys()):
             await self.send_event(uid, event)
 
+    async def force_disconnect_user(self, user_id: str):
+        """Close every WebSocket for a user (e.g. after admin account deletion)."""
+        sockets = list(self.active.pop(user_id, set()))
+        for ws in sockets:
+            try:
+                await ws.close(code=4000)
+            except Exception:
+                pass
+        ts = now_iso()
+        try:
+            await db.users.update_one({"id": user_id}, {"$set": {"online": False, "last_seen": ts}})
+        except Exception:
+            pass
+        await self._broadcast_presence(user_id, False, ts)
+
 
 manager = ConnectionManager()
 
 
 @app.websocket("/api/ws")
-async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(None)):
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: Optional[str] = Query(None),
+    browser_id: Optional[str] = Query(None, alias="bid"),
+):
     try:
         jwt_token = (token or "").strip() or (websocket.cookies.get(AUTH_COOKIE_NAME) or "").strip()
         if not jwt_token:
@@ -2084,6 +2494,12 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(
             return
 
         payload = jwt.decode(jwt_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        try:
+            _assert_jwt_browser_binding_ws(payload, browser_id)
+        except HTTPException:
+            logger.warning("WS reject: browser binding mismatch")
+            await websocket.close(code=4401)
+            return
         user_id = payload.get("sub")
         if not user_id:
             logger.warning("WS reject: token missing sub")

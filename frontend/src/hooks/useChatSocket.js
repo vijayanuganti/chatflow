@@ -7,6 +7,7 @@ export default function useChatSocket({
   onPresence,
   onReadReceipt,
   onProfile,
+  onConversationRemoved,
   enabled = true,
 }) {
   const wsRef = useRef(null);
@@ -16,7 +17,7 @@ export default function useChatSocket({
   const [connected, setConnected] = useState(false);
 
   const handlersRef = useRef({});
-  handlersRef.current = { onMessage, onTyping, onPresence, onReadReceipt, onProfile };
+  handlersRef.current = { onMessage, onTyping, onPresence, onReadReceipt, onProfile, onConversationRemoved };
 
   const connect = useCallback(() => {
     if (!enabled) return;
@@ -33,8 +34,32 @@ export default function useChatSocket({
 
     if (wsRef.current) {
       try {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
+        const prev = wsRef.current;
+        prev.onopen = null;
+        prev.onmessage = null;
+        prev.onerror = null;
+        prev.onclose = null;
+        if (prev.readyState === WebSocket.CONNECTING) {
+          // React 18 Strict Mode (dev) runs effect cleanup while the first socket is
+          // still handshaking. Synchronous close() spams "closed before connection is
+          // established" — wait for open/error then close.
+          prev.addEventListener("open", () => {
+            try {
+              prev.close(1000, "unmount");
+            } catch {
+              /* ignore */
+            }
+          }, { once: true });
+          prev.addEventListener("error", () => {
+            try {
+              prev.close();
+            } catch {
+              /* ignore */
+            }
+          }, { once: true });
+        } else {
+          prev.close(1000, "unmount");
+        }
       } catch {
         /* ignore */
       }
@@ -78,12 +103,13 @@ export default function useChatSocket({
     ws.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data);
-        const { onMessage, onTyping, onPresence, onReadReceipt, onProfile } = handlersRef.current;
+        const { onMessage, onTyping, onPresence, onReadReceipt, onProfile, onConversationRemoved } = handlersRef.current;
         if (data.type === "message" && onMessage) onMessage(data.message);
         else if (data.type === "typing" && onTyping) onTyping(data);
         else if (data.type === "presence" && onPresence) onPresence(data);
         else if (data.type === "read_receipt" && onReadReceipt) onReadReceipt(data);
         else if (data.type === "profile" && onProfile) onProfile(data.user);
+        else if (data.type === "conversation_removed" && onConversationRemoved) onConversationRemoved(data);
       } catch {
         /* ignore */
       }
@@ -96,9 +122,30 @@ export default function useChatSocket({
       clearTimeout(reconnectRef.current);
       clearInterval(pingRef.current);
       if (wsRef.current) {
-        wsRef.current.onclose = null;
+        const ws = wsRef.current;
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
         try {
-          wsRef.current.close();
+          if (ws.readyState === WebSocket.CONNECTING) {
+            ws.addEventListener("open", () => {
+              try {
+                ws.close(1000, "unmount");
+              } catch {
+                /* ignore */
+              }
+            }, { once: true });
+            ws.addEventListener("error", () => {
+              try {
+                ws.close();
+              } catch {
+                /* ignore */
+              }
+            }, { once: true });
+          } else {
+            ws.close(1000, "unmount");
+          }
         } catch {
           /* ignore */
         }
@@ -124,14 +171,35 @@ export default function useChatSocket({
       closedIntentionallyRef.current = true;
       clearTimeout(reconnectRef.current);
       clearInterval(pingRef.current);
-      if (wsRef.current) {
-        wsRef.current.onclose = null;
+      const ws = wsRef.current;
+      wsRef.current = null;
+      if (ws) {
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
         try {
-          wsRef.current.close();
+          if (ws.readyState === WebSocket.CONNECTING) {
+            ws.addEventListener("open", () => {
+              try {
+                ws.close(1000, "unmount");
+              } catch {
+                /* ignore */
+              }
+            }, { once: true });
+            ws.addEventListener("error", () => {
+              try {
+                ws.close();
+              } catch {
+                /* ignore */
+              }
+            }, { once: true });
+          } else {
+            ws.close(1000, "unmount");
+          }
         } catch {
           /* ignore */
         }
-        wsRef.current = null;
       }
       setConnected(false);
     };
