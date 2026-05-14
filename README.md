@@ -20,6 +20,21 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 
 ---
 
+## Mobile app (Capacitor)
+
+Native shells live under `frontend/android` and `frontend/ios` (Capacitor 8).
+
+- **Install:** JavaScript dependencies (including `@capacitor/*`) install only under **`frontend/`**. From that directory run `npm install` before `npm start` or `npm run build`; otherwise Webpack reports “Can't resolve '@capacitor/…'”.
+- **Build and sync:** from `frontend/`, run `npm run build:mobile` (CRA build + `npx cap sync`).
+- **Open in IDEs:** `npm run cap:android` or `npm run cap:ios` (iOS requires macOS with Xcode).
+- **App name and bundle id:** edit `frontend/capacitor.config.json` (`appName`, `appId`). Defaults: **ChatFlow** and **`com.chatflow.app`**. Change `appId` if you need something like `com.user.myapp`; after changing it, run `npx cap sync` and fix signing in Android Studio / Xcode.
+- **API URL on a physical device:** set `REACT_APP_BACKEND_URL` to an address the phone can reach (for example `http://192.168.x.x:8001`), rebuild, then `npm run build:mobile`. Add that origin to backend `CORS_ORIGINS` in production.
+- **CORS for the native shell:** when `CORS_ORIGINS` is unset in development, FastAPI allows `capacitor://localhost` and `ionic://localhost` in addition to `http://localhost:3000` and `http://127.0.0.1:3000`.
+- **Camera and photos:** profile avatar and chat “Photo” attachments use `@capacitor/camera` in the native app (`frontend/src/lib/nativeMedia.js`). iOS privacy strings are in `frontend/ios/App/App/Info.plist`. Video and other file types still use the web file picker unless you extend them.
+- **Capacitor CLI** 8.x may warn that **Node 22+** is expected; upgrade Node if `npx cap` misbehaves.
+
+---
+
 ## Authentication flow
 
 ```
@@ -262,7 +277,8 @@ Then in **Environment → Add Environment Variable**, paste the values from
 - `MONGO_URL`, `DB_NAME`
 - `JWT_SECRET` (generate with `openssl rand -hex 48`)
 - `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_PHONE`
-- `CORS_ORIGINS` = your frontend URL (e.g. `https://chatflow.vercel.app`)
+- `CORS_ORIGINS` = comma-separated, **no spaces** after commas. Include your **web** origin and the **native shell** origins the app uses (Capacitor’s WebView still reports these even when the API is on the public internet), for example:  
+  `https://chatflow.vercel.app,http://localhost,capacitor://localhost,ionic://localhost`
 - `COOKIE_SECURE=true`, `COOKIE_SAMESITE=none`  (cross-site cookie over HTTPS)
 - `S3_BUCKET`, `S3_REGION`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`,
   `AWS_SECRET_ACCESS_KEY`, `S3_PUBLIC_BASE_URL`
@@ -284,6 +300,25 @@ Then in **Environment → Add Environment Variable**, paste the values from
 Build-time environment variables (from [`frontend/.env.example`](./frontend/.env.example)):
 
 - `REACT_APP_BACKEND_URL` = your Render backend URL, e.g. `https://chatflow-api.onrender.com`
+
+### 3. Capacitor — installable app on other phones
+
+The JS bundle bakes API URLs at **build time**. Other people’s phones do **not** use your LAN IP; they must talk to the same **public HTTPS** API as production web.
+
+1. **Environment (before `npm run build:mobile`)**  
+   - Set `REACT_APP_BACKEND_URL=https://your-api.onrender.com` (no trailing slash).  
+   - Set `REACT_APP_BACKEND_URL_MOBILE` to the **same** HTTPS URL (or leave it empty so the native app falls back to `REACT_APP_BACKEND_URL`).  
+   Do **not** ship a release build that still points at `http://192.168.x.x`.
+
+2. **Backend `CORS_ORIGINS`** must include the native origins listed above (`http://localhost`, `capacitor://localhost`, `ionic://localhost`) **in addition to** your hosted web app URL, or the app will fail API calls from the installed APK/IPA.
+
+3. **Build and ship**  
+   - From `frontend/`: `npm run build:mobile`, then open Android Studio / Xcode, bump version code, and build a **release** APK or AAB (Android) or archive for TestFlight / App Store (iOS).  
+   - For sideloading Android, recipients install the signed APK (or you use Play Console **Internal testing**).
+
+4. **Optional:** In [`frontend/capacitor.config.json`](./frontend/capacitor.config.json), extend `server.allowNavigation` with your API **hostname** if you open that host inside the WebView. XHR/fetch to the API does not require this.
+
+5. **S3 / uploads:** Production uploads go to S3; ensure `S3_PUBLIC_BASE_URL` is correct and bucket policy/CORS allow your web origin if the browser loads objects directly.
 
 After the first deploy:
 

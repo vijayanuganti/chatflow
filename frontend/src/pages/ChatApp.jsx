@@ -13,6 +13,7 @@ import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import {
   ensureNotificationPermission,
+  registerServiceWorker,
   showAppNotification,
 } from "@/lib/notify";
 import {
@@ -116,8 +117,9 @@ export default function ChatApp() {
 
   const maybeNotify = useCallback((msg) => {
     if (!msg) return;
-    // Only notify if I'm a recipient
-    if (!Array.isArray(msg.recipient_ids) || !msg.recipient_ids.includes(user.id)) return;
+    // Only notify if I'm a recipient (string-compare ids in case of type skew).
+    const ids = Array.isArray(msg.recipient_ids) ? msg.recipient_ids : [];
+    if (!ids.some((id) => String(id) === String(user.id))) return;
     // If the user is already looking at this conversation, no popup needed.
     if (document.visibilityState === "visible" && selectedIdRef.current === msg.conversation_id) return;
 
@@ -253,10 +255,12 @@ export default function ChatApp() {
     enabled: Boolean(user?.id),
   });
 
-  // Ask once for OS notification permission so Chrome can surface them like
-  // any other app would. Result is cached by the browser per origin.
+  // Register SW first (Android WebView requires it for showNotification), then ask permission.
   useEffect(() => {
-    ensureNotificationPermission();
+    void (async () => {
+      await registerServiceWorker();
+      await ensureNotificationPermission();
+    })();
   }, []);
 
   // When the user clicks a notification, the SW asks us to focus the right
@@ -510,7 +514,7 @@ export default function ChatApp() {
           type="button"
           onClick={() => setNewChatOpen(true)}
           data-testid="new-chat-fab"
-          className="fixed bottom-4 sm:bottom-6 right-4 sm:right-6 h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white shadow-lg flex items-center justify-center"
+          className="fixed z-30 h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white shadow-lg flex items-center justify-center bottom-[max(1rem,calc(1rem+env(safe-area-inset-bottom,0px)))] right-[max(1rem,calc(1rem+env(safe-area-inset-right,0px)))] sm:bottom-[max(1.5rem,calc(1.5rem+env(safe-area-inset-bottom,0px)))] sm:right-[max(1.5rem,calc(1.5rem+env(safe-area-inset-right,0px)))]"
           title="New chat"
         >
           <Plus className="h-5 w-5 sm:h-6 sm:w-6" />

@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useEffect } from "react";
 import "@/App.css";
+import { registerServiceWorker } from "@/lib/notify";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
@@ -30,9 +31,17 @@ function RoleRouter() {
   return <Navigate to="/chat" replace />;
 }
 
+function ServiceWorkerBootstrap() {
+  useEffect(() => {
+    void registerServiceWorker();
+  }, []);
+  return null;
+}
+
 function App() {
   return (
-    <div className="App">
+    <div className="App min-h-0 overflow-x-hidden">
+      <ServiceWorkerBootstrap />
       <ThemeProvider>
       <AuthProvider>
         <BrowserRouter>

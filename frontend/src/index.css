@@ -129,17 +129,20 @@ select,
 
 /* Message bubble tails */
 .bubble-sent {
-    background: #D1FAE5;
+    background: #d9fdd3;
     border-radius: 16px 16px 4px 16px;
+    box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.08);
 }
 .bubble-received {
-    background: #FFFFFF;
-    border: 1px solid #F3F4F6;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
     border-radius: 16px 16px 16px 4px;
+    box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.06);
 }
 html.dark .bubble-sent {
-    background: #064e3b;
-    color: #ecfdf5;
+    background: #005c4b;
+    color: #e7ffdb;
+    box-shadow: none;
 }
 html.dark .bubble-received {
     background: #1f2937;
@@ -178,10 +181,18 @@ html.dark .bubble-received {
 /* ----- default (classic) ----- */
 html:not(.dark)[data-chat-theme="default"] .chat-bg,
 html:not(.dark):not([data-chat-theme]) .chat-bg {
-    background-color: #F3F4F6;
+    /* WhatsApp-inspired light chat canvas */
+    background-color: #e8ded0;
     background-image:
-        radial-gradient(circle at 20% 30%, rgba(16, 185, 129, 0.04) 0, transparent 40%),
-        radial-gradient(circle at 80% 70%, rgba(6, 78, 59, 0.03) 0, transparent 40%);
+        radial-gradient(circle at 18% 22%, rgba(255, 255, 255, 0.35) 0, transparent 42%),
+        radial-gradient(circle at 82% 78%, rgba(16, 185, 129, 0.06) 0, transparent 45%),
+        repeating-linear-gradient(
+            125deg,
+            transparent,
+            transparent 2px,
+            rgba(0, 0, 0, 0.015) 2px,
+            rgba(0, 0, 0, 0.015) 3px
+        );
 }
 html.dark[data-chat-theme="default"] .chat-bg,
 html.dark:not([data-chat-theme]) .chat-bg {

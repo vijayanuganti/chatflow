@@ -1,5 +1,7 @@
 import axios from "axios";
 
+import { resolveBackendUrl } from "./backendUrl";
+
 /**
  * Auth material:
  * - `sessionStorage`: always used for the active tab copy (so each tab has an explicit copy).
@@ -213,15 +215,6 @@ export function clearAuthSession() {
   } catch {
     /* ignore */
   }
-}
-
-function resolveBackendUrl() {
-  const fromEnv = (process.env.REACT_APP_BACKEND_URL || "").replace(/\/$/, "");
-  if (fromEnv) return fromEnv;
-  if (process.env.NODE_ENV === "development" && typeof window !== "undefined") {
-    return `${window.location.protocol}//${window.location.hostname}:8001`;
-  }
-  return "";
 }
 
 export const BACKEND_URL = resolveBackendUrl();

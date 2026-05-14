@@ -109,9 +109,19 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen grid lg:grid-cols-2 bg-white dark:bg-gray-950" data-testid="login-page">
+    <div
+      className="flex min-h-dvh flex-col bg-white dark:bg-gray-950"
+      data-testid="login-page"
+    >
+      {/* Match app chrome: reserve space for the OS status bar (signal, wifi, battery). */}
+      <div
+        className="shrink-0 w-full bg-white dark:bg-gray-950"
+        style={{ minHeight: "max(env(safe-area-inset-top, 0px), 36px)" }}
+        aria-hidden
+      />
+      <div className="grid min-h-0 flex-1 grid-rows-1 lg:grid-cols-2 lg:min-h-0">
       {/* Brand panel */}
-      <div className="hidden lg:flex flex-col justify-between p-12 bg-emerald-900 text-white relative overflow-hidden">
+      <div className="hidden lg:flex min-h-0 flex-col justify-between py-12 pl-[max(3rem,env(safe-area-inset-left,0px))] pr-[max(3rem,env(safe-area-inset-right,0px))] pb-[max(3rem,env(safe-area-inset-bottom,0px))] bg-emerald-900 text-white relative overflow-hidden">
         <div className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-emerald-700 opacity-30 blur-3xl" />
         <div className="absolute bottom-0 -left-16 w-80 h-80 rounded-full bg-emerald-500 opacity-20 blur-3xl" />
 
@@ -147,9 +157,9 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* Form panel */}
-      <div className="flex items-center justify-center p-4 sm:p-8 lg:p-12 bg-white dark:bg-gray-950">
-        <div className="w-full max-w-md">
+      {/* Form panel — scroll when keyboard / short viewport; respect home indicator. */}
+      <div className="flex min-h-0 flex-col overflow-y-auto overscroll-y-contain bg-white dark:bg-gray-950 py-6 pl-[max(1rem,env(safe-area-inset-left,0px))] pr-[max(1rem,env(safe-area-inset-right,0px))] sm:py-8 sm:pl-[max(2rem,env(safe-area-inset-left,0px))] sm:pr-[max(2rem,env(safe-area-inset-right,0px))] lg:py-12 lg:pl-[max(3rem,env(safe-area-inset-left,0px))] lg:pr-[max(3rem,env(safe-area-inset-right,0px))] pb-[max(1.5rem,calc(1.5rem+env(safe-area-inset-bottom,0px)))]">
+        <div className="m-auto w-full max-w-md">
           <div className="lg:hidden flex items-center gap-3 mb-6">
             <div className="h-10 w-10 rounded-xl bg-emerald-900 text-white flex items-center justify-center">
               <MessageCircle className="h-6 w-6" />
@@ -324,6 +334,7 @@ export default function LoginPage() {
             © {new Date().getFullYear()} ChatFlow · Designed & built by vijay_anuganti
           </p>
         </div>
+      </div>
       </div>
     </div>
   );

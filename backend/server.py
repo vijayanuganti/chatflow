@@ -2801,15 +2801,19 @@ async def on_startup():
 async def shutdown_db_client():
     client.close()
 
-
 # ---------- CORS & router ----------
 _cors_env = (os.environ.get("CORS_ORIGINS") or "").strip()
 if _cors_env:
     CORS_ORIGINS = [o.strip().rstrip("/") for o in _cors_env.split(",") if o.strip()]
 else:
+    # This list must be indented to belong to the 'else' block
     CORS_ORIGINS = [
+        "http://localhost",
         "http://localhost:3000",
+        "http://127.0.0.1",
         "http://127.0.0.1:3000",
+        "capacitor://localhost",
+        "ionic://localhost",
     ]
 
 app.add_middleware(
@@ -2819,5 +2823,4 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 app.include_router(api_router)

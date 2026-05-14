@@ -21,6 +21,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { api, formatApiError } from "@/lib/api";
+import { isCapacitorNativeApp, pickPhotoFileForUpload } from "@/lib/nativeMedia";
 import { formatWhatsAppLastSeen } from "@/lib/datetime";
 import { useAuth } from "@/context/AuthContext";
 import Avatar from "./Avatar";
@@ -41,6 +42,8 @@ export default function ChatWindow({
   sendTyping,
   readOnly = false,
   onBack,
+  /** When true (e.g. admin full-screen chat with TopBar hidden), reserve space under the OS status bar. */
+  statusBarInset = false,
 }) {
   const { user } = useAuth();
   const [text, setText] = useState("");
@@ -214,7 +217,13 @@ export default function ChatWindow({
     // button activation and the textarea re-render.
     requestAnimationFrame(() => {
       const el = composerRef.current;
-      if (el && document.activeElement !== el) el.focus();
+      if (el && document.activeElement !== el) {
+        try {
+          el.focus({ preventScroll: true });
+        } catch {
+          el.focus();
+        }
+      }
     });
   };
 
@@ -225,9 +234,7 @@ export default function ChatWindow({
     }
   };
 
-  const handleFile = async (e) => {
-    const inputEl = e.target;
-    const file = inputEl?.files?.[0];
+  const uploadAttachmentFile = useCallback(async (file, inputEl) => {
     if (!file || !conversation) {
       if (inputEl) inputEl.value = "";
       return;
@@ -239,7 +246,6 @@ export default function ChatWindow({
       const res = await api.post("/upload", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      // Optimistic send once we have the uploaded file URL.
       onSendMessage({
         conversation_id: conversation.id,
         content: "",
@@ -253,16 +259,34 @@ export default function ChatWindow({
       setUploading(false);
       if (inputEl) inputEl.value = "";
     }
+  }, [conversation, onSendMessage]);
+
+  const handleFile = async (e) => {
+    const inputEl = e.target;
+    const file = inputEl?.files?.[0];
+    await uploadAttachmentFile(file, inputEl);
   };
 
-  const openPicker = useCallback((kind) => {
+  const openPicker = useCallback(async (kind) => {
     setAttachOpen(false);
+    if (kind === "photo" && isCapacitorNativeApp()) {
+      try {
+        const file = await pickPhotoFileForUpload();
+        await uploadAttachmentFile(file, null);
+      } catch (err) {
+        const msg = (err && (err.message || String(err))) || "";
+        if (!/cancel|dismiss|denied|User cancelled/i.test(msg)) {
+          toast.error(formatApiError(err) || msg || "Could not pick photo");
+        }
+      }
+      return;
+    }
     const ref = kind === "photo" ? photoInputRef
       : kind === "video" ? videoInputRef
       : kind === "audio" ? audioInputRef
       : docInputRef;
     ref.current?.click();
-  }, []);
+  }, [uploadAttachmentFile]);
 
   const handleVoiceNote = useCallback(async (blob, mime, durationMs) => {
     if (!conversation) return;
@@ -349,8 +373,16 @@ export default function ChatWindow({
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950" data-testid="chat-window">
-      {/* Header */}
-      <div className="z-10 flex shrink-0 items-center gap-2 border-b border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-gray-950/80 px-3 py-3 backdrop-blur-xl sm:gap-3 sm:px-4">
+      {/* Header: optional status-bar spacer when this window is the top chrome (admin mobile chat). */}
+      <div className="z-10 flex shrink-0 flex-col border-b border-gray-200 bg-white/90 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-950/80">
+        {statusBarInset ? (
+          <div
+            className="w-full shrink-0 bg-white/90 dark:bg-gray-950/80"
+            style={{ minHeight: "max(env(safe-area-inset-top, 0px), 36px)" }}
+            aria-hidden
+          />
+        ) : null}
+        <div className="flex items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5 md:py-2.5">
         {onBack && (
           <Button size="icon" variant="ghost" className="md:hidden rounded-full" onClick={onBack} data-testid="chat-back-btn">
             <ArrowLeft className="h-5 w-5" />
@@ -452,6 +484,7 @@ export default function ChatWindow({
             </Button>
           </>
         )}
+        </div>
       </div>
 
       {!isGroup && otherUser?.role === "client" && (user?.role === "admin" || user?.role === "employee") && (
@@ -509,7 +542,7 @@ export default function ChatWindow({
 
       {/* Input */}
       {!readOnly && (
-        <div className="shrink-0 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 pb-[max(0.625rem,env(safe-area-inset-bottom,0px))] pt-2 sm:pb-3 sm:pt-3">
+        <div className="relative z-10 shrink-0 border-t border-gray-200 bg-white pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-2 shadow-[0_-4px_12px_rgba(0,0,0,0.04)] dark:border-gray-800 dark:bg-gray-950 dark:shadow-[0_-4px_16px_rgba(0,0,0,0.35)] sm:pb-3 sm:pt-3">
           <div className="flex items-end gap-2 px-2.5 sm:px-3">
             <input
               ref={photoInputRef}
@@ -570,7 +603,7 @@ export default function ChatWindow({
                   >
                     <button
                       type="button"
-                      onClick={() => openPicker("photo")}
+                      onClick={() => void openPicker("photo")}
                       className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-gray-800"
                       data-testid="chat-attach-photos"
                     >
@@ -584,7 +617,7 @@ export default function ChatWindow({
                     </button>
                     <button
                       type="button"
-                      onClick={() => openPicker("video")}
+                      onClick={() => void openPicker("video")}
                       className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-gray-800"
                       data-testid="chat-attach-videos"
                     >
@@ -598,7 +631,7 @@ export default function ChatWindow({
                     </button>
                     <button
                       type="button"
-                      onClick={() => openPicker("document")}
+                      onClick={() => void openPicker("document")}
                       className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-gray-800"
                       data-testid="chat-attach-documents"
                     >
@@ -612,7 +645,7 @@ export default function ChatWindow({
                     </button>
                     <button
                       type="button"
-                      onClick={() => openPicker("audio")}
+                      onClick={() => void openPicker("audio")}
                       className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-gray-800"
                       data-testid="chat-attach-audio"
                     >

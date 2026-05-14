@@ -20,6 +20,7 @@ import {
   NOTIFICATION_TONE_EVENT,
   playNotificationTone,
 } from "@/lib/notificationTone";
+import { isCapacitorNativeApp, pickPhotoFileForUpload } from "@/lib/nativeMedia";
 
 const STATUS_OPTIONS = [
   { value: "available", label: "Available", color: "bg-emerald-500" },
@@ -127,8 +128,7 @@ export default function ProfileDialog({ open, onOpenChange }) {
     }
   };
 
-  const uploadAvatar = async (e) => {
-    const file = e.target.files?.[0];
+  const uploadAvatarFile = async (file) => {
     if (!file) return;
     setUploadingAvatar(true);
     try {
@@ -145,6 +145,28 @@ export default function ProfileDialog({ open, onOpenChange }) {
       setUploadingAvatar(false);
       if (fileRef.current) fileRef.current.value = "";
     }
+  };
+
+  const openAvatarPicker = async () => {
+    if (isCapacitorNativeApp()) {
+      try {
+        const file = await pickPhotoFileForUpload();
+        await uploadAvatarFile(file);
+      } catch (err) {
+        const msg = (err && (err.message || String(err))) || "";
+        if (!/cancel|dismiss|denied|User cancelled/i.test(msg)) {
+          toast.error(formatApiError(err) || msg || "Could not open camera");
+        }
+      }
+      return;
+    }
+    fileRef.current?.click();
+  };
+
+  const uploadAvatar = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await uploadAvatarFile(file);
   };
 
   return (
@@ -214,7 +236,7 @@ export default function ProfileDialog({ open, onOpenChange }) {
               <div className="relative">
                 <Avatar name={form.full_name || "You"} avatarUrl={form.avatar_url} status={form.status} size={72} />
                 <button
-                  onClick={() => fileRef.current?.click()}
+                  onClick={() => void openAvatarPicker()}
                   data-testid="upload-avatar-btn"
                   className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full bg-emerald-900 text-white flex items-center justify-center shadow-md hover:bg-emerald-950"
                   title="Upload photo"

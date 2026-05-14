@@ -11,6 +11,7 @@ import useMobileChatViewport from "@/hooks/useMobileChatViewport";
 import { api, formatApiError } from "@/lib/api";
 import {
   ensureNotificationPermission,
+  registerServiceWorker,
   showAppNotification,
 } from "@/lib/notify";
 import {
@@ -23,7 +24,7 @@ import {
   MessageCircle, Eye, Activity, Plus, Layers, UserPlus, ShieldCheck,
   KeyRound, ShieldAlert, UserCheck, UserX, PowerOff, Power, Stethoscope,
   ArrowRightLeft, FolderPlus, Inbox, CheckCircle2, Clock, RotateCcw, Loader2,
-  HardDrive, Trash2,
+  HardDrive, Trash2, Settings,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -42,7 +43,7 @@ import {
 
 const ADMIN_TAB_IDS = new Set([
   "overview", "batches", "chats", "mychats", "activity", "users",
-  "accounts", "permissions", "inactive", "complaints", "storage",
+  "accounts", "permissions", "inactive", "complaints", "storage", "more",
 ]);
 
 function pathForAdminTab(t) {
@@ -327,10 +328,11 @@ export default function AdminDashboard() {
   useEffect(() => { loadOverview(); }, [loadOverview]);
   useEffect(() => { loadEmployees(); }, [loadEmployees]);
 
-  // Ask once for OS notification permission so admins get Chrome-style alerts
-  // for messages in conversations they are part of.
   useEffect(() => {
-    ensureNotificationPermission();
+    void (async () => {
+      await registerServiceWorker();
+      await ensureNotificationPermission();
+    })();
   }, []);
 
   // Service worker tells us when the admin taps a chat notification — jump to
@@ -484,10 +486,15 @@ export default function AdminDashboard() {
     // Surface a Chrome-style OS notification when the admin isn't already
     // looking at this conversation. Admins are notified for chats they
     // participate in (anything where they are a recipient).
+    const recipientIds = Array.isArray(msg?.recipient_ids) ? msg.recipient_ids : [];
+    const inRecipientList = recipientIds.some((id) => String(id) === String(user.id));
+    // Admins receive WS copies of chats they do not participate in; those
+    // payloads omit them from recipient_ids, but they should still get alerts.
+    const adminMonitoring =
+      user.role === "admin" && msg && String(msg.sender_id) !== String(user.id);
     if (
       msg &&
-      Array.isArray(msg.recipient_ids) &&
-      msg.recipient_ids.includes(user.id) &&
+      (inRecipientList || adminMonitoring) &&
       !(document.visibilityState === "visible" && activeId === msg.conversation_id)
     ) {
       const sender = msg.sender_name || "Someone";
@@ -536,7 +543,7 @@ export default function AdminDashboard() {
     };
     setAllConvs(updater);
     setMyConvs(updater);
-  }, [loadOverview, user.id]);
+  }, [loadOverview, user.id, user.role]);
 
   const handlePresence = useCallback((data) => {
     setOnlineUsers((prev) => ({ ...prev, [data.user_id]: data.online }));
@@ -632,6 +639,7 @@ export default function AdminDashboard() {
 
   const topbarTitle = (() => {
     if (tab === "overview") return "Admin · Overview";
+    if (tab === "more") return "Admin · Settings";
     if (tab === "batches") return "Admin · Batches";
     if (tab === "chats") return "Admin · Monitor";
     if (tab === "mychats") return "Admin · My Chats";
@@ -736,7 +744,7 @@ export default function AdminDashboard() {
     (tab === "activity" && mobileActivityStep === "detail");
 
   useDoubleBackToExit({
-    enabled: drillDownBackActive,
+    enabled: true,
     onBeforeExitBack: () => {
       if (mobileInChat) {
         if (tab === "batches") backToBatchesChat();
@@ -759,7 +767,7 @@ export default function AdminDashboard() {
 
   return (
     <div
-      className="flex min-h-0 w-full flex-col overflow-hidden bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100"
+      className="flex min-h-0 w-full flex-col overflow-hidden bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100"
       style={{ height: "var(--visual-vh, 100dvh)" }}
       data-testid="admin-dashboard"
     >
@@ -773,22 +781,10 @@ export default function AdminDashboard() {
         />
       </div>
 
-      <div className={`shrink-0 overflow-x-auto border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-2 py-2 md:hidden ${mobileInChat ? "hidden" : ""}`} data-testid="admin-mobile-tabs">
-        <div className="flex gap-2 min-w-max">
-          <MobileTabButton label="Overview" active={tab === "overview"} onClick={() => goToTab("overview")} />
-          <MobileTabButton label="Accounts" active={tab === "accounts"} onClick={() => goToTab("accounts")} />
-          <MobileTabButton label="Permissions" active={tab === "permissions"} onClick={() => goToTab("permissions")} />
-          <MobileTabButton label="Batches" active={tab === "batches"} onClick={() => goToTab("batches", { mobileBatchesStep: "employees" })} />
-          <MobileTabButton label="Monitor" active={tab === "chats"} onClick={() => goToTab("chats", { mobileChatStep: "list" })} />
-          <MobileTabButton label="My Chats" active={tab === "mychats"} onClick={() => goToTab("mychats", { mobileChatStep: "list" })} />
-          <MobileTabButton label="Activity" active={tab === "activity"} onClick={() => goToTab("activity", { resetActivityList: true })} />
-          <MobileTabButton label="Users" active={tab === "users"} onClick={() => goToTab("users")} />
-          <MobileTabButton label="Complaints" active={tab === "complaints"} onClick={() => goToTab("complaints")} />
-          <MobileTabButton label="Storage" active={tab === "storage"} onClick={() => goToTab("storage")} />
-        </div>
-      </div>
+      {/* Mobile: primary navigation is the bottom bar (WhatsApp-style). */}
+      <div className="hidden" aria-hidden data-testid="admin-mobile-tabs-legacy" />
 
-      <div className={`flex min-h-0 flex-1 overflow-hidden ${mobileInChat ? "pb-0" : "pb-[calc(56px+env(safe-area-inset-bottom))]"} md:pb-0`}>
+      <div className={`flex min-h-0 flex-1 overflow-hidden ${mobileInChat ? "pb-0" : "pb-[calc(3.5rem+env(safe-area-inset-bottom))]"} md:pb-0`}>
         {/* Admin Nav */}
         <nav className="hidden md:flex w-20 lg:w-60 bg-emerald-950 text-emerald-100 flex-col py-6 px-3">
           <div className="flex items-center gap-3 px-2 mb-8">
@@ -807,6 +803,7 @@ export default function AdminDashboard() {
         <NavButton icon={Users} label="Users" active={tab === "users"} onClick={() => goToTab("users")} testId="admin-nav-users" />
         <NavButton icon={Inbox} label="Complaints" active={tab === "complaints"} onClick={() => goToTab("complaints")} testId="admin-nav-complaints" badge={stats?.complaints_pending || 0} />
         <NavButton icon={HardDrive} label="Storage" active={tab === "storage"} onClick={() => goToTab("storage")} testId="admin-nav-storage" />
+        <NavButton icon={Settings} label="Settings & more" active={tab === "more"} onClick={() => goToTab("more")} testId="admin-nav-more" />
         <div className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-[0.2em] text-emerald-200/50 hidden lg:block">Archive</div>
         <NavButton icon={UserX} label="Inactive" active={tab === "inactive"} onClick={() => goToTab("inactive")} testId="admin-nav-inactive" />
         <div className="mt-auto px-2 py-2 text-[10px] text-emerald-200/70 hidden lg:block">
@@ -909,6 +906,35 @@ export default function AdminDashboard() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {tab === "more" && (
+          <div className="mx-auto w-full max-w-lg space-y-5 overflow-y-auto p-4 sm:p-6" data-testid="admin-more-pane">
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Tools</div>
+              <h1 className="mt-1 font-display text-2xl font-semibold dark:text-gray-100">Settings & admin</h1>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Jump to monitoring, batches, and account tools.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <AdminMoreTile icon={Eye} title="Monitor chats" subtitle="All conversations" onClick={() => goToTab("chats", { mobileChatStep: "list" })} testId="more-monitor" />
+              <AdminMoreTile icon={Layers} title="Batches" subtitle="Teams & clients" onClick={() => goToTab("batches", { mobileBatchesStep: "employees" })} testId="more-batches" />
+              <AdminMoreTile icon={UserPlus} title="Accounts" subtitle="Create users" onClick={() => goToTab("accounts")} testId="more-accounts" />
+              <AdminMoreTile icon={ShieldCheck} title="Permissions" subtitle="Who can create clients" onClick={() => goToTab("permissions")} testId="more-permissions" />
+              <AdminMoreTile icon={Activity} title="Activity" subtitle="Audit trail" onClick={() => goToTab("activity", { resetActivityList: true })} testId="more-activity" />
+              <AdminMoreTile icon={Inbox} title="Complaints" subtitle={stats?.complaints_pending ? `${stats.complaints_pending} open` : "Inbox"} onClick={() => goToTab("complaints")} testId="more-complaints" />
+              <AdminMoreTile icon={HardDrive} title="Storage" subtitle="Usage & quotas" onClick={() => goToTab("storage")} testId="more-storage" />
+              <AdminMoreTile icon={UserX} title="Inactive" subtitle="Deactivated clients" onClick={() => goToTab("inactive")} testId="more-inactive" />
+            </div>
+            <button
+              type="button"
+              onClick={() => setProfileOpen(true)}
+              className="flex w-full min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-emerald-900 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-emerald-200"
+              data-testid="more-profile-btn"
+            >
+              <UserCircle2 className="h-5 w-5" strokeWidth={1.5} />
+              Profile & preferences
+            </button>
           </div>
         )}
 
@@ -1044,6 +1070,7 @@ export default function AdminDashboard() {
                 sendTyping={sendTyping}
                 readOnly
                 onBack={backToBatchesChat}
+                statusBarInset={mobileInChat}
               />
             </main>
           </div>
@@ -1087,6 +1114,7 @@ export default function AdminDashboard() {
                 sendTyping={sendTyping}
                 readOnly={tab === "chats" && !isSelectedAdminChat}
                 onBack={backToChatList}
+                statusBarInset={mobileInChat}
               />
             </main>
           </div>
@@ -2006,13 +2034,40 @@ export default function AdminDashboard() {
 
       {/* Mobile bottom nav (Flutter-style BottomNavigationBar) */}
       <div
-        className={`md:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-gray-950/95 backdrop-blur border-t border-gray-200 dark:border-gray-800 items-stretch justify-around z-20 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_18px_rgba(0,0,0,0.06)] dark:shadow-[0_-4px_18px_rgba(0,0,0,0.5)] ${mobileInChat ? "hidden" : "flex"}`}
+        className={`md:hidden fixed bottom-0 left-0 right-0 z-20 flex items-stretch justify-around border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_18px_rgba(0,0,0,0.06)] backdrop-blur dark:border-gray-800 dark:bg-gray-950/95 dark:shadow-[0_-4px_18px_rgba(0,0,0,0.5)] ${mobileInChat ? "hidden" : ""}`}
         data-testid="admin-bottom-nav"
       >
-        <BottomNavButton icon={Layers} label="Batches" active={tab === "batches"} onClick={() => goToTab("batches", { mobileBatchesStep: "employees" })} testId="admin-nav-mobile-batches" />
-        <BottomNavButton icon={Eye} label="Monitor" active={tab === "chats"} onClick={() => goToTab("chats", { mobileChatStep: "list" })} testId="admin-nav-mobile-monitor" />
-        <BottomNavButton icon={MessageSquare} label="My chats" active={tab === "mychats"} onClick={() => goToTab("mychats", { mobileChatStep: "list" })} testId="admin-nav-mobile-mychats" />
-        <BottomNavButton icon={Users} label="Users" active={tab === "users"} onClick={() => goToTab("users")} testId="admin-nav-mobile-users" />
+        <BottomNavButton
+          icon={LayoutDashboard}
+          label="Home"
+          active={tab === "overview"}
+          onClick={() => goToTab("overview")}
+          testId="admin-nav-mobile-home"
+        />
+        <BottomNavButton
+          icon={MessageSquare}
+          label="Chats"
+          active={tab === "mychats"}
+          onClick={() => goToTab("mychats", { mobileChatStep: "list" })}
+          testId="admin-nav-mobile-chats"
+        />
+        <BottomNavButton
+          icon={Users}
+          label="Contacts"
+          active={tab === "users"}
+          onClick={() => goToTab("users")}
+          testId="admin-nav-mobile-contacts"
+        />
+        <BottomNavButton
+          icon={Settings}
+          label="Settings"
+          active={
+            tab === "more" ||
+            ["accounts", "permissions", "batches", "chats", "activity", "complaints", "storage", "inactive"].includes(tab)
+          }
+          onClick={() => goToTab("more")}
+          testId="admin-nav-mobile-settings"
+        />
       </div>
     </div>
   );
@@ -2043,13 +2098,28 @@ function NavButton({ icon: Icon, label, active, onClick, testId, badge }) {
   );
 }
 
+function AdminMoreTile({ icon: Icon, title, subtitle, onClick, testId }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className="flex min-h-[88px] touch-manipulation flex-col items-start justify-center gap-1 rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-sm transition active:scale-[0.98] dark:border-gray-800 dark:bg-gray-900"
+    >
+      <Icon className="h-5 w-5 text-emerald-800 dark:text-emerald-300" strokeWidth={1.5} />
+      <span className="font-display text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</span>
+      <span className="text-[11px] text-gray-500 dark:text-gray-400">{subtitle}</span>
+    </button>
+  );
+}
+
 function BottomNavButton({ icon: Icon, label, active, onClick, testId }) {
   return (
     <button
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className="flex-1 h-14 min-h-[56px] flex flex-col items-center justify-center gap-0.5 select-none active:scale-[0.97] transition-transform"
+      className="flex h-14 min-h-[56px] flex-1 touch-manipulation flex-col items-center justify-center gap-0.5 select-none transition-transform active:scale-[0.97]"
     >
       <span
         className={`flex items-center justify-center h-7 w-12 rounded-full transition-colors ${
@@ -2069,21 +2139,6 @@ function BottomNavButton({ icon: Icon, label, active, onClick, testId }) {
       >
         {label}
       </span>
-    </button>
-  );
-}
-
-function MobileTabButton({ label, active, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3.5 py-1.5 rounded-full text-xs whitespace-nowrap border transition-all active:scale-[0.97] ${
-        active
-          ? "bg-emerald-900 border-emerald-900 text-white shadow-sm"
-          : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
-      }`}
-    >
-      {label}
     </button>
   );
 }

@@ -29,15 +29,25 @@ export default function TopBar({
   const canRaiseComplaint = !!onRaiseComplaint && user?.role === "client";
 
   return (
-    <header className="h-14 bg-white/90 dark:bg-gray-950/80 backdrop-blur-xl border-b border-gray-200 dark:border-gray-800 px-4 flex items-center justify-between sticky top-0 z-20" data-testid="topbar">
-      <div className="flex items-center gap-2 min-w-0">
+    <header
+      className="sticky top-0 z-20 flex flex-col border-b border-gray-200 bg-white/95 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-950/90"
+      data-testid="topbar"
+    >
+      {/* Reserve space for the OS status bar (signal, wifi, battery). Below this, app chrome starts. */}
+      <div
+        className="shrink-0 w-full bg-white/95 dark:bg-gray-950/90"
+        style={{ minHeight: "max(env(safe-area-inset-top, 0px), 36px)" }}
+        aria-hidden
+      />
+      <div className="flex min-h-[44px] flex-1 items-center justify-between gap-2 px-3 sm:h-12 sm:px-4">
+      <div className="flex min-w-0 items-center gap-2">
         {onBack && (
-          <Button size="icon" variant="ghost" className="rounded-full" onClick={onBack} data-testid="topbar-back-btn" title="Back">
+          <Button size="icon" variant="ghost" className="h-10 w-10 shrink-0 touch-manipulation rounded-full" onClick={onBack} data-testid="topbar-back-btn" title="Back">
             <ArrowLeft className="h-5 w-5" strokeWidth={1.5} />
           </Button>
         )}
-        <div className="h-9 w-9 rounded-xl bg-emerald-900 text-white flex items-center justify-center shrink-0 relative">
-          <MessageCircle className="h-5 w-5" />
+        <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-900 text-white sm:h-9 sm:w-9 sm:rounded-xl">
+          <MessageCircle className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
           {unreadTotal > 0 && (
             <span className="absolute -top-1.5 -right-1.5 h-5 min-w-[20px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center border-2 border-white">
               {unreadTotal > 99 ? "99+" : unreadTotal}
@@ -45,11 +55,11 @@ export default function TopBar({
           )}
         </div>
         <div className="min-w-0">
-          <div className="font-display font-semibold leading-tight truncate">{title}</div>
+          <div className="font-display text-sm font-semibold leading-tight truncate sm:text-base">{title}</div>
         </div>
       </div>
 
-      <div className="flex items-center gap-1.5 sm:gap-2">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         {canCreateAccounts && (
           <Button
             size="sm"
@@ -66,7 +76,7 @@ export default function TopBar({
         <Button
           size="icon"
           variant="ghost"
-          className="rounded-full"
+          className="h-10 w-10 touch-manipulation rounded-full"
           onClick={toggleTheme}
           data-testid="topbar-theme-toggle"
           title={isDark ? "Switch to light mode" : "Switch to dark mode"}
@@ -80,7 +90,7 @@ export default function TopBar({
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="icon" variant="ghost" className="rounded-full" data-testid="topbar-menu-btn" title="Menu">
+            <Button size="icon" variant="ghost" className="h-10 w-10 touch-manipulation rounded-full" data-testid="topbar-menu-btn" title="Menu">
               <MoreVertical className="h-5 w-5" strokeWidth={1.5} />
             </Button>
           </DropdownMenuTrigger>
@@ -104,6 +114,7 @@ export default function TopBar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+      </div>
       </div>
     </header>
   );

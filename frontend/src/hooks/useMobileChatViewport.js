@@ -1,29 +1,14 @@
 import { useEffect } from "react";
 
 /**
- * WhatsApp-style mobile chat layout fix.
+ * WhatsApp-style mobile chat: lock document scroll and publish a stable shell
+ * height for the chat chrome.
  *
- * Two things go wrong when the soft keyboard opens on Android Chrome / iOS
- * Safari and they have to be solved together:
- *
- *   1. `html` / `body` are allowed to scroll. When the user taps the chat
- *      composer the browser does `scrollIntoView` on the input and walks up
- *      looking for any scrollable ancestor — finding `body`, it pushes the
- *      whole layout up so the chat header scrolls off the top.
- *
- *   2. `100dvh` (and friends) isn't perfectly reliable. On some browsers it
- *      doesn't update fast enough when the keyboard opens/closes, so the
- *      flex layout briefly overflows the visible area, which again lets the
- *      browser shift things around.
- *
- * This hook does both: it pins `html` and `body` to the visual viewport while
- * the chat screen is mounted, and it publishes the visual viewport height as
- * a CSS variable `--visual-vh` that the root container reads. The chat
- * window's own `flex` + `overflow-auto` then keeps the header pinned and
- * scrolls only the message list, exactly like WhatsApp.
- *
- * Safe to call on every render; the effect cleans up on unmount and never
- * mutates user content.
+ * We intentionally do **not** translate the root by `visualViewport.offsetTop`
+ * anymore: the viewport meta includes `interactive-widget=resizes-content`, so
+ * the layout viewport already shrinks with the soft keyboard. Combining that
+ * with vv offsets made the whole shell (and the focused composer) jump and
+ * “blink” mid-screen while the keyboard animated.
  */
 export default function useMobileChatViewport() {
   useEffect(() => {
@@ -41,7 +26,6 @@ export default function useMobileChatViewport() {
       bodyPosition: body.style.position,
     };
 
-    // Stop body from scrolling on input focus / safari rubber-band.
     html.style.overflow = "hidden";
     body.style.overflow = "hidden";
     html.style.height = "100%";
@@ -50,8 +34,12 @@ export default function useMobileChatViewport() {
     const vv = window.visualViewport;
 
     const update = () => {
-      const h = vv ? vv.height : window.innerHeight;
-      html.style.setProperty("--visual-vh", `${h}px`);
+      // With `interactive-widget=resizes-content`, `innerHeight` tracks the
+      // visible area when the keyboard opens. `vv.height` + `offsetTop` would
+      // double-apply and fight scroll-into-view on the focused input.
+      html.style.setProperty("--visual-vh", `${window.innerHeight}px`);
+      html.style.setProperty("--vv-offset-top", "0px");
+      html.style.setProperty("--vv-offset-left", "0px");
     };
 
     update();
@@ -71,6 +59,8 @@ export default function useMobileChatViewport() {
       html.style.position = prev.htmlPosition;
       body.style.position = prev.bodyPosition;
       html.style.removeProperty("--visual-vh");
+      html.style.removeProperty("--vv-offset-top");
+      html.style.removeProperty("--vv-offset-left");
 
       if (vv) {
         vv.removeEventListener("resize", update);

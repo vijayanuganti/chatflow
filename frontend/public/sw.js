@@ -44,9 +44,15 @@ self.addEventListener("notificationclick", (event) => {
         // try next client
       }
     }
-    // No tab open — open a new one at the target.
+    // No tab open — open a new one at the target (must be absolute for some WebViews).
     if (self.clients.openWindow) {
-      await self.clients.openWindow(targetUrl);
+      let openUrl = targetUrl;
+      try {
+        openUrl = new URL(targetUrl, self.location.origin).href;
+      } catch {
+        /* keep targetUrl */
+      }
+      await self.clients.openWindow(openUrl);
     }
   })());
 });

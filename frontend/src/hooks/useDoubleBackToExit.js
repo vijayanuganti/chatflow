@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { Capacitor } from "@capacitor/core";
 
 /**
  * System back-button hook for SPA "drill-down" navigation.
@@ -32,6 +33,10 @@ import { useCallback, useEffect, useRef } from "react";
  *
  * The legacy prop name `onBeforeExitBack` is still accepted so older
  * callers keep working.
+ *
+ * **Capacitor (Android):** registering `App.addListener('backButton')` disables
+ * the default handler; we forward to `window.history.back()` so the same
+ * `popstate` + sentinel logic runs as in mobile Chrome.
  */
 const SENTINEL_FLAG = "__chatflowBackSentinel";
 
@@ -94,6 +99,29 @@ export default function useDoubleBackToExit({
       window.removeEventListener("popstate", onPopState);
     };
   }, [enabled, pushSentinel]);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    if (typeof window === "undefined") return undefined;
+    if (!Capacitor.isNativePlatform()) return undefined;
+
+    let remove;
+    const ready = import("@capacitor/app").then(({ App }) =>
+      App.addListener("backButton", () => {
+        window.history.back();
+      }).then((handle) => {
+        remove = () => {
+          void handle.remove();
+        };
+      }),
+    );
+
+    return () => {
+      void ready.finally(() => {
+        remove?.();
+      });
+    };
+  }, [enabled]);
 
   return pushSentinel;
 }

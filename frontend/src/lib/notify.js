@@ -13,7 +13,14 @@
  *   showAppNotification({ title: "New message", body: "Hi!", tag: "conv-123", url: "/chat" });
  */
 
-const ICON_URL = "/favicon.svg";
+function notificationIconUrl() {
+  if (typeof window === "undefined" || !window.location?.origin) return "/favicon.svg";
+  try {
+    return new URL("/favicon.svg", window.location.origin).href;
+  } catch {
+    return "/favicon.svg";
+  }
+}
 
 let _registration = null;
 let _registrationPromise = null;
@@ -38,8 +45,13 @@ export function registerServiceWorker() {
   }
   if (_registration) return Promise.resolve(_registration);
   if (_registrationPromise) return _registrationPromise;
+  const swPath =
+    typeof process !== "undefined" && process.env && process.env.PUBLIC_URL
+      ? `${String(process.env.PUBLIC_URL).replace(/\/$/, "")}/sw.js`
+      : "/sw.js";
+
   _registrationPromise = navigator.serviceWorker
-    .register("/sw.js")
+    .register(swPath)
     .then((reg) => {
       _registration = reg;
       return reg;
@@ -97,10 +109,11 @@ export async function showAppNotification({
   if (Notification.permission !== "granted") return false;
   if (!title) return false;
 
+  const iconAbs = notificationIconUrl();
   const payload = {
     body: body || "",
-    icon: ICON_URL,
-    badge: ICON_URL,
+    icon: iconAbs,
+    badge: iconAbs,
     tag: tag || undefined,
     renotify: tag ? renotify : false,
     silent,
@@ -110,10 +123,12 @@ export async function showAppNotification({
   };
 
   // Preferred path: route through the active service worker so Android Chrome
-  // also shows the notification.
+  // / WebView can show the notification. Wait for `ready` so the first alert
+  // after cold start isn't lost while the worker is still installing.
   if ("serviceWorker" in navigator) {
     try {
-      const reg = await registerServiceWorker();
+      await registerServiceWorker();
+      const reg = await navigator.serviceWorker.ready;
       if (reg && typeof reg.showNotification === "function") {
         await reg.showNotification(title, payload);
         return true;

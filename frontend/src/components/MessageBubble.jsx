@@ -1,6 +1,7 @@
 import React from "react";
 import { Check, CheckCheck, Clock, AlertCircle, FileText, Download } from "lucide-react";
 import { fileUrl } from "@/lib/api";
+import VoiceNotePlayer, { parseVoiceNoteDurationLabel } from "@/components/VoiceNotePlayer";
 
 function formatTime(iso) {
   try {
@@ -52,15 +53,13 @@ export default function MessageBubble({ message, mine, showSenderName, totalReci
           <video src={fileUrl(message.file_url)} controls className="rounded-xl max-h-80 mb-1 w-full" />
         )}
         {message.message_type === "audio" && message.file_url && (
-          <audio
-            src={fileUrl(message.file_url)}
-            controls
-            preload="metadata"
-            className="mb-1 w-[240px] sm:w-[280px] max-w-full"
-            data-testid={`audio-player-${message.id}`}
-          >
-            <track kind="captions" />
-          </audio>
+          <div className="mb-1" data-testid={`audio-player-${message.id}`}>
+            <VoiceNotePlayer
+              src={fileUrl(message.file_url)}
+              durationLabel={parseVoiceNoteDurationLabel(message.content)}
+              mine={mine}
+            />
+          </div>
         )}
         {message.message_type === "file" && message.file_url && (
           <a
