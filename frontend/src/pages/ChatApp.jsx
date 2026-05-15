@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import NewChatDialog from "@/components/NewChatDialog";
@@ -26,6 +27,7 @@ import { Plus } from "lucide-react";
 export default function ChatApp() {
   useMobileChatViewport();
   const { user } = useAuth();
+  const location = useLocation();
   const [conversations, setConversations] = useState([]);
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -45,6 +47,14 @@ export default function ChatApp() {
   const canCreateAccounts =
     user?.role === "admin" ||
     (user?.role === "employee" && !!user?.account_creation_access);
+
+  // Open conversation when user taps a push notification (including cold start).
+  useEffect(() => {
+    const convId = location.state?.conversationId;
+    if (!convId || conversations.length === 0) return;
+    const target = conversations.find((c) => c.id === convId);
+    if (target) setSelected(target);
+  }, [location.state?.conversationId, conversations]);
 
   const loadConversations = useCallback(async () => {
     try {

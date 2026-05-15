@@ -223,12 +223,131 @@ client = AsyncIOMotorClient(MONGO_URL, serverSelectionTimeoutMS=10000)
 db = client[DB_NAME]
 
 
-app = FastAPI(title="ChatFlow API")
-api_router = APIRouter(prefix="/api")
+app = FastAPI(title="ChatFlow API", redirect_slashes=False)
+api_router = APIRouter()
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+
+# ---------- Firebase Cloud Messaging ----------
+_firebase_app = None
+
+
+def _firebase_credential_path() -> Optional[Path]:
+    for name in ("firebase-adminsdk.json", "firebase-adminsdk.json.json"):
+        path = ROOT_DIR / name
+        if path.is_file():
+            return path
+    return None
+
+
+def _init_firebase() -> bool:
+    global _firebase_app
+    if _firebase_app is False:
+        return False
+    if _firebase_app is not None:
+        return True
+    cred_path = _firebase_credential_path()
+    if not cred_path:
+        logger.warning("Firebase credentials not found in backend/; FCM disabled")
+        _firebase_app = False
+        return False
+    try:
+        import firebase_admin
+        from firebase_admin import credentials
+
+        cred = credentials.Certificate(str(cred_path))
+        _firebase_app = firebase_admin.initialize_app(cred)
+        logger.info("Firebase Admin initialized for FCM")
+        return True
+    except Exception as e:
+        logger.warning("Firebase init failed: %s", e)
+        _firebase_app = False
+        return False
+
+
+def _fcm_data_payload(data: Optional[Dict]) -> Dict[str, str]:
+    payload: Dict[str, str] = {}
+    for key, value in (data or {}).items():
+        if value is None:
+            continue
+        payload[str(key)] = str(value)
+    return payload
+
+
+def _send_fcm_multicast_blocking(tokens: List[str], title: str, body: str, data: Dict[str, str]):
+    from firebase_admin import messaging
+
+    message = messaging.MulticastMessage(
+        notification=messaging.Notification(title=title, body=body),
+        data=data,
+        tokens=tokens,
+        android=messaging.AndroidConfig(
+            priority="high",
+            notification=messaging.AndroidNotification(
+                title=title,
+                body=body,
+                channel_id="high_importance_channel",
+                priority="max",  # FCM v1 notification_priority: PRIORITY_MAX
+            ),
+        ),
+        apns=messaging.APNSConfig(
+            payload=messaging.APNSPayload(aps=messaging.Aps(sound="default"))
+        ),
+    )
+    return messaging.send_each_for_multicast(message)
+
+
+async def send_fcm_notification(
+    user_id: str,
+    title: str,
+    body: str,
+    data: Optional[Dict] = None,
+) -> None:
+    """Send an FCM v1 notification+data payload to all tokens for a user."""
+    if not _init_firebase():
+        return
+
+    doc = await db.users.find_one({"id": user_id}, {"fcm_tokens": 1, "_id": 0})
+    tokens = [t for t in (doc or {}).get("fcm_tokens") or [] if isinstance(t, str) and t.strip()]
+    if not tokens:
+        return
+
+    str_data = _fcm_data_payload(data)
+    try:
+        response = await asyncio.to_thread(
+            _send_fcm_multicast_blocking, tokens, title, body, str_data
+        )
+    except Exception as e:
+        logger.warning("FCM send failed for user %s: %s", user_id, e)
+        return
+
+    invalid: List[str] = []
+    try:
+        from firebase_admin import messaging
+
+        for idx, resp in enumerate(response.responses):
+            if resp.success:
+                continue
+            exc = resp.exception
+            if isinstance(
+                exc,
+                (
+                    messaging.UnregisteredError,
+                    messaging.SenderIdMismatchError,
+                ),
+            ):
+                invalid.append(tokens[idx])
+    except Exception:
+        pass
+
+    if invalid:
+        await db.users.update_one(
+            {"id": user_id},
+            {"$pull": {"fcm_tokens": {"$in": invalid}}},
+        )
 
 
 # ---------- Phone helpers ----------
@@ -985,6 +1104,32 @@ async def update_profile(body: ProfileBody, user: dict = Depends(get_current_use
 
     fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0, "password_hash": 0})
     return fresh
+
+
+class FcmTokenBody(BaseModel):
+    token: str = Field(..., min_length=1, max_length=4096)
+
+
+@app.post("/api/users/me/fcm-token", tags=["users"])
+async def register_fcm_token(
+    body: FcmTokenBody,
+    user: dict = Depends(get_current_user),
+):
+    token = body.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Token is required")
+    print(f"DEBUG: Received token for user {user['id']}")
+    result = await db.users.update_one(
+        {"id": user["id"]},
+        {"$addToSet": {"fcm_tokens": token}},
+    )
+    logger.info(
+        "FCM token registered for user %s (matched=%s modified=%s)",
+        user["id"],
+        result.matched_count,
+        result.modified_count,
+    )
+    return {"message": "Token registered", "stored": result.modified_count > 0 or result.matched_count > 0}
 
 
 @api_router.post("/users/me/password")
@@ -2307,6 +2452,29 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
     )
 
     await manager.broadcast_message(msg, conv)
+
+    for recipient_id in msg["recipient_ids"]:
+        if manager.active.get(recipient_id):
+            continue
+        if conv["type"] == "group":
+            fcm_title = (conv.get("name") or "Group")[:80]
+            fcm_body = preview
+        else:
+            fcm_title = (user.get("full_name") or "New message")[:80]
+            fcm_body = preview
+        asyncio.create_task(
+            send_fcm_notification(
+                recipient_id,
+                fcm_title,
+                fcm_body,
+                {
+                    "type": "new_message",
+                    "conversation_id": conv["id"],
+                    "message_id": msg["id"],
+                },
+            )
+        )
+
     return msg
 
 
@@ -2802,11 +2970,20 @@ async def shutdown_db_client():
     client.close()
 
 # ---------- CORS & router ----------
+_cors_allow_all = (os.environ.get("CORS_ALLOW_ALL") or "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 _cors_env = (os.environ.get("CORS_ORIGINS") or "").strip()
-if _cors_env:
+if _cors_allow_all:
+    CORS_ORIGINS = ["*"]
+    CORS_CREDENTIALS = False
+elif _cors_env:
     CORS_ORIGINS = [o.strip().rstrip("/") for o in _cors_env.split(",") if o.strip()]
+    CORS_CREDENTIALS = True
 else:
-    # This list must be indented to belong to the 'else' block
     CORS_ORIGINS = [
         "http://localhost",
         "http://localhost:3000",
@@ -2814,13 +2991,15 @@ else:
         "http://127.0.0.1:3000",
         "capacitor://localhost",
         "ionic://localhost",
+        "https://chatflow-2-z7w6.onrender.com",
     ]
+    CORS_CREDENTIALS = True
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=CORS_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(api_router)
+app.include_router(api_router, prefix="/api")

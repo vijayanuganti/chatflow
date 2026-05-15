@@ -8,6 +8,7 @@ import LoginPage from "@/pages/Login";
 import ChatApp from "@/pages/ChatApp";
 import AdminDashboard from "@/pages/AdminDashboard";
 import { Toaster } from "@/components/ui/sonner";
+import PushNotificationBootstrap from "@/components/PushNotificationBootstrap";
 
 function Protected({ children, roles }) {
   const { user, loading } = useAuth();
@@ -45,6 +46,7 @@ function App() {
       <ThemeProvider>
       <AuthProvider>
         <BrowserRouter>
+          <PushNotificationBootstrap />
           <Routes>
             <Route path="/" element={<RoleRouter />} />
             <Route path="/login" element={<LoginPage />} />

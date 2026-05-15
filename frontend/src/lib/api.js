@@ -1,6 +1,12 @@
 import axios from "axios";
 
-import { resolveBackendUrl } from "./backendUrl";
+import {
+  getMobileBackendUrlFromEnv,
+  isCapacitorNative,
+  joinBackendPath,
+  normalizeBackendOrigin,
+  resolveBackendUrl,
+} from "./backendUrl";
 
 /**
  * Auth material:
@@ -217,15 +223,80 @@ export function clearAuthSession() {
   }
 }
 
-export const BACKEND_URL = resolveBackendUrl();
-export const API = BACKEND_URL ? `${BACKEND_URL}/api` : "/api";
+/** FastAPI origin without `/api` suffix (baked at build time from .env). */
+export const BASE_URL = resolveBackendUrl();
+/** @deprecated Use BASE_URL */
+export const BACKEND_URL = BASE_URL;
+
+/** Full REST prefix, e.g. http://192.168.1.13:8000/api — resolved per request on native. */
+export function getApiBaseUrl() {
+  const backend = normalizeBackendOrigin(resolveBackendUrl());
+  if (backend) return joinBackendPath(backend, "api");
+  if (isCapacitorNative()) {
+    console.error("[api] getApiBaseUrl: missing REACT_APP_BACKEND_URL_MOBILE — requests will fail");
+  }
+  return "/api";
+}
+
+export const API = getApiBaseUrl();
+
+/**
+ * Full URL for FCM token registration on native (REACT_APP_BACKEND_URL_MOBILE only).
+ * @returns {string|null}
+ */
+export function getFcmTokenPostUrl() {
+  if (isCapacitorNative()) {
+    const backend = getMobileBackendUrlFromEnv();
+    if (!backend) return null;
+    return joinBackendPath(backend, "api", "users", "me", "fcm-token");
+  }
+  const base = normalizeBackendOrigin(resolveBackendUrl());
+  return base ? joinBackendPath(base, "api", "users", "me", "fcm-token") : null;
+}
+
+/** API base used for FCM POST on native — always from REACT_APP_BACKEND_URL_MOBILE. */
+export function getFcmApiBaseUrl() {
+  if (isCapacitorNative()) {
+    const backend = getMobileBackendUrlFromEnv();
+    return backend ? joinBackendPath(backend, "api") : null;
+  }
+  return getApiBaseUrl();
+}
 
 export const api = axios.create({
   baseURL: API,
   withCredentials: true,
 });
 
+/**
+ * Resolves when a JWT is stored and passes browser-id binding (post-login / session restore).
+ */
+export function waitUntilAuthenticated({ maxWaitMs = 20000, intervalMs = 250 } = {}) {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const tick = () => {
+      const token = getStoredAccessToken();
+      if (token) {
+        resolve(token);
+        return;
+      }
+      if (Date.now() - started >= maxWaitMs) {
+        reject(new Error("Authentication token not available"));
+        return;
+      }
+      window.setTimeout(tick, intervalMs);
+    };
+    tick();
+  });
+}
+
 api.interceptors.request.use((config) => {
+  const url = config.url || "";
+  const isAbsolute = /^https?:\/\//i.test(url);
+  if (!isAbsolute) {
+    config.baseURL = getApiBaseUrl();
+  }
+
   const headers = config.headers ?? {};
   config.headers = headers;
   const set = (key, value) => {
@@ -256,8 +327,9 @@ export function formatApiError(err) {
  * to WebSocket). Pass explicitToken for mobile; otherwise the tab token is used.
  */
 export function getWsUrl(explicitToken) {
-  if (!BACKEND_URL) return null;
-  const url = new URL(BACKEND_URL);
+  const backend = resolveBackendUrl();
+  if (!backend) return null;
+  const url = new URL(backend);
   const wsProto = url.protocol === "https:" ? "wss:" : "ws:";
   const base = `${wsProto}//${url.host}/api/ws`;
   const token =
@@ -279,5 +351,6 @@ export function getWsUrl(explicitToken) {
 export function fileUrl(path) {
   if (!path) return "";
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
-  return `${BACKEND_URL}${path}`;
+  const backend = resolveBackendUrl();
+  return backend ? `${backend}${path}` : path;
 }
