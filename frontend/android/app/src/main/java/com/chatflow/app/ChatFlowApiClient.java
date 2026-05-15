@@ -19,7 +19,11 @@ public final class ChatFlowApiClient {
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final String HEADER_PRIORITY = "X-Priority";
 
-    /** Shared client — connection pool reused across every reply / mark-read. */
+    /** Matches FastAPI {@code POST /api/notifications/direct-reply}. */
+    private static final String PATH_DIRECT_REPLY = "/notifications/direct-reply";
+    /** Matches FastAPI {@code POST /api/notifications/mark-read}. */
+    private static final String PATH_MARK_READ = "/notifications/mark-read";
+
     private static final OkHttpClient CLIENT = new OkHttpClient.Builder()
             .connectionPool(new ConnectionPool(8, 5, TimeUnit.MINUTES))
             .connectTimeout(8, TimeUnit.SECONDS)
@@ -38,9 +42,9 @@ public final class ChatFlowApiClient {
             if (conversationId != null && !conversationId.isEmpty()) {
                 body.put("conversation_id", conversationId);
             }
-            return postJson(context, "/send-message", body);
+            return postJson(context, PATH_DIRECT_REPLY, body);
         } catch (Exception e) {
-            Log.e(TAG, "send-message payload error", e);
+            Log.e(TAG, "direct-reply payload error", e);
             return false;
         }
     }
@@ -52,7 +56,7 @@ public final class ChatFlowApiClient {
             if (conversationId != null && !conversationId.isEmpty()) {
                 body.put("conversation_id", conversationId);
             }
-            return postJson(context, "/mark-read", body);
+            return postJson(context, PATH_MARK_READ, body);
         } catch (Exception e) {
             Log.e(TAG, "mark-read payload error", e);
             return false;
@@ -63,29 +67,51 @@ public final class ChatFlowApiClient {
         long t0 = System.currentTimeMillis();
         Log.d(SPEED_TAG, "Start: " + t0 + " path=" + path);
 
-        if (!ChatFlowAuthStore.hasCredentials(context)) {
-            Log.w(TAG, "Missing auth — call ChatFlowNative.syncAuth from the app after login");
-            Log.d(SPEED_TAG, "End: " + System.currentTimeMillis() + " ms=" + (System.currentTimeMillis() - t0) + " auth=missing");
+        String savedToken = ChatFlowAuthStore.getAuthToken(context);
+        if (savedToken.isEmpty()) {
+            Log.w(TAG, "auth_token missing in SharedPreferences — open app and log in once");
+            Log.d(
+                    SPEED_TAG,
+                    "End: "
+                            + System.currentTimeMillis()
+                            + " ms="
+                            + (System.currentTimeMillis() - t0)
+                            + " path="
+                            + path
+                            + " code=401 auth=missing"
+            );
+            return false;
+        }
+
+        String base = ChatFlowAuthStore.getApiBase(context);
+        if (base.isEmpty()) {
+            Log.w(TAG, "api_base_url missing");
+            Log.d(
+                    SPEED_TAG,
+                    "End: "
+                            + System.currentTimeMillis()
+                            + " ms="
+                            + (System.currentTimeMillis() - t0)
+                            + " path="
+                            + path
+                            + " code=0 auth=no_api_base"
+            );
             return false;
         }
 
         try {
-            String base = ChatFlowAuthStore.getApiBase(context);
-            if (base.endsWith("/")) {
-                base = base.substring(0, base.length() - 1);
-            }
             String url = base + path;
 
             Request.Builder reqBuilder = new Request.Builder()
                     .url(url)
                     .post(RequestBody.create(body.toString(), JSON))
-                    .header("Accept", "application/json")
-                    .header("Authorization", "Bearer " + ChatFlowAuthStore.getToken(context))
-                    .header(HEADER_PRIORITY, "High");
+                    .addHeader("Accept", "application/json")
+                    .addHeader("Authorization", "Bearer " + savedToken)
+                    .addHeader(HEADER_PRIORITY, "High");
 
             String browserId = ChatFlowAuthStore.getBrowserId(context);
             if (!browserId.isEmpty()) {
-                reqBuilder.header("X-ChatFlow-Browser-Id", browserId);
+                reqBuilder.addHeader("X-ChatFlow-Browser-Id", browserId);
             }
 
             try (Response response = CLIENT.newCall(reqBuilder.build()).execute()) {
@@ -94,17 +120,38 @@ public final class ChatFlowApiClient {
                 boolean ok = code >= 200 && code < 300;
                 if (!ok) {
                     String errBody = response.body() != null ? response.body().string() : "";
-                    Log.w(TAG, "POST " + path + " failed HTTP " + code + " body=" + errBody);
+                    Log.w(TAG, "POST " + path + " HTTP " + code + " body=" + errBody);
                 } else {
-                    Log.i(TAG, "POST " + path + " OK");
+                    Log.i(TAG, "POST " + path + " HTTP " + code);
                 }
-                Log.d(SPEED_TAG, "End: " + t1 + " ms=" + (t1 - t0) + " path=" + path + " code=" + code);
+                Log.d(
+                        SPEED_TAG,
+                        "End: "
+                                + t1
+                                + " ms="
+                                + (t1 - t0)
+                                + " path="
+                                + path
+                                + " code="
+                                + code
+                                + " auth=ok"
+                );
                 return ok;
             }
         } catch (Exception e) {
             long t1 = System.currentTimeMillis();
             Log.e(TAG, "POST " + path + " error", e);
-            Log.d(SPEED_TAG, "End: " + t1 + " ms=" + (t1 - t0) + " path=" + path + " error=" + e.getMessage());
+            Log.d(
+                    SPEED_TAG,
+                    "End: "
+                            + t1
+                            + " ms="
+                            + (t1 - t0)
+                            + " path="
+                            + path
+                            + " code=0 auth=ok error="
+                            + e.getMessage()
+            );
             return false;
         }
     }

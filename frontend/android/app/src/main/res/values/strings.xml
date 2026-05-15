@@ -4,4 +4,6 @@
     <string name="title_activity_main">ChatFlow</string>
     <string name="package_name">com.chatflow.app</string>
     <string name="custom_url_scheme">com.chatflow.app</string>
+    <!-- Fallback API prefix when native sync has not run yet (must match REACT_APP_BACKEND_URL_MOBILE + /api). -->
+    <string name="chatflow_api_base_default">https://chatflow-2-z7w6.onrender.com/api</string>
 </resources>

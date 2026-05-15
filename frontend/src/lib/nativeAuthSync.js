@@ -17,6 +17,7 @@ export async function syncNativeAuthForPush() {
   try {
     await ChatFlowNative.syncAuth({
       token,
+      auth_token: token,
       apiBase,
       browserId,
     });

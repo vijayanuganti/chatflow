@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import { syncNativeAuthForPush } from "@/lib/nativeAuthSync";
 import {
   initCapacitorPush,
   teardownCapacitorPush,
@@ -25,6 +26,7 @@ export default function PushNotificationBootstrap() {
       return undefined;
     }
 
+    void syncNativeAuthForPush();
     void initCapacitorPush(
       user.id,
       (notification) => {

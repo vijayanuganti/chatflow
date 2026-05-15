@@ -45,10 +45,10 @@ public class ChatFlowNativePlugin extends Plugin {
 
     @PluginMethod
     public void syncAuth(PluginCall call) {
-        String token = call.getString("token", "");
+        String token = call.getString("token", call.getString("auth_token", ""));
         String apiBase = call.getString("apiBase", "");
         String browserId = call.getString("browserId", "");
-        ChatFlowAuthStore.save(getContext(), token, apiBase, browserId);
+        ChatFlowAuthStore.save(getContext().getApplicationContext(), token, apiBase, browserId);
         call.resolve();
     }
 

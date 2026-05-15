@@ -1,5 +1,6 @@
 package com.chatflow.app;
 
+import android.app.NotificationManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -17,7 +18,6 @@ public class NotificationActionReceiver extends BroadcastReceiver {
     private static final String TAG = "ChatFlowNotifyAction";
     private static final String SPEED_TAG = "ChatFlowSpeed";
 
-    /** Must match {@link ChatFlowNotificationHelper#KEY_TEXT_REPLY} and RemoteInput result key. */
     public static final String KEY_TEXT_REPLY = ChatFlowNotificationHelper.KEY_TEXT_REPLY;
 
     public static final String ACTION_REPLY = "com.chatflow.app.REPLY_ACTION";
@@ -34,16 +34,19 @@ public class NotificationActionReceiver extends BroadcastReceiver {
             return;
         }
 
-        final PendingResult pendingResult = goAsync();
-        final Context appContext = context.getApplicationContext();
-        final String action = intent.getAction();
         final String messageId = intent.getStringExtra(ChatFlowNotificationHelper.EXTRA_MESSAGE_ID);
         final String conversationId = intent.getStringExtra(ChatFlowNotificationHelper.EXTRA_CONVERSATION_ID);
 
         if (messageId == null || messageId.isEmpty()) {
-            pendingResult.finish();
             return;
         }
+
+        // Optimistic dismissal the instant the user taps Reply / Mark as Read.
+        optimisticallyDismiss(context, messageId);
+
+        final PendingResult pendingResult = goAsync();
+        final Context appContext = context.getApplicationContext();
+        final String action = intent.getAction();
 
         EXECUTOR.execute(() -> {
             try {
@@ -60,11 +63,18 @@ public class NotificationActionReceiver extends BroadcastReceiver {
         });
     }
 
-    private void handleMarkRead(Context context, String messageId, String conversationId, long actionStart) {
-        Log.d(SPEED_TAG, "Start: " + System.currentTimeMillis() + " action=mark_read_pre_network");
-
-        // Dismiss immediately — don't wait for the server.
+    private void optimisticallyDismiss(Context context, String messageId) {
+        NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) {
+            int nid = ChatFlowNotificationHelper.notificationIdFor(messageId);
+            nm.cancel(nid);
+            Log.d(SPEED_TAG, "Dismissed notification id=" + nid + " (optimistic)");
+        }
         ChatFlowNotificationHelper.cancel(context, messageId);
+    }
+
+    private void handleMarkRead(Context context, String messageId, String conversationId, long actionStart) {
+        Log.d(SPEED_TAG, "Start: " + System.currentTimeMillis() + " action=mark_read_network");
 
         boolean ok = ChatFlowApiClient.postMarkRead(context, messageId, conversationId);
         if (ok) {
@@ -96,10 +106,7 @@ public class NotificationActionReceiver extends BroadcastReceiver {
         }
 
         Log.d(TAG, "Reply: " + text.length() + " chars for msg=" + messageId);
-        Log.d(SPEED_TAG, "Start: " + System.currentTimeMillis() + " action=reply_pre_network");
-
-        // Dismiss immediately so the UI feels instant; network runs on pooled OkHttp.
-        ChatFlowNotificationHelper.cancel(context, messageId);
+        Log.d(SPEED_TAG, "Start: " + System.currentTimeMillis() + " action=reply_network");
 
         boolean ok = ChatFlowApiClient.postSendMessage(context, messageId, conversationId, text);
         if (ok) {

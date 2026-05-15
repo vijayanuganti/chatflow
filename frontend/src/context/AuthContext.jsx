@@ -67,6 +67,7 @@ export function AuthProvider({ children }) {
               }
             })();
             setStoredUser(u, remember);
+            void syncNativeAuthForPush();
           }
         }
       } catch {

@@ -2531,13 +2531,52 @@ def _is_high_priority_notification_action(request: Request) -> bool:
     return (request.headers.get("X-Priority") or "").strip().lower() == "high"
 
 
+@api_router.post("/notifications/direct-reply")
+async def notification_direct_reply(
+    request: Request,
+    body: NotificationSendBody,
+    user: dict = Depends(get_current_user),
+):
+    """Send a text reply from an Android notification inline reply."""
+    if _is_high_priority_notification_action(request):
+        logger.debug("notification direct-reply high priority user=%s", user.get("id"))
+    conv_id = (body.conversation_id or "").strip()
+    if not conv_id:
+        msg_doc = await db.messages.find_one({"id": body.message_id}, {"_id": 0, "conversation_id": 1})
+        if not msg_doc:
+            raise HTTPException(status_code=404, detail="Message not found")
+        conv_id = msg_doc["conversation_id"]
+    return await send_message(
+        MessageBody(conversation_id=conv_id, content=body.text, message_type="text"),
+        user,
+    )
+
+
+@api_router.post("/notifications/mark-read")
+async def notification_mark_read_route(
+    request: Request,
+    body: NotificationMarkReadBody,
+    user: dict = Depends(get_current_user),
+):
+    """Mark conversation read from an Android notification action."""
+    if _is_high_priority_notification_action(request):
+        logger.debug("notification mark-read high priority user=%s", user.get("id"))
+    conv_id = (body.conversation_id or "").strip()
+    if conv_id:
+        return await mark_read(conv_id, user)
+    msg_doc = await db.messages.find_one({"id": body.message_id}, {"_id": 0, "conversation_id": 1})
+    if not msg_doc:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return await mark_read(msg_doc["conversation_id"], user)
+
+
 @api_router.post("/send-message")
 async def notification_send_message(
     request: Request,
     body: NotificationSendBody,
     user: dict = Depends(get_current_user),
 ):
-    """Send a text reply triggered from an Android notification action."""
+    """Send a text reply triggered from an Android notification action (legacy path)."""
     if _is_high_priority_notification_action(request):
         logger.debug("notification send-message high priority user=%s", user.get("id"))
     conv_id = (body.conversation_id or "").strip()
