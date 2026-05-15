@@ -19,7 +19,14 @@ function formatTime(iso) {
  *  - showSenderName: whether to show sender label (for groups + admin monitor)
  *  - totalRecipients: for read receipts (group: double-tick when read by everyone)
  */
-export default function MessageBubble({ message, mine, showSenderName, totalRecipients, showReceipts = true }) {
+export default function MessageBubble({
+  message,
+  mine,
+  showSenderName,
+  totalRecipients,
+  showReceipts = true,
+  onImageClick,
+}) {
   const time = formatTime(message.created_at);
   const bubbleClass = mine ? "bubble-sent" : "bubble-received";
   const align = mine ? "items-end" : "items-start";
@@ -42,12 +49,18 @@ export default function MessageBubble({ message, mine, showSenderName, totalReci
           </div>
         )}
         {message.message_type === "image" && message.file_url && (
-          <img
-            src={fileUrl(message.file_url)}
-            alt={message.file_name || "image"}
-            className="rounded-xl max-h-80 mb-1 cursor-pointer"
-            onClick={() => window.open(fileUrl(message.file_url), "_blank")}
-          />
+          <button
+            type="button"
+            className="block p-0 border-0 bg-transparent cursor-pointer rounded-xl overflow-hidden mb-1 max-w-full"
+            onClick={() => onImageClick?.(fileUrl(message.file_url), message.file_name || "image")}
+            data-testid={`message-image-${message.id}`}
+          >
+            <img
+              src={fileUrl(message.file_url)}
+              alt={message.file_name || "image"}
+              className="rounded-xl max-h-80 w-full object-cover pointer-events-none"
+            />
+          </button>
         )}
         {message.message_type === "video" && message.file_url && (
           <video src={fileUrl(message.file_url)} controls className="rounded-xl max-h-80 mb-1 w-full" />

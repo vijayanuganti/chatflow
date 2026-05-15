@@ -305,21 +305,32 @@ def _fcm_data_payload(data: Optional[Dict]) -> Dict[str, str]:
 def _send_fcm_multicast_blocking(tokens: List[str], title: str, body: str, data: Dict[str, str]):
     from firebase_admin import messaging
 
+    # Unique tag per message so Android does not replace prior banners (sound-only updates).
+    message_id = (data or {}).get("message_id") or uuid.uuid4().hex
+    notification_tag = f"msg-{message_id}"
+    payload_data = dict(data or {})
+    payload_data["android_priority"] = "2"  # PRIORITY_MAX on Android
+
+    # Android: data-only so ChatFlowMessagingService can attach Reply / Mark as Read actions.
+    payload_data["title"] = title
+    payload_data["body"] = body
+    payload_data["notification_tag"] = notification_tag
+
     message = messaging.MulticastMessage(
-        notification=messaging.Notification(title=title, body=body),
-        data=data,
+        data=payload_data,
         tokens=tokens,
         android=messaging.AndroidConfig(
             priority="high",
-            notification=messaging.AndroidNotification(
-                title=title,
-                body=body,
-                channel_id="high_importance_channel",
-                priority="max",  # FCM v1 notification_priority: PRIORITY_MAX
-            ),
+            ttl=timedelta(hours=24),
+            direct_boot_ok=True,
         ),
         apns=messaging.APNSConfig(
-            payload=messaging.APNSPayload(aps=messaging.Aps(sound="default"))
+            payload=messaging.APNSPayload(
+                aps=messaging.Aps(
+                    alert=messaging.ApsAlert(title=title, body=body),
+                    sound="default",
+                )
+            )
         ),
     )
     return messaging.send_each_for_multicast(message)
@@ -741,6 +752,18 @@ class MessageBody(BaseModel):
     message_type: str = "text"
     file_url: Optional[str] = None
     file_name: Optional[str] = None
+
+
+class NotificationSendBody(BaseModel):
+    """Payload from Android notification direct reply."""
+    message_id: str
+    text: str
+    conversation_id: Optional[str] = None
+
+
+class NotificationMarkReadBody(BaseModel):
+    """Payload from Android notification mark-as-read action."""
+    message_id: str
 
 
 class StartDirectBody(BaseModel):
@@ -2478,9 +2501,9 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
 
     await manager.broadcast_message(msg, conv)
 
+    # Always send FCM — WebSocket may still be registered while the WebView is suspended
+    # in the background (common on OPPO/Xiaomi/Vivo), which would skip push and drop messages.
     for recipient_id in msg["recipient_ids"]:
-        if manager.active.get(recipient_id):
-            continue
         if conv["type"] == "group":
             fcm_title = (conv.get("name") or "Group")[:80]
             fcm_body = preview
@@ -2501,6 +2524,36 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
         )
 
     return msg
+
+
+@api_router.post("/send-message")
+async def notification_send_message(
+    body: NotificationSendBody,
+    user: dict = Depends(get_current_user),
+):
+    """Send a text reply triggered from an Android notification action."""
+    conv_id = (body.conversation_id or "").strip()
+    if not conv_id:
+        msg_doc = await db.messages.find_one({"id": body.message_id}, {"_id": 0, "conversation_id": 1})
+        if not msg_doc:
+            raise HTTPException(status_code=404, detail="Message not found")
+        conv_id = msg_doc["conversation_id"]
+    return await send_message(
+        MessageBody(conversation_id=conv_id, content=body.text, message_type="text"),
+        user,
+    )
+
+
+@api_router.post("/mark-read")
+async def notification_mark_read(
+    body: NotificationMarkReadBody,
+    user: dict = Depends(get_current_user),
+):
+    """Mark conversation read from an Android notification action."""
+    msg_doc = await db.messages.find_one({"id": body.message_id}, {"_id": 0, "conversation_id": 1})
+    if not msg_doc:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return await mark_read(msg_doc["conversation_id"], user)
 
 
 @api_router.post("/conversations/{conv_id}/read")

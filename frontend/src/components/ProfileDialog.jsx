@@ -19,6 +19,8 @@ import {
   setNotificationTone,
   NOTIFICATION_TONE_EVENT,
   playNotificationTone,
+  getCustomToneDataUrl,
+  setCustomToneDataUrl,
 } from "@/lib/notificationTone";
 import { isCapacitorNativeApp, pickPhotoFileForUpload } from "@/lib/nativeMedia";
 
@@ -57,6 +59,8 @@ export default function ProfileDialog({ open, onOpenChange }) {
   const [medical, setMedical] = useState(null);
   const [medicalLoading, setMedicalLoading] = useState(false);
   const [notificationTone, setNotificationToneState] = useState(() => getNotificationTone());
+  const customToneInputRef = useRef(null);
+  const CUSTOM_TONE_MAX_BYTES = 300 * 1024;
 
   const isClient = user?.role === "client";
 
@@ -391,8 +395,8 @@ export default function ProfileDialog({ open, onOpenChange }) {
                 New message sound
               </h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Plays when someone messages you and you are not already viewing that chat (same moment as the desktop / mobile notification, if allowed).
-                With a tone enabled, the browser notification stays silent so you do not get two sounds.
+                Default uses your phone&apos;s system message sound for push alerts. In-app presets play inside ChatFlow
+                and mute the duplicate OS beep. Custom uploads a short clip stored on this device only.
               </p>
             </div>
             <div className="space-y-2">
@@ -416,12 +420,69 @@ export default function ProfileDialog({ open, onOpenChange }) {
                 </button>
               ))}
             </div>
+            {notificationTone === "custom" && (
+              <div className="space-y-2 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 p-3">
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  {getCustomToneDataUrl()
+                    ? "Custom tone saved on this device."
+                    : "Choose a short sound file (max 300 KB)."}
+                </p>
+                <input
+                  ref={customToneInputRef}
+                  type="file"
+                  accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac"
+                  className="hidden"
+                  data-testid="notification-tone-custom-file"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!file) return;
+                    if (file.size > CUSTOM_TONE_MAX_BYTES) {
+                      toast.error("Sound file must be 300 KB or smaller.");
+                      return;
+                    }
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      setCustomToneDataUrl(String(reader.result || ""));
+                      setNotificationTone("custom");
+                      setNotificationToneState("custom");
+                      toast.success("Custom message tone saved.");
+                    };
+                    reader.onerror = () => toast.error("Could not read that file.");
+                    reader.readAsDataURL(file);
+                  }}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-full h-10"
+                    onClick={() => customToneInputRef.current?.click()}
+                  >
+                    {getCustomToneDataUrl() ? "Replace sound" : "Upload sound"}
+                  </Button>
+                  {getCustomToneDataUrl() && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="rounded-full h-10 text-rose-600"
+                      onClick={() => {
+                        setCustomToneDataUrl("");
+                        toast.message("Custom tone removed.");
+                      }}
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
             <Button
               type="button"
               variant="outline"
               className="w-full rounded-full h-11 gap-2"
               data-testid="notification-tone-preview"
-              disabled={notificationTone === "off"}
+              disabled={notificationTone === "off" || notificationTone === "system"}
               onClick={() => playNotificationTone(notificationTone)}
             >
               <Volume2 className="h-4 w-4" aria-hidden />

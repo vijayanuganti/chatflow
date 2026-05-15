@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  Paperclip,
+  Plus,
+  Camera,
   Send,
   Loader2,
   Eye,
@@ -21,7 +22,13 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { api, formatApiError } from "@/lib/api";
-import { isCapacitorNativeApp, pickPhotoFileForUpload } from "@/lib/nativeMedia";
+import {
+  isCapacitorNativeApp,
+  capturePhotoFileForUpload,
+  pickGalleryPhotoFileForUpload,
+} from "@/lib/nativeMedia";
+import EmojiPickerPopover from "./EmojiPickerPopover";
+import ImageLightbox from "./ImageLightbox";
 import { formatWhatsAppLastSeen } from "@/lib/datetime";
 import { useAuth } from "@/context/AuthContext";
 import Avatar from "./Avatar";
@@ -61,6 +68,8 @@ export default function ChatWindow({
   const lastTypingPingRef = useRef(0);
   const [medicalOpen, setMedicalOpen] = useState(false);
   const [dietOpen, setDietOpen] = useState(false);
+  const [lightbox, setLightbox] = useState(null);
+  const cameraInputRef = useRef(null);
 
   /* Only show messages that actually belong to the currently-open
      conversation. Without this, switching from chat A → chat B briefly
@@ -267,11 +276,46 @@ export default function ChatWindow({
     await uploadAttachmentFile(file, inputEl);
   };
 
+  const insertEmoji = useCallback((emoji) => {
+    const el = composerRef.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    const next = `${text.slice(0, start)}${emoji}${text.slice(end)}`;
+    setText(next);
+    handleTyping(next);
+    requestAnimationFrame(() => {
+      if (!el) return;
+      try {
+        el.focus({ preventScroll: true });
+      } catch {
+        el.focus();
+      }
+      const pos = start + emoji.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }, [text, handleTyping]);
+
+  const handleCameraCapture = useCallback(async () => {
+    if (isCapacitorNativeApp()) {
+      try {
+        const file = await capturePhotoFileForUpload();
+        await uploadAttachmentFile(file, null);
+      } catch (err) {
+        const msg = (err && (err.message || String(err))) || "";
+        if (!/cancel|dismiss|denied|User cancelled/i.test(msg)) {
+          toast.error(formatApiError(err) || msg || "Could not open camera");
+        }
+      }
+      return;
+    }
+    cameraInputRef.current?.click();
+  }, [uploadAttachmentFile]);
+
   const openPicker = useCallback(async (kind) => {
     setAttachOpen(false);
     if (kind === "photo" && isCapacitorNativeApp()) {
       try {
-        const file = await pickPhotoFileForUpload();
+        const file = await pickGalleryPhotoFileForUpload();
         await uploadAttachmentFile(file, null);
       } catch (err) {
         const msg = (err && (err.message || String(err))) || "";
@@ -535,15 +579,32 @@ export default function ChatWindow({
               showSenderName={showSenderNames}
               totalRecipients={totalRecipients}
               showReceipts={!readOnly}
+              onImageClick={(src, alt) => setLightbox({ src, alt })}
             />
           );
         })}
       </div>
 
-      {/* Input */}
+      <ImageLightbox
+        open={!!lightbox?.src}
+        src={lightbox?.src}
+        alt={lightbox?.alt}
+        onClose={() => setLightbox(null)}
+      />
+
+      {/* Input — WhatsApp-style: emoji | text | attach (+) | camera | send/mic */}
       {!readOnly && (
         <div className="relative z-10 shrink-0 border-t border-gray-200 bg-white pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-2 shadow-[0_-4px_12px_rgba(0,0,0,0.04)] dark:border-gray-800 dark:bg-gray-950 dark:shadow-[0_-4px_16px_rgba(0,0,0,0.35)] sm:pb-3 sm:pt-3">
-          <div className="flex items-end gap-2 px-2.5 sm:px-3">
+          <div className="flex items-end gap-1 px-2 sm:gap-1.5 sm:px-3">
+            <input
+              ref={cameraInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFile}
+              data-testid="chat-camera-input"
+              accept="image/*"
+              capture="environment"
+            />
             <input
               ref={photoInputRef}
               type="file"
@@ -581,17 +642,40 @@ export default function ChatWindow({
                 the row and renders its own recording strip. */}
             {!recording && (
               <>
+                <EmojiPickerPopover disabled={uploading} onPick={insertEmoji} />
+                <Textarea
+                  ref={composerRef}
+                  value={text}
+                  onChange={(e) => handleTyping(e.target.value)}
+                  onKeyDown={handleKey}
+                  onBlur={() => {
+                    setComposerFocused(false);
+                    flushTypingStop();
+                  }}
+                  onFocus={() => {
+                    setComposerFocused(true);
+                    if (readOnly || !conversation?.id || !sendTyping || !text.trim()) return;
+                    sendTyping(conversation.id, true);
+                  }}
+                  placeholder="Type a message"
+                  rows={1}
+                  data-testid="chat-input"
+                  className="max-h-32 min-h-[44px] flex-1 resize-none rounded-2xl border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 dark:text-gray-100 mx-0.5"
+                  enterKeyHint="send"
+                  autoComplete="off"
+                />
                 <Popover open={attachOpen} onOpenChange={setAttachOpen}>
                   <PopoverTrigger asChild>
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="rounded-full text-gray-500 hover:text-emerald-900 dark:hover:text-emerald-300"
+                      className="shrink-0 rounded-full text-gray-500 hover:text-emerald-900 dark:hover:text-emerald-300"
                       disabled={uploading}
                       data-testid="chat-attach-btn"
-                      title="Attach media"
+                      title="Attach"
+                      aria-label="Attach"
                     >
-                      {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Paperclip className="h-5 w-5" strokeWidth={1.5} />}
+                      {uploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Plus className="h-5 w-5" strokeWidth={1.5} />}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent
@@ -659,27 +743,19 @@ export default function ChatWindow({
                     </button>
                   </PopoverContent>
                 </Popover>
-                <Textarea
-                  ref={composerRef}
-                  value={text}
-                  onChange={(e) => handleTyping(e.target.value)}
-                  onKeyDown={handleKey}
-                  onBlur={() => {
-                    setComposerFocused(false);
-                    flushTypingStop();
-                  }}
-                  onFocus={() => {
-                    setComposerFocused(true);
-                    if (readOnly || !conversation?.id || !sendTyping || !text.trim()) return;
-                    sendTyping(conversation.id, true);
-                  }}
-                  placeholder="Type a message"
-                  rows={1}
-                  data-testid="chat-input"
-                  className="max-h-32 min-h-[44px] flex-1 resize-none rounded-2xl border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 dark:text-gray-100"
-                  enterKeyHint="send"
-                  autoComplete="off"
-                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="shrink-0 rounded-full text-gray-500 hover:text-emerald-900 dark:hover:text-emerald-300"
+                  disabled={uploading}
+                  onClick={() => void handleCameraCapture()}
+                  data-testid="chat-camera-btn"
+                  title="Camera"
+                  aria-label="Camera"
+                >
+                  <Camera className="h-5 w-5" strokeWidth={1.5} />
+                </Button>
               </>
             )}
             {/* When the textarea has content, show the Send button instead of

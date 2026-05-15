@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { Capacitor } from "@capacitor/core";
 import { getWsUrl } from "@/lib/api";
 
 export default function useChatSocket({
@@ -166,7 +167,43 @@ export default function useChatSocket({
     };
     document.addEventListener("visibilitychange", onVis);
 
+    let appStateListener = null;
+    if (Capacitor.isNativePlatform()) {
+      import("@capacitor/app")
+        .then(({ App }) => {
+          appStateListener = App.addListener("appStateChange", ({ isActive }) => {
+            if (isActive) {
+              if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+                connect();
+              }
+            } else {
+              closedIntentionallyRef.current = true;
+              clearTimeout(reconnectRef.current);
+              clearInterval(pingRef.current);
+              const ws = wsRef.current;
+              wsRef.current = null;
+              if (ws) {
+                ws.onopen = null;
+                ws.onmessage = null;
+                ws.onerror = null;
+                ws.onclose = null;
+                try {
+                  ws.close(1000, "background");
+                } catch {
+                  /* ignore */
+                }
+              }
+              setConnected(false);
+            }
+          });
+        })
+        .catch(() => {});
+    }
+
     return () => {
+      if (appStateListener?.remove) {
+        appStateListener.remove().catch(() => {});
+      }
       document.removeEventListener("visibilitychange", onVis);
       closedIntentionallyRef.current = true;
       clearTimeout(reconnectRef.current);

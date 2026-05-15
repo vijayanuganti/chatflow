@@ -21,6 +21,7 @@ import {
   playInboundMessageTone,
   notificationToneSuppressesOsSound,
 } from "@/lib/notificationTone";
+import { FCM_MESSAGE_EVENT, NOTIFICATION_MARK_READ_EVENT } from "@/lib/push";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 
@@ -105,6 +106,26 @@ export default function ChatApp() {
   }, []);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  useEffect(() => {
+    const onFcmMessage = () => {
+      loadConversations();
+    };
+    window.addEventListener(FCM_MESSAGE_EVENT, onFcmMessage);
+    return () => window.removeEventListener(FCM_MESSAGE_EVENT, onFcmMessage);
+  }, [loadConversations]);
+
+  useEffect(() => {
+    const onMarkRead = (event) => {
+      const convId = event?.detail?.conversationId;
+      if (!convId) return;
+      setConversations((prev) => prev.map((c) => (
+        c.id === convId ? { ...c, unread_count: 0 } : c
+      )));
+    };
+    window.addEventListener(NOTIFICATION_MARK_READ_EVENT, onMarkRead);
+    return () => window.removeEventListener(NOTIFICATION_MARK_READ_EVENT, onMarkRead);
+  }, []);
   useEffect(() => { loadBatches(); }, [loadBatches]);
 
   useEffect(() => {
@@ -144,7 +165,7 @@ export default function ChatApp() {
     showAppNotification({
       title,
       body: preview,
-      tag: `conv-${msg.conversation_id}`,
+      tag: msg.id ? `msg-${msg.id}` : `msg-${Date.now()}`,
       url: "/chat",
       data: { conversation_id: msg.conversation_id },
       silent: notificationToneSuppressesOsSound(),

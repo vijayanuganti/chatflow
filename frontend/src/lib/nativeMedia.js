@@ -1,6 +1,5 @@
 /**
  * True when running inside the Capacitor native WebView (iOS / Android).
- * Matches @capacitor/core platform detection via injected bridges (no core import).
  */
 export function isCapacitorNativeApp() {
   if (typeof window === "undefined") return false;
@@ -10,10 +9,51 @@ export function isCapacitorNativeApp() {
   return false;
 }
 
+async function photoToFile(photo, opts = {}) {
+  const { CameraResultType } = await import("@capacitor/camera");
+  const webPath = photo.webPath;
+  if (!webPath) throw new Error("No image path from camera");
+  const res = await fetch(webPath);
+  const blob = await res.blob();
+  const ext = photo.format === "png" ? "png" : "jpeg";
+  const name = opts.filename || `photo-${Date.now()}.${ext === "jpeg" ? "jpg" : ext}`;
+  return new File([blob], name, { type: blob.type || `image/${ext}` });
+}
+
 /**
- * Pick an image via the native camera / photo library and return a `File`
- * suitable for `FormData` uploads to `/upload` (same as `<input type="file">`).
- *
+ * Camera shutter — direct capture (no gallery prompt).
+ * @param {{ quality?: number }} [opts]
+ * @returns {Promise<File>}
+ */
+export async function capturePhotoFileForUpload(opts = {}) {
+  const { Camera, CameraResultType, CameraSource } = await import("@capacitor/camera");
+  const photo = await Camera.getPhoto({
+    quality: opts.quality ?? 88,
+    allowEditing: false,
+    resultType: CameraResultType.Uri,
+    source: CameraSource.Camera,
+  });
+  return photoToFile(photo, opts);
+}
+
+/**
+ * Gallery — pick a single photo from the library.
+ * @param {{ quality?: number }} [opts]
+ * @returns {Promise<File>}
+ */
+export async function pickGalleryPhotoFileForUpload(opts = {}) {
+  const { Camera, CameraResultType, CameraSource } = await import("@capacitor/camera");
+  const photo = await Camera.getPhoto({
+    quality: opts.quality ?? 88,
+    allowEditing: false,
+    resultType: CameraResultType.Uri,
+    source: CameraSource.Photos,
+  });
+  return photoToFile(photo, opts);
+}
+
+/**
+ * Prompt: camera or gallery (legacy helper).
  * @param {{ quality?: number }} [opts]
  * @returns {Promise<File>}
  */
@@ -25,11 +65,5 @@ export async function pickPhotoFileForUpload(opts = {}) {
     resultType: CameraResultType.Uri,
     source: CameraSource.Prompt,
   });
-  const webPath = photo.webPath;
-  if (!webPath) throw new Error("No image path from camera");
-  const res = await fetch(webPath);
-  const blob = await res.blob();
-  const ext = photo.format === "png" ? "png" : "jpeg";
-  const name = `photo-${Date.now()}.${ext === "jpeg" ? "jpg" : ext}`;
-  return new File([blob], name, { type: blob.type || `image/${ext}` });
+  return photoToFile(photo, opts);
 }

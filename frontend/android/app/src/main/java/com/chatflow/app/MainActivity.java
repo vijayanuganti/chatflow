@@ -1,9 +1,11 @@
 package com.chatflow.app;
 
 import android.Manifest;
+import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.pm.PackageManager;
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
@@ -20,38 +22,18 @@ public class MainActivity extends BridgeActivity {
 
     private static final String TAG = "ChatFlowFCM";
     private static final int REQ_POST_NOTIFICATIONS = 1001;
-    /** Must match FCM {@code channel_id} in backend/server.py. */
-    public static final String HIGH_IMPORTANCE_CHANNEL_ID = "high_importance_channel";
+    /** @deprecated Use {@link ChatFlowNotificationHelper#CHANNEL_ID}. */
+    public static final String HIGH_IMPORTANCE_CHANNEL_ID = ChatFlowNotificationHelper.CHANNEL_ID;
 
     private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return;
-        }
-        NotificationChannel channel = new NotificationChannel(
-                HIGH_IMPORTANCE_CHANNEL_ID,
-                "Messages",
-                NotificationManager.IMPORTANCE_HIGH
-        );
-        channel.setDescription("New chat messages");
-        channel.enableVibration(true);
-        channel.setLockscreenVisibility(android.app.Notification.VISIBILITY_PUBLIC);
-        channel.setShowBadge(true);
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        if (nm != null) {
-            nm.createNotificationChannel(channel);
-            Log.i(
-                    TAG,
-                    "Notification channel created: "
-                            + HIGH_IMPORTANCE_CHANNEL_ID
-                            + " importance=IMPORTANCE_HIGH");
-        }
+        ChatFlowNotificationHelper.ensureActionsChannel(this);
+        Log.i(TAG, "Notification channel ready: " + ChatFlowNotificationHelper.CHANNEL_ID);
     }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         createNotificationChannel();
-        // Keep the WebView below the system status bar so CSS safe-area matches the visual chrome.
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -62,5 +44,19 @@ public class MainActivity extends BridgeActivity {
                         REQ_POST_NOTIFICATIONS);
             }
         }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+    }
+
+    public String getLaunchConversationId() {
+        Intent intent = getIntent();
+        if (intent == null) {
+            return null;
+        }
+        return intent.getStringExtra(ChatFlowNotificationHelper.EXTRA_CONVERSATION_ID);
     }
 }

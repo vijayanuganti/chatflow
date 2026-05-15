@@ -508,7 +508,7 @@ export default function AdminDashboard() {
       showAppNotification({
         title,
         body: preview,
-        tag: `conv-${msg.conversation_id}`,
+        tag: msg.id ? `msg-${msg.id}` : `msg-${Date.now()}`,
         url: "/admin/mychats",
         data: { conversation_id: msg.conversation_id },
         silent: notificationToneSuppressesOsSound(),

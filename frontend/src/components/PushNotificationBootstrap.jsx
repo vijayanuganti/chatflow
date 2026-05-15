@@ -1,7 +1,11 @@
 import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { initCapacitorPush, teardownCapacitorPush } from "@/lib/push";
+import {
+  initCapacitorPush,
+  teardownCapacitorPush,
+  NOTIFICATION_MARK_READ_EVENT,
+} from "@/lib/push";
 
 /**
  * Registers FCM on native after login and routes notification taps into chat.
@@ -21,12 +25,26 @@ export default function PushNotificationBootstrap() {
       return undefined;
     }
 
-    void initCapacitorPush(user.id, (notification) => {
-      const convId = notification?.data?.conversation_id;
-      navigateRef.current("/chat", {
-        state: convId ? { conversationId: convId } : undefined,
-      });
-    });
+    void initCapacitorPush(
+      user.id,
+      (notification) => {
+        const convId = notification?.data?.conversation_id;
+        navigateRef.current("/chat", {
+          state: convId ? { conversationId: convId } : undefined,
+        });
+      },
+      (detail) => {
+        const convId = detail?.conversationId;
+        if (!convId) return;
+        try {
+          window.dispatchEvent(
+            new CustomEvent(NOTIFICATION_MARK_READ_EVENT, { detail }),
+          );
+        } catch {
+          /* ignore */
+        }
+      },
+    );
 
     return () => teardownCapacitorPush();
   }, [user?.id]);

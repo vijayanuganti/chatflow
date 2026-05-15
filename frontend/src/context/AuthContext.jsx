@@ -9,6 +9,7 @@ import {
   AUTH_USER_KEY,
   AUTH_REMEMBER_KEY,
 } from "../lib/api";
+import { syncNativeAuthForPush } from "../lib/nativeAuthSync";
 
 const AuthContext = React.createContext(null);
 
@@ -135,6 +136,7 @@ export function AuthProvider({ children }) {
     if (userData) setStoredUser(userData, staySignedIn);
     else clearAuthSession();
     setUserState(userData || null);
+    void syncNativeAuthForPush();
   }, []);
 
   const logout = useCallback(async () => {

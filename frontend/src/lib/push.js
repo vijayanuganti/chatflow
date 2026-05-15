@@ -6,12 +6,18 @@ import {
   getFcmTokenPostUrl,
   waitUntilAuthenticated,
 } from "./api";
+import { playInboundMessageTone, notificationToneSuppressesOsSound } from "./notificationTone";
+import { syncNativeAuthForPush, ChatFlowNative } from "./nativeAuthSync";
 
-export const FCM_CHANNEL_ID = "high_importance_channel";
+export const FCM_MESSAGE_EVENT = "chatflow:fcm-message";
+export const NOTIFICATION_MARK_READ_EVENT = "chatflow:notification-mark-read";
+
+export const FCM_CHANNEL_ID = "chatflow_messages_actions";
 
 let activeUserId = null;
 let listeners = [];
 let onNotificationActionRef = null;
+let onMarkReadRef = null;
 
 function logPush(...args) {
   console.log("[push]", ...args);
@@ -47,19 +53,9 @@ function logFcmPostFailure(err, fullUrl, status, data) {
 }
 
 async function ensureAndroidNotificationChannel() {
-  if (Capacitor.getPlatform() !== "android") return;
-  try {
-    await PushNotifications.createChannel({
-      id: FCM_CHANNEL_ID,
-      name: "Messages",
-      description: "New chat messages",
-      importance: 5,
-      visibility: 1,
-      vibration: true,
-    });
-    logPush("Android notification channel ready:", FCM_CHANNEL_ID);
-  } catch (err) {
-    console.warn("[push] createChannel failed:", err);
+  // Channel is created in native Java (ChatFlowNotificationHelper) with action-button support.
+  if (Capacitor.getPlatform() === "android") {
+    logPush("Android notification channel managed natively:", FCM_CHANNEL_ID);
   }
 }
 
@@ -147,13 +143,14 @@ export function teardownCapacitorPush() {
   listeners = [];
   activeUserId = null;
   onNotificationActionRef = null;
+  onMarkReadRef = null;
 }
 
 /**
  * Request push permission, register with FCM, and POST the device token to the API.
  * Native (Capacitor) only — web continues to use the service worker in notify.js.
  */
-export async function initCapacitorPush(userId, onNotificationAction) {
+export async function initCapacitorPush(userId, onNotificationAction, onMarkRead) {
   if (!userId || !Capacitor.isNativePlatform()) {
     logPush("skip init", { userId: !!userId, native: Capacitor.isNativePlatform() });
     return;
@@ -168,6 +165,7 @@ export async function initCapacitorPush(userId, onNotificationAction) {
   }
 
   onNotificationActionRef = onNotificationAction;
+  onMarkReadRef = onMarkRead;
 
   if (activeUserId === userId && listeners.length > 0) {
     logPush("already initialized for user", userId);
@@ -194,6 +192,8 @@ export async function initCapacitorPush(userId, onNotificationAction) {
     return;
   }
 
+  await syncNativeAuthForPush();
+
   await ensureAndroidNotificationChannel();
 
   const perm = await PushNotifications.checkPermissions();
@@ -213,10 +213,81 @@ export async function initCapacitorPush(userId, onNotificationAction) {
   listeners.push(
     await PushNotifications.addListener("registration", onRegistration),
     await PushNotifications.addListener("registrationError", onRegistrationError),
+    // Log only — never call removeAllDeliveredNotifications / removeDeliveredNotifications here.
+    await PushNotifications.addListener("pushNotificationReceived", async (notification) => {
+      logPush(
+        "pushNotificationReceived:",
+        notification?.id ?? notification?.title,
+        "visible=",
+        document.visibilityState,
+      );
+      const data = notification?.data || {};
+      if (Capacitor.getPlatform() === "android" && data?.message_id) {
+        try {
+          await ChatFlowNative.showMessageNotification({
+            messageId: String(data.message_id),
+            conversationId: data.conversation_id ? String(data.conversation_id) : "",
+            title: notification?.title || data.title || "ChatFlow",
+            body: notification?.body || data.body || "",
+          });
+        } catch (err) {
+          console.warn("[push] native showMessageNotification failed:", err);
+        }
+      }
+      try {
+        window.dispatchEvent(
+          new CustomEvent(FCM_MESSAGE_EVENT, { detail: { notification, data } }),
+        );
+      } catch {
+        /* ignore */
+      }
+      if (document.visibilityState !== "visible" && notificationToneSuppressesOsSound()) {
+        void playInboundMessageTone();
+      }
+    }),
     await PushNotifications.addListener("pushNotificationActionPerformed", (event) => {
+      const data = event?.notification?.data || {};
+      if (data?.action === "mark_read" || event?.actionId === "mark_read") {
+        onMarkReadRef?.({
+          conversationId: data.conversation_id,
+          messageId: data.message_id,
+        });
+        try {
+          window.dispatchEvent(
+            new CustomEvent(NOTIFICATION_MARK_READ_EVENT, {
+              detail: {
+                conversationId: data.conversation_id,
+                messageId: data.message_id,
+              },
+            }),
+          );
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       onNotificationActionRef?.(event?.notification);
     }),
   );
+
+  if (Capacitor.getPlatform() === "android") {
+    try {
+      listeners.push(
+        await ChatFlowNative.addListener("markRead", (detail) => {
+          onMarkReadRef?.(detail);
+          try {
+            window.dispatchEvent(
+              new CustomEvent(NOTIFICATION_MARK_READ_EVENT, { detail }),
+            );
+          } catch {
+            /* ignore */
+          }
+        }),
+      );
+    } catch (err) {
+      console.warn("[push] ChatFlowNative markRead listener failed:", err);
+    }
+  }
 
   logPush("listeners attached, calling PushNotifications.register()");
   try {

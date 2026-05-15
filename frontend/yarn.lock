@@ -1152,6 +1152,11 @@
   resolved "https://registry.npmjs.org/@capacitor/push-notifications/-/push-notifications-8.0.4.tgz"
   integrity sha512-14ZWKik9ExTu65AZ9+o7+k05uEOaTstuYv6lLq1Bobip+SC5AOwciSICYLALgTTKN2jEDTRoigFAEixmVEJp/w==
 
+"@capacitor/splash-screen@^8.0.1":
+  version "8.0.1"
+  resolved "https://registry.npmjs.org/@capacitor/splash-screen/-/splash-screen-8.0.1.tgz"
+  integrity sha512-c/ew/Z3eA7z8l06WoRAtzVF16VwYYrExmHmfGq1Cg675pVzaC/yuucB8/1xG1vhEfnW4fZ1KhSf/kzR1RiVYgg==
+
 "@craco/craco@^7.1.0":
   version "7.1.0"
   resolved "https://registry.npmjs.org/@craco/craco/-/craco-7.1.0.tgz"

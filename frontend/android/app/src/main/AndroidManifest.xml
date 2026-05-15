@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:allowBackup="true"
@@ -25,6 +26,38 @@
 
         </activity>
 
+        <!-- Sole FCM handler (removes duplicate Firebase default that showed plain notifications). -->
+        <service
+            android:name=".ChatFlowMessagingService"
+            android:exported="false"
+            android:directBootAware="true">
+            <intent-filter android:priority="1">
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"
+            tools:node="remove" />
+
+        <service
+            android:name="com.google.firebase.messaging.FirebaseMessagingService"
+            tools:node="remove" />
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="chatflow_messages_actions" />
+
+        <receiver
+            android:name="com.chatflow.app.NotificationActionReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.chatflow.app.REPLY_ACTION" />
+                <action android:name="com.chatflow.app.MARK_READ_ACTION" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -39,6 +72,7 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />

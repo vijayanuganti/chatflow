@@ -9,6 +9,7 @@ import ChatApp from "@/pages/ChatApp";
 import AdminDashboard from "@/pages/AdminDashboard";
 import { Toaster } from "@/components/ui/sonner";
 import PushNotificationBootstrap from "@/components/PushNotificationBootstrap";
+import SplashScreenBootstrap from "@/components/SplashScreenBootstrap";
 
 function Protected({ children, roles }) {
   const { user, loading } = useAuth();
@@ -45,6 +46,7 @@ function App() {
       <ServiceWorkerBootstrap />
       <ThemeProvider>
       <AuthProvider>
+        <SplashScreenBootstrap />
         <BrowserRouter>
           <PushNotificationBootstrap />
           <Routes>
