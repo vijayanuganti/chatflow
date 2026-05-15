@@ -1,19 +1,37 @@
 import { registerPlugin } from "@capacitor/core";
 import { Capacitor } from "@capacitor/core";
-import { getOrCreateBrowserId, getStoredAccessToken } from "./api";
-import { getFcmApiBaseUrl } from "./api";
+import { App } from "@capacitor/app";
+import { getOrCreateBrowserId, getStoredAccessToken, getFcmApiBaseUrl, getApiBaseUrl } from "./api";
 
 const ChatFlowNative = registerPlugin("ChatFlowNative");
 
+const PREFS_NAME = "chatflow_native_prefs";
+const AUTH_TOKEN_KEY = "auth_token";
+
+let appStateListener = null;
+
+function resolveApiBase() {
+  return getFcmApiBaseUrl() || getApiBaseUrl() || "";
+}
+
 /**
- * Mirror JWT + API base into Android SharedPreferences for notification actions.
+ * Mirror JWT into Android SharedPreferences (`chatflow_native_prefs` / `auth_token`).
+ * @returns {Promise<boolean>} true when native sync succeeded
  */
 export async function syncNativeAuthForPush() {
-  if (!Capacitor.isNativePlatform()) return;
+  if (!Capacitor.isNativePlatform()) {
+    return false;
+  }
+
   const token = getStoredAccessToken();
-  const apiBase = getFcmApiBaseUrl();
+  if (!token) {
+    console.warn("[nativeAuthSync] skip sync — no JWT in WebView storage");
+    return false;
+  }
+
+  const apiBase = resolveApiBase();
   const browserId = getOrCreateBrowserId();
-  if (!token || !apiBase) return;
+
   try {
     await ChatFlowNative.syncAuth({
       token,
@@ -21,9 +39,49 @@ export async function syncNativeAuthForPush() {
       apiBase,
       browserId,
     });
+    console.log("Token synced to native storage", {
+      prefs: PREFS_NAME,
+      key: AUTH_TOKEN_KEY,
+      tokenLength: token.length,
+      apiBase: apiBase || "(fallback in strings.xml)",
+    });
+    return true;
   } catch (err) {
-    console.warn("[nativeAuthSync] syncAuth failed:", err);
+    console.error("[nativeAuthSync] syncAuth bridge failed:", err);
+    return false;
   }
+}
+
+/** Clear native credentials on logout. */
+export async function clearNativeAuth() {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await ChatFlowNative.clearAuth();
+    console.log("[nativeAuthSync] Cleared native auth_token");
+  } catch (err) {
+    console.warn("[nativeAuthSync] clearAuth failed:", err);
+  }
+}
+
+/**
+ * Re-sync JWT when the app returns to foreground (background replies need fresh native prefs).
+ */
+export function initNativeAuthSync() {
+  if (!Capacitor.isNativePlatform()) return;
+
+  void syncNativeAuthForPush();
+
+  if (appStateListener) return;
+
+  App.addListener("appStateChange", ({ isActive }) => {
+    if (isActive) {
+      void syncNativeAuthForPush();
+    }
+  }).then((handle) => {
+    appStateListener = handle;
+  }).catch((err) => {
+    console.warn("[nativeAuthSync] appStateChange listener failed:", err);
+  });
 }
 
 export { ChatFlowNative };

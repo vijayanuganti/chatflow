@@ -20,6 +20,12 @@ public class ChatFlowMessagingService extends FirebaseMessagingService {
         // Must run before Capacitor — we own the system notification with action buttons.
         ChatFlowNotificationHelper.showFromFcm(getApplicationContext(), remoteMessage);
 
+        java.util.Map<String, String> data = remoteMessage.getData();
+        String messageId = data != null ? data.get("message_id") : null;
+        if (messageId != null && !messageId.isEmpty()) {
+            ChatFlowApiClient.postUpdateStatusAsync(getApplicationContext(), messageId, "delivered");
+        }
+
         PushNotificationsPlugin.sendRemoteMessage(remoteMessage);
     }
 

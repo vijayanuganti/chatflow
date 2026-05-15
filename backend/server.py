@@ -16,7 +16,7 @@ import asyncio
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Set, Tuple
+from typing import List, Optional, Dict, Set, Tuple, Any
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -765,6 +765,14 @@ class NotificationMarkReadBody(BaseModel):
     """Payload from Android notification mark-as-read action."""
     message_id: str
     conversation_id: Optional[str] = None
+
+
+class UpdateMessageStatusBody(BaseModel):
+    message_id: str
+    status: str = Field(..., pattern="^(sent|delivered|seen)$")
+
+
+MESSAGE_STATUS_ORDER = {"sent": 0, "delivered": 1, "seen": 2}
 
 
 class StartDirectBody(BaseModel):
@@ -2488,6 +2496,7 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
         "file_name": body.file_name,
         "created_at": now_iso(),
         "read_by": [user["id"]],
+        "status": "sent",
     }
 
     await db.messages.insert_one(dict(msg))
@@ -2529,6 +2538,56 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
 
 def _is_high_priority_notification_action(request: Request) -> bool:
     return (request.headers.get("X-Priority") or "").strip().lower() == "high"
+
+
+async def _apply_message_status_update(message_id: str, new_status: str, actor_id: str) -> Optional[dict]:
+    """Upgrade message status (sent → delivered → seen) and notify the sender."""
+    if new_status not in MESSAGE_STATUS_ORDER:
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    msg = await db.messages.find_one({"id": message_id}, {"_id": 0})
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    if actor_id not in (msg.get("recipient_ids") or []):
+        raise HTTPException(status_code=403, detail="Only recipients can update delivery status")
+
+    current = (msg.get("status") or "sent").strip().lower()
+    if MESSAGE_STATUS_ORDER.get(new_status, -1) <= MESSAGE_STATUS_ORDER.get(current, 0):
+        return {"message_id": message_id, "status": current, "conversation_id": msg["conversation_id"]}
+
+    update_fields: Dict[str, Any] = {"status": new_status}
+    if new_status == "seen":
+        await db.messages.update_one(
+            {"id": message_id},
+            {"$set": update_fields, "$addToSet": {"read_by": actor_id}},
+        )
+    else:
+        await db.messages.update_one({"id": message_id}, {"$set": update_fields})
+
+    sender_id = msg.get("sender_id")
+    if sender_id:
+        await manager.send_event(
+            sender_id,
+            {
+                "type": "STATUS_UPDATE",
+                "message_id": message_id,
+                "conversation_id": msg["conversation_id"],
+                "status": new_status,
+                "updated_by": actor_id,
+            },
+        )
+
+    return {"message_id": message_id, "status": new_status, "conversation_id": msg["conversation_id"]}
+
+
+@api_router.post("/notifications/update-status")
+async def notification_update_status(
+    body: UpdateMessageStatusBody,
+    user: dict = Depends(get_current_user),
+):
+    """Update delivery/read ticks (delivered / seen) from mobile or web clients."""
+    return await _apply_message_status_update(body.message_id, body.status.strip().lower(), user["id"])
 
 
 @api_router.post("/notifications/direct-reply")
@@ -2615,10 +2674,37 @@ async def mark_read(conv_id: str, user: dict = Depends(get_current_user)):
     if not conv or user["id"] not in conv["participants"]:
         raise HTTPException(status_code=403, detail="Not a participant")
 
+    to_mark = await db.messages.find(
+        {
+            "conversation_id": conv_id,
+            "recipient_ids": user["id"],
+            "read_by": {"$ne": user["id"]},
+        },
+        {"_id": 0, "id": 1, "sender_id": 1},
+    ).to_list(500)
+
     result = await db.messages.update_many(
-        {"conversation_id": conv_id, "read_by": {"$ne": user["id"]}},
-        {"$addToSet": {"read_by": user["id"]}},
+        {
+            "conversation_id": conv_id,
+            "recipient_ids": user["id"],
+            "read_by": {"$ne": user["id"]},
+        },
+        {"$addToSet": {"read_by": user["id"]}, "$set": {"status": "seen"}},
     )
+
+    for m in to_mark:
+        sender_id = m.get("sender_id")
+        if sender_id:
+            await manager.send_event(
+                sender_id,
+                {
+                    "type": "STATUS_UPDATE",
+                    "message_id": m["id"],
+                    "conversation_id": conv_id,
+                    "status": "seen",
+                    "updated_by": user["id"],
+                },
+            )
 
     for pid in conv["participants"]:
         if pid != user["id"]:

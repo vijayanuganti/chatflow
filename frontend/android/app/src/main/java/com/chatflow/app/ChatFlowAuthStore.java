@@ -9,8 +9,8 @@ public final class ChatFlowAuthStore {
 
     private static final String TAG = "ChatFlowAuth";
 
-    private static final String PREFS = "chatflow_native_prefs";
-    /** Primary token key (requested for notification actions). */
+    /** Must match React {@code nativeAuthSync} / Capacitor bridge. */
+    public static final String PREFS_NAME = "chatflow_native_prefs";
     public static final String KEY_AUTH_TOKEN = "auth_token";
     private static final String KEY_ACCESS_TOKEN = "access_token";
     private static final String KEY_API_BASE = "api_base_url";
@@ -24,26 +24,49 @@ public final class ChatFlowAuthStore {
         String bid = browserId == null ? "" : browserId.trim();
 
         SharedPreferences prefs = prefs(context);
-        SharedPreferences.Editor editor = prefs.edit();
-        editor.putString(KEY_AUTH_TOKEN, t);
-        editor.putString(KEY_ACCESS_TOKEN, t);
-        editor.putString(KEY_API_BASE, base);
-        editor.putString(KEY_BROWSER_ID, bid);
-        editor.apply();
+        boolean ok = prefs.edit()
+                .putString(KEY_AUTH_TOKEN, t)
+                .putString(KEY_ACCESS_TOKEN, t)
+                .putString(KEY_API_BASE, base)
+                .putString(KEY_BROWSER_ID, bid)
+                .commit();
 
-        Log.d(TAG, "save auth_token len=" + t.length() + " apiBase=" + (base.isEmpty() ? "(empty)" : base));
+        Log.i(
+                TAG,
+                "save prefs="
+                        + PREFS_NAME
+                        + " key="
+                        + KEY_AUTH_TOKEN
+                        + " len="
+                        + t.length()
+                        + " commit="
+                        + ok
+                        + " apiBase="
+                        + (base.isEmpty() ? "(empty)" : base)
+        );
     }
 
-    /**
-     * Resolves JWT from native prefs ({@link #KEY_AUTH_TOKEN} then legacy {@code access_token}).
-     */
+    public static void clear(Context context) {
+        boolean ok = prefs(context).edit()
+                .remove(KEY_AUTH_TOKEN)
+                .remove(KEY_ACCESS_TOKEN)
+                .remove(KEY_API_BASE)
+                .remove(KEY_BROWSER_ID)
+                .commit();
+        Log.i(TAG, "clear prefs=" + PREFS_NAME + " commit=" + ok);
+    }
+
     public static String getAuthToken(Context context) {
         SharedPreferences prefs = prefs(context);
-        String token = prefs.getString(KEY_AUTH_TOKEN, "").trim();
-        if (token.isEmpty()) {
-            token = prefs.getString(KEY_ACCESS_TOKEN, "").trim();
+        String token = prefs.getString(KEY_AUTH_TOKEN, null);
+        if (token == null || token.trim().isEmpty()) {
+            token = prefs.getString(KEY_ACCESS_TOKEN, null);
         }
-        return token;
+        return token == null ? "" : token.trim();
+    }
+
+    public static int getAuthTokenLength(Context context) {
+        return getAuthToken(context).length();
     }
 
     public static String getApiBase(Context context) {
@@ -62,7 +85,7 @@ public final class ChatFlowAuthStore {
     }
 
     public static boolean hasAuthToken(Context context) {
-        return !getAuthToken(context).isEmpty();
+        return getAuthTokenLength(context) > 0;
     }
 
     public static boolean hasCredentials(Context context) {
@@ -70,6 +93,6 @@ public final class ChatFlowAuthStore {
     }
 
     private static SharedPreferences prefs(Context context) {
-        return context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        return context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
 }

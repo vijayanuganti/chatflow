@@ -482,12 +482,15 @@ export default function AdminDashboard() {
   }, []);
 
   const handleIncoming = useCallback((msg) => {
+    const recipientIds = Array.isArray(msg?.recipient_ids) ? msg.recipient_ids : [];
+    const inRecipientList = recipientIds.some((id) => String(id) === String(user.id));
+    if (msg?.id && inRecipientList && String(msg.sender_id) !== String(user.id)) {
+      api.post("/notifications/update-status", { message_id: msg.id, status: "delivered" }).catch(() => {});
+    }
     const activeId = selectedIdRef.current;
     // Surface a Chrome-style OS notification when the admin isn't already
     // looking at this conversation. Admins are notified for chats they
     // participate in (anything where they are a recipient).
-    const recipientIds = Array.isArray(msg?.recipient_ids) ? msg.recipient_ids : [];
-    const inRecipientList = recipientIds.some((id) => String(id) === String(user.id));
     // Admins receive WS copies of chats they do not participate in; those
     // payloads omit them from recipient_ids, but they should still get alerts.
     const adminMonitoring =
@@ -566,12 +569,23 @@ export default function AdminDashboard() {
     if (activeId && data.conversation_id === activeId) {
       setMessages((prev) => prev.map((m) => {
         if (m.sender_id === user.id && !(m.read_by || []).includes(data.reader_id)) {
-          return { ...m, read_by: [...(m.read_by || []), data.reader_id] };
+          return {
+            ...m,
+            read_by: [...(m.read_by || []), data.reader_id],
+            status: "seen",
+          };
         }
         return m;
       }));
     }
   }, [user.id]);
+
+  const handleStatusUpdate = useCallback((data) => {
+    if (!data?.message_id) return;
+    setMessages((prev) => prev.map((m) => (
+      m.id === data.message_id ? { ...m, status: data.status } : m
+    )));
+  }, []);
 
   const handleConversationRemoved = useCallback((data) => {
     const id = data?.conversation_id;
@@ -588,6 +602,7 @@ export default function AdminDashboard() {
     onTyping: handleTypingEvent,
     onPresence: handlePresence,
     onReadReceipt: handleReadReceipt,
+    onStatusUpdate: handleStatusUpdate,
     onConversationRemoved: handleConversationRemoved,
     enabled: Boolean(user?.id),
   });

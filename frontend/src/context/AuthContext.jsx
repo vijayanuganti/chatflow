@@ -9,7 +9,7 @@ import {
   AUTH_USER_KEY,
   AUTH_REMEMBER_KEY,
 } from "../lib/api";
-import { syncNativeAuthForPush } from "../lib/nativeAuthSync";
+import { syncNativeAuthForPush, clearNativeAuth } from "../lib/nativeAuthSync";
 
 const AuthContext = React.createContext(null);
 
@@ -108,7 +108,10 @@ export function AuthProvider({ children }) {
         .then((res) => {
           const u = res.data?.user || null;
           setUserState(u);
-          if (u) setStoredUser(u, readRemember());
+          if (u) {
+            setStoredUser(u, readRemember());
+            void syncNativeAuthForPush();
+          }
         })
         .catch(() => {
           clearAuthSession();
@@ -148,6 +151,7 @@ export function AuthProvider({ children }) {
     }
     clearAuthSession();
     setUserState(null);
+    void clearNativeAuth();
   }, []);
 
   return (

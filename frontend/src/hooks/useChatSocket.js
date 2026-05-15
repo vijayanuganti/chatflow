@@ -7,6 +7,7 @@ export default function useChatSocket({
   onTyping,
   onPresence,
   onReadReceipt,
+  onStatusUpdate,
   onProfile,
   onConversationRemoved,
   enabled = true,
@@ -18,7 +19,15 @@ export default function useChatSocket({
   const [connected, setConnected] = useState(false);
 
   const handlersRef = useRef({});
-  handlersRef.current = { onMessage, onTyping, onPresence, onReadReceipt, onProfile, onConversationRemoved };
+  handlersRef.current = {
+    onMessage,
+    onTyping,
+    onPresence,
+    onReadReceipt,
+    onStatusUpdate,
+    onProfile,
+    onConversationRemoved,
+  };
 
   const connect = useCallback(() => {
     if (!enabled) return;
@@ -104,11 +113,20 @@ export default function useChatSocket({
     ws.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data);
-        const { onMessage, onTyping, onPresence, onReadReceipt, onProfile, onConversationRemoved } = handlersRef.current;
+        const {
+          onMessage,
+          onTyping,
+          onPresence,
+          onReadReceipt,
+          onStatusUpdate,
+          onProfile,
+          onConversationRemoved,
+        } = handlersRef.current;
         if (data.type === "message" && onMessage) onMessage(data.message);
         else if (data.type === "typing" && onTyping) onTyping(data);
         else if (data.type === "presence" && onPresence) onPresence(data);
         else if (data.type === "read_receipt" && onReadReceipt) onReadReceipt(data);
+        else if (data.type === "STATUS_UPDATE" && onStatusUpdate) onStatusUpdate(data);
         else if (data.type === "profile" && onProfile) onProfile(data.user);
         else if (data.type === "conversation_removed" && onConversationRemoved) onConversationRemoved(data);
       } catch {

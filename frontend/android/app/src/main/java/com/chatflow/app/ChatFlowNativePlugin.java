@@ -1,5 +1,6 @@
 package com.chatflow.app;
 
+import android.content.Context;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -45,10 +46,21 @@ public class ChatFlowNativePlugin extends Plugin {
 
     @PluginMethod
     public void syncAuth(PluginCall call) {
-        String token = call.getString("token", call.getString("auth_token", ""));
+        String token = call.getString("auth_token", call.getString("token", ""));
         String apiBase = call.getString("apiBase", "");
         String browserId = call.getString("browserId", "");
-        ChatFlowAuthStore.save(getContext().getApplicationContext(), token, apiBase, browserId);
+        Context ctx = getContext().getApplicationContext();
+        ChatFlowAuthStore.save(ctx, token, apiBase, browserId);
+        JSObject result = new JSObject();
+        result.put("prefs", ChatFlowAuthStore.PREFS_NAME);
+        result.put("key", ChatFlowAuthStore.KEY_AUTH_TOKEN);
+        result.put("tokenLength", ChatFlowAuthStore.getAuthTokenLength(ctx));
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void clearAuth(PluginCall call) {
+        ChatFlowAuthStore.clear(getContext().getApplicationContext());
         call.resolve();
     }
 

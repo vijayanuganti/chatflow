@@ -32,6 +32,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(ChatFlowNativePlugin.class);
         super.onCreate(savedInstanceState);
         createNotificationChannel();
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);

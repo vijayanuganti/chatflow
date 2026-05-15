@@ -10,6 +10,7 @@ import AdminDashboard from "@/pages/AdminDashboard";
 import { Toaster } from "@/components/ui/sonner";
 import PushNotificationBootstrap from "@/components/PushNotificationBootstrap";
 import SplashScreenBootstrap from "@/components/SplashScreenBootstrap";
+import { initNativeAuthSync } from "@/lib/nativeAuthSync";
 
 function Protected({ children, roles }) {
   const { user, loading } = useAuth();
@@ -40,12 +41,20 @@ function ServiceWorkerBootstrap() {
   return null;
 }
 
+function NativeAuthBootstrap() {
+  useEffect(() => {
+    initNativeAuthSync();
+  }, []);
+  return null;
+}
+
 function App() {
   return (
     <div className="App min-h-0 overflow-x-hidden">
       <ServiceWorkerBootstrap />
       <ThemeProvider>
       <AuthProvider>
+        <NativeAuthBootstrap />
         <SplashScreenBootstrap />
         <BrowserRouter>
           <PushNotificationBootstrap />

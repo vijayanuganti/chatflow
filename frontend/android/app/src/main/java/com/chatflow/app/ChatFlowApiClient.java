@@ -23,6 +23,11 @@ public final class ChatFlowApiClient {
     private static final String PATH_DIRECT_REPLY = "/notifications/direct-reply";
     /** Matches FastAPI {@code POST /api/notifications/mark-read}. */
     private static final String PATH_MARK_READ = "/notifications/mark-read";
+    /** Matches FastAPI {@code POST /api/notifications/update-status}. */
+    private static final String PATH_UPDATE_STATUS = "/notifications/update-status";
+
+    private static final java.util.concurrent.ExecutorService BG =
+            java.util.concurrent.Executors.newCachedThreadPool();
 
     private static final OkHttpClient CLIENT = new OkHttpClient.Builder()
             .connectionPool(new ConnectionPool(8, 5, TimeUnit.MINUTES))
@@ -45,6 +50,27 @@ public final class ChatFlowApiClient {
             return postJson(context, PATH_DIRECT_REPLY, body);
         } catch (Exception e) {
             Log.e(TAG, "direct-reply payload error", e);
+            return false;
+        }
+    }
+
+    /** Fire-and-forget status update (delivered / seen) for WhatsApp-style ticks. */
+    public static void postUpdateStatusAsync(Context context, String messageId, String status) {
+        if (messageId == null || messageId.isEmpty() || status == null || status.isEmpty()) {
+            return;
+        }
+        final Context appCtx = context.getApplicationContext();
+        BG.execute(() -> postUpdateStatus(appCtx, messageId, status));
+    }
+
+    public static boolean postUpdateStatus(Context context, String messageId, String status) {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("message_id", messageId);
+            body.put("status", status);
+            return postJson(context, PATH_UPDATE_STATUS, body);
+        } catch (Exception e) {
+            Log.e(TAG, "update-status payload error", e);
             return false;
         }
     }

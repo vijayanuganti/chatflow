@@ -12,6 +12,15 @@ function formatTime(iso) {
   }
 }
 
+/** Resolve WhatsApp-style tick state from `status` or legacy `read_by`. */
+function resolveMessageStatus(message, readByOthers, readByAll) {
+  const raw = (message.status || "").toLowerCase();
+  if (raw === "seen" || readByAll) return "seen";
+  if (raw === "delivered" || readByOthers.length > 0) return "delivered";
+  if (raw === "sent") return "sent";
+  return "sent";
+}
+
 /**
  * Props:
  *  - message: message doc
@@ -33,6 +42,7 @@ export default function MessageBubble({
 
   const readByOthers = (message.read_by || []).filter((uid) => uid !== message.sender_id);
   const readByAll = totalRecipients > 0 && readByOthers.length >= totalRecipients;
+  const tickStatus = resolveMessageStatus(message, readByOthers, readByAll);
 
   const wrapperClass = message.__error ? "opacity-90" : "";
 
@@ -40,13 +50,13 @@ export default function MessageBubble({
     <div
       className={`flex flex-col ${align} animate-in-up ${wrapperClass}`}
       data-testid={`message-${message.id}`}
-      data-status={message.__pending ? "pending" : message.__error ? "error" : "sent"}
+      data-status={message.__pending ? "pending" : message.__error ? "error" : tickStatus}
     >
       <div className={`${bubbleClass} max-w-[82%] md:max-w-[65%] px-3 py-2 shadow-sm`}>
         {showSenderName && !mine && (
           <div className="text-[11px] font-semibold text-emerald-800 mb-0.5" data-testid={`sender-name-${message.id}`}>
             {message.sender_name || "User"}
-          </div>
+          </motion.div>
         )}
         {message.message_type === "image" && message.file_url && (
           <button
@@ -92,21 +102,16 @@ export default function MessageBubble({
         <div className="flex items-center justify-end gap-1 mt-1">
           <span className="text-[10px] text-gray-500">{time}</span>
           {mine && showReceipts && (() => {
-            // WhatsApp-style send status:
-            //   pending (in-flight)  → Clock
-            //   error (failed)       → AlertCircle (red)
-            //   sent (server ack)    → single Check
-            //   delivered/read       → CheckCheck (sky blue when read by all)
             if (message.__pending) {
               return <Clock className="h-3.5 w-3.5 text-gray-400" strokeWidth={2} aria-label="Sending" />;
             }
             if (message.__error) {
               return <AlertCircle className="h-3.5 w-3.5 text-rose-500" strokeWidth={2} aria-label="Failed to send" />;
             }
-            if (readByAll) {
+            if (tickStatus === "seen") {
               return <CheckCheck className="h-3.5 w-3.5 text-sky-500" strokeWidth={2} aria-label="Read" />;
             }
-            if (readByOthers.length > 0) {
+            if (tickStatus === "delivered") {
               return <CheckCheck className="h-3.5 w-3.5 text-gray-400" strokeWidth={2} aria-label="Delivered" />;
             }
             return <Check className="h-3.5 w-3.5 text-gray-400" strokeWidth={2} aria-label="Sent" />;

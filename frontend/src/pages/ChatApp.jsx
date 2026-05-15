@@ -172,8 +172,17 @@ export default function ChatApp() {
     });
   }, [user.id]);
 
+  const ackMessageDelivered = useCallback((msg) => {
+    if (!msg?.id) return;
+    const ids = Array.isArray(msg.recipient_ids) ? msg.recipient_ids : [];
+    if (!ids.some((id) => String(id) === String(user.id))) return;
+    if (String(msg.sender_id) === String(user.id)) return;
+    api.post("/notifications/update-status", { message_id: msg.id, status: "delivered" }).catch(() => {});
+  }, [user.id]);
+
   const handleIncomingMessage = useCallback((msg) => {
     maybeNotify(msg);
+    ackMessageDelivered(msg);
     const activeId = selectedIdRef.current;
     setMessages((prev) => {
       if (activeId && msg.conversation_id === activeId) {
@@ -226,7 +235,7 @@ export default function ChatApp() {
       updated.sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || ""));
       return updated;
     });
-  }, [user.id, loadConversations, maybeNotify]);
+  }, [user.id, loadConversations, maybeNotify, ackMessageDelivered]);
 
   const handleTyping = useCallback((data) => {
     setTypingUsers((prev) => {
@@ -262,12 +271,23 @@ export default function ChatApp() {
     if (activeId && data.conversation_id === activeId) {
       setMessages((prev) => prev.map((m) => {
         if (m.sender_id === user.id && !(m.read_by || []).includes(data.reader_id)) {
-          return { ...m, read_by: [...(m.read_by || []), data.reader_id] };
+          return {
+            ...m,
+            read_by: [...(m.read_by || []), data.reader_id],
+            status: "seen",
+          };
         }
         return m;
       }));
     }
   }, [user.id]);
+
+  const handleStatusUpdate = useCallback((data) => {
+    if (!data?.message_id) return;
+    setMessages((prev) => prev.map((m) => (
+      m.id === data.message_id ? { ...m, status: data.status } : m
+    )));
+  }, []);
 
   const handleConversationRemoved = useCallback((data) => {
     const id = data?.conversation_id;
@@ -282,6 +302,7 @@ export default function ChatApp() {
     onTyping: handleTyping,
     onPresence: handlePresence,
     onReadReceipt: handleReadReceipt,
+    onStatusUpdate: handleStatusUpdate,
     onConversationRemoved: handleConversationRemoved,
     enabled: Boolean(user?.id),
   });
@@ -353,6 +374,7 @@ export default function ChatApp() {
       created_at: nowIso,
       read_by: [user.id],
       recipient_ids: recipientIds,
+      status: "sent",
     };
 
     if (selectedIdRef.current === body.conversation_id) {

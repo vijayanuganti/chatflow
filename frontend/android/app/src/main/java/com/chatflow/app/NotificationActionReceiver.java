@@ -41,6 +41,8 @@ public class NotificationActionReceiver extends BroadcastReceiver {
             return;
         }
 
+        logAuthTokenFromPrefs(context);
+
         // Optimistic dismissal the instant the user taps Reply / Mark as Read.
         optimisticallyDismiss(context, messageId);
 
@@ -63,6 +65,22 @@ public class NotificationActionReceiver extends BroadcastReceiver {
         });
     }
 
+    private void logAuthTokenFromPrefs(Context context) {
+        int len = ChatFlowAuthStore.getAuthTokenLength(context);
+        Log.d(
+                TAG,
+                "SharedPreferences file="
+                        + ChatFlowAuthStore.PREFS_NAME
+                        + " key="
+                        + ChatFlowAuthStore.KEY_AUTH_TOKEN
+                        + " tokenLength="
+                        + len
+        );
+        if (len == 0) {
+            Log.e(TAG, "AuthToken is NULL in SharedPreferences");
+        }
+    }
+
     private void optimisticallyDismiss(Context context, String messageId) {
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) {
@@ -76,10 +94,11 @@ public class NotificationActionReceiver extends BroadcastReceiver {
     private void handleMarkRead(Context context, String messageId, String conversationId, long actionStart) {
         Log.d(SPEED_TAG, "Start: " + System.currentTimeMillis() + " action=mark_read_network");
 
-        boolean ok = ChatFlowApiClient.postMarkRead(context, messageId, conversationId);
-        if (ok) {
+        boolean seenOk = ChatFlowApiClient.postUpdateStatus(context, messageId, "seen");
+        boolean readOk = ChatFlowApiClient.postMarkRead(context, messageId, conversationId);
+        if (seenOk || readOk) {
             ChatFlowNativePlugin.notifyMarkRead(conversationId, messageId);
-            Log.i(TAG, "Marked read messageId=" + messageId);
+            Log.i(TAG, "Marked seen messageId=" + messageId + " seen=" + seenOk + " read=" + readOk);
         } else {
             Log.w(TAG, "Mark read failed messageId=" + messageId);
         }
