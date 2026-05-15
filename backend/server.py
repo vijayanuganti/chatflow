@@ -243,22 +243,47 @@ def _firebase_credential_path() -> Optional[Path]:
     return None
 
 
+def _load_firebase_credentials():
+    """Prefer FIREBASE_SERVICE_ACCOUNT_JSON env (Render); fall back to local JSON file."""
+    import firebase_admin
+    from firebase_admin import credentials
+
+    raw = (os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON") or "").strip()
+    if raw:
+        try:
+            service_account_info = json.loads(raw)
+            if not isinstance(service_account_info, dict):
+                raise ValueError("FIREBASE_SERVICE_ACCOUNT_JSON must be a JSON object")
+            logger.info("Firebase credentials loaded from FIREBASE_SERVICE_ACCOUNT_JSON")
+            return credentials.Certificate(service_account_info)
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.warning("FIREBASE_SERVICE_ACCOUNT_JSON invalid: %s", e)
+
+    cred_path = _firebase_credential_path()
+    if cred_path:
+        logger.info("Firebase credentials loaded from file: %s", cred_path.name)
+        return credentials.Certificate(str(cred_path))
+
+    return None
+
+
 def _init_firebase() -> bool:
     global _firebase_app
     if _firebase_app is False:
         return False
     if _firebase_app is not None:
         return True
-    cred_path = _firebase_credential_path()
-    if not cred_path:
-        logger.warning("Firebase credentials not found in backend/; FCM disabled")
-        _firebase_app = False
-        return False
     try:
         import firebase_admin
-        from firebase_admin import credentials
 
-        cred = credentials.Certificate(str(cred_path))
+        cred = _load_firebase_credentials()
+        if cred is None:
+            logger.warning(
+                "Firebase credentials not found (set FIREBASE_SERVICE_ACCOUNT_JSON or add "
+                "firebase-adminsdk.json in backend/); FCM disabled"
+            )
+            _firebase_app = False
+            return False
         _firebase_app = firebase_admin.initialize_app(cred)
         logger.info("Firebase Admin initialized for FCM")
         return True
