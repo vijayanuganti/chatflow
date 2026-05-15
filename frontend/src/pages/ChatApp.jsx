@@ -283,10 +283,18 @@ export default function ChatApp() {
   }, [user.id]);
 
   const handleStatusUpdate = useCallback((data) => {
-    if (!data?.message_id) return;
-    setMessages((prev) => prev.map((m) => (
-      m.id === data.message_id ? { ...m, status: data.status } : m
-    )));
+    if (!data?.message_id || !data?.status) return;
+    const messageId = String(data.message_id);
+    const nextStatus = String(data.status).toLowerCase();
+    setMessages((prev) => {
+      let changed = false;
+      const next = prev.map((m) => {
+        if (String(m.id) !== messageId) return m;
+        changed = true;
+        return { ...m, status: nextStatus };
+      });
+      return changed ? next : prev;
+    });
   }, []);
 
   const handleConversationRemoved = useCallback((data) => {

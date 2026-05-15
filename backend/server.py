@@ -2540,6 +2540,34 @@ def _is_high_priority_notification_action(request: Request) -> bool:
     return (request.headers.get("X-Priority") or "").strip().lower() == "high"
 
 
+async def _notify_sender_message_status(msg: dict, status: str, actor_id: Optional[str] = None) -> None:
+    """Push delivery/read ticks to the original sender over WebSocket."""
+    message_id = msg.get("id")
+    sender_id = (msg.get("sender_id") or "").strip()
+    if not sender_id:
+        logger.warning("status_update: missing sender_id for message_id=%s", message_id)
+        return
+
+    event: Dict[str, Any] = {
+        "type": "status_update",
+        "message_id": message_id,
+        "status": status,
+        "conversation_id": msg.get("conversation_id"),
+    }
+    if actor_id:
+        event["updated_by"] = actor_id
+
+    active_ws = len(manager.active.get(sender_id, set()))
+    logger.info(
+        "status_update ws -> sender_id=%s message_id=%s status=%s active_ws=%s",
+        sender_id,
+        message_id,
+        status,
+        active_ws,
+    )
+    await manager.send_event(sender_id, event)
+
+
 async def _apply_message_status_update(message_id: str, new_status: str, actor_id: str) -> Optional[dict]:
     """Upgrade message status (sent → delivered → seen) and notify the sender."""
     if new_status not in MESSAGE_STATUS_ORDER:
@@ -2554,6 +2582,8 @@ async def _apply_message_status_update(message_id: str, new_status: str, actor_i
 
     current = (msg.get("status") or "sent").strip().lower()
     if MESSAGE_STATUS_ORDER.get(new_status, -1) <= MESSAGE_STATUS_ORDER.get(current, 0):
+        # Idempotent retry — re-push so sender UI can catch up if the first WS event was missed.
+        await _notify_sender_message_status(msg, current, actor_id)
         return {"message_id": message_id, "status": current, "conversation_id": msg["conversation_id"]}
 
     update_fields: Dict[str, Any] = {"status": new_status}
@@ -2565,18 +2595,15 @@ async def _apply_message_status_update(message_id: str, new_status: str, actor_i
     else:
         await db.messages.update_one({"id": message_id}, {"$set": update_fields})
 
-    sender_id = msg.get("sender_id")
-    if sender_id:
-        await manager.send_event(
-            sender_id,
-            {
-                "type": "STATUS_UPDATE",
-                "message_id": message_id,
-                "conversation_id": msg["conversation_id"],
-                "status": new_status,
-                "updated_by": actor_id,
-            },
-        )
+    fresh = await db.messages.find_one(
+        {"id": message_id},
+        {"_id": 0, "id": 1, "sender_id": 1, "conversation_id": 1, "status": 1},
+    )
+    if not fresh:
+        logger.warning("status_update: message vanished after update id=%s", message_id)
+        return {"message_id": message_id, "status": new_status, "conversation_id": msg["conversation_id"]}
+
+    await _notify_sender_message_status(fresh, new_status, actor_id)
 
     return {"message_id": message_id, "status": new_status, "conversation_id": msg["conversation_id"]}
 
@@ -2693,18 +2720,11 @@ async def mark_read(conv_id: str, user: dict = Depends(get_current_user)):
     )
 
     for m in to_mark:
-        sender_id = m.get("sender_id")
-        if sender_id:
-            await manager.send_event(
-                sender_id,
-                {
-                    "type": "STATUS_UPDATE",
-                    "message_id": m["id"],
-                    "conversation_id": conv_id,
-                    "status": "seen",
-                    "updated_by": user["id"],
-                },
-            )
+        await _notify_sender_message_status(
+            {"id": m["id"], "sender_id": m.get("sender_id"), "conversation_id": conv_id},
+            "seen",
+            user["id"],
+        )
 
     for pid in conv["participants"]:
         if pid != user["id"]:

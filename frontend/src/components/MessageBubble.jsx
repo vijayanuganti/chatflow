@@ -12,12 +12,14 @@ function formatTime(iso) {
   }
 }
 
-/** Resolve WhatsApp-style tick state from `status` or legacy `read_by`. */
+/** Resolve WhatsApp-style tick state from `status` (falls back to legacy `read_by`). */
 function resolveMessageStatus(message, readByOthers, readByAll) {
   const raw = (message.status || "").toLowerCase();
-  if (raw === "seen" || readByAll) return "seen";
-  if (raw === "delivered" || readByOthers.length > 0) return "delivered";
+  if (raw === "seen") return "seen";
+  if (raw === "delivered") return "delivered";
   if (raw === "sent") return "sent";
+  if (readByAll) return "seen";
+  if (readByOthers.length > 0) return "delivered";
   return "sent";
 }
 
@@ -56,7 +58,7 @@ export default function MessageBubble({
         {showSenderName && !mine && (
           <div className="text-[11px] font-semibold text-emerald-800 mb-0.5" data-testid={`sender-name-${message.id}`}>
             {message.sender_name || "User"}
-          </motion.div>
+          </div>
         )}
         {message.message_type === "image" && message.file_url && (
           <button

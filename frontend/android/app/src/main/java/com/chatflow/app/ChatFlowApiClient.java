@@ -37,6 +37,14 @@ public final class ChatFlowApiClient {
             .retryOnConnectionFailure(true)
             .build();
 
+    /** Short timeouts for delivery receipts while the FCM process may be suspended (OPPO etc.). */
+    private static final OkHttpClient URGENT_CLIENT = new OkHttpClient.Builder()
+            .connectTimeout(2, TimeUnit.SECONDS)
+            .readTimeout(2, TimeUnit.SECONDS)
+            .writeTimeout(2, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)
+            .build();
+
     private ChatFlowApiClient() {}
 
     public static boolean postSendMessage(Context context, String messageId, String conversationId, String text) {
@@ -75,6 +83,30 @@ public final class ChatFlowApiClient {
         }
     }
 
+    /**
+     * Synchronous delivery/seen receipt with 2s timeouts — call only from a high-priority worker thread.
+     */
+    public static boolean postUpdateStatusUrgent(Context context, String messageId, String status) {
+        Log.i(TAG, "update-status urgent message_id=" + (messageId != null ? messageId : "NULL") + " status=" + status);
+        if (messageId == null || messageId.isEmpty()) {
+            Log.w(TAG, "update-status urgent skipped: message_id is null or empty");
+            return false;
+        }
+        if (status == null || status.isEmpty()) {
+            Log.w(TAG, "update-status urgent skipped: status is null or empty");
+            return false;
+        }
+        try {
+            JSONObject body = new JSONObject();
+            body.put("message_id", messageId);
+            body.put("status", status);
+            return postJson(context, PATH_UPDATE_STATUS, body, URGENT_CLIENT);
+        } catch (Exception e) {
+            Log.e(TAG, "update-status urgent payload error message_id=" + messageId, e);
+            return false;
+        }
+    }
+
     public static boolean postMarkRead(Context context, String messageId, String conversationId) {
         try {
             JSONObject body = new JSONObject();
@@ -90,6 +122,10 @@ public final class ChatFlowApiClient {
     }
 
     private static boolean postJson(Context context, String path, JSONObject body) {
+        return postJson(context, path, body, CLIENT);
+    }
+
+    private static boolean postJson(Context context, String path, JSONObject body, OkHttpClient client) {
         long t0 = System.currentTimeMillis();
         Log.d(SPEED_TAG, "Start: " + t0 + " path=" + path);
 
@@ -140,7 +176,7 @@ public final class ChatFlowApiClient {
                 reqBuilder.addHeader("X-ChatFlow-Browser-Id", browserId);
             }
 
-            try (Response response = CLIENT.newCall(reqBuilder.build()).execute()) {
+            try (Response response = client.newCall(reqBuilder.build()).execute()) {
                 int code = response.code();
                 long t1 = System.currentTimeMillis();
                 boolean ok = code >= 200 && code < 300;

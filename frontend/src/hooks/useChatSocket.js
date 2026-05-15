@@ -126,7 +126,12 @@ export default function useChatSocket({
         else if (data.type === "typing" && onTyping) onTyping(data);
         else if (data.type === "presence" && onPresence) onPresence(data);
         else if (data.type === "read_receipt" && onReadReceipt) onReadReceipt(data);
-        else if (data.type === "STATUS_UPDATE" && onStatusUpdate) onStatusUpdate(data);
+        else if (
+          (data.type === "status_update" || data.type === "STATUS_UPDATE") &&
+          onStatusUpdate
+        ) {
+          onStatusUpdate(data);
+        }
         else if (data.type === "profile" && onProfile) onProfile(data.user);
         else if (data.type === "conversation_removed" && onConversationRemoved) onConversationRemoved(data);
       } catch {
