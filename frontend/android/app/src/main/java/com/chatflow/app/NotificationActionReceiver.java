@@ -15,6 +15,7 @@ import java.util.concurrent.Executors;
 public class NotificationActionReceiver extends BroadcastReceiver {
 
     private static final String TAG = "ChatFlowNotifyAction";
+    private static final String SPEED_TAG = "ChatFlowSpeed";
 
     /** Must match {@link ChatFlowNotificationHelper#KEY_TEXT_REPLY} and RemoteInput result key. */
     public static final String KEY_TEXT_REPLY = ChatFlowNotificationHelper.KEY_TEXT_REPLY;
@@ -26,6 +27,9 @@ public class NotificationActionReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        long actionStart = System.currentTimeMillis();
+        Log.d(SPEED_TAG, "Start: " + actionStart + " action=onReceive");
+
         if (intent == null || intent.getAction() == null) {
             return;
         }
@@ -44,28 +48,41 @@ public class NotificationActionReceiver extends BroadcastReceiver {
         EXECUTOR.execute(() -> {
             try {
                 if (ACTION_MARK_READ.equals(action)) {
-                    handleMarkRead(appContext, messageId, conversationId);
+                    handleMarkRead(appContext, messageId, conversationId, actionStart);
                 } else if (ACTION_REPLY.equals(action)) {
-                    handleReply(appContext, intent, messageId, conversationId);
+                    handleReply(appContext, intent, messageId, conversationId, actionStart);
                 }
             } finally {
+                long done = System.currentTimeMillis();
+                Log.d(SPEED_TAG, "End: " + done + " ms=" + (done - actionStart) + " action=onReceive_total");
                 pendingResult.finish();
             }
         });
     }
 
-    private void handleMarkRead(Context context, String messageId, String conversationId) {
-        boolean ok = ChatFlowApiClient.postMarkRead(context, messageId);
+    private void handleMarkRead(Context context, String messageId, String conversationId, long actionStart) {
+        Log.d(SPEED_TAG, "Start: " + System.currentTimeMillis() + " action=mark_read_pre_network");
+
+        // Dismiss immediately — don't wait for the server.
+        ChatFlowNotificationHelper.cancel(context, messageId);
+
+        boolean ok = ChatFlowApiClient.postMarkRead(context, messageId, conversationId);
         if (ok) {
-            ChatFlowNotificationHelper.cancel(context, messageId);
             ChatFlowNativePlugin.notifyMarkRead(conversationId, messageId);
             Log.i(TAG, "Marked read messageId=" + messageId);
         } else {
             Log.w(TAG, "Mark read failed messageId=" + messageId);
         }
+        Log.d(SPEED_TAG, "End: " + System.currentTimeMillis() + " ms=" + (System.currentTimeMillis() - actionStart) + " action=mark_read");
     }
 
-    private void handleReply(Context context, Intent intent, String messageId, String conversationId) {
+    private void handleReply(
+            Context context,
+            Intent intent,
+            String messageId,
+            String conversationId,
+            long actionStart
+    ) {
         CharSequence replyText = null;
         Bundle remoteInput = RemoteInput.getResultsFromIntent(intent);
         if (remoteInput != null) {
@@ -78,14 +95,18 @@ public class NotificationActionReceiver extends BroadcastReceiver {
             return;
         }
 
-        Log.d(TAG, "Reply received: " + text + " for msg: " + messageId);
+        Log.d(TAG, "Reply: " + text.length() + " chars for msg=" + messageId);
+        Log.d(SPEED_TAG, "Start: " + System.currentTimeMillis() + " action=reply_pre_network");
+
+        // Dismiss immediately so the UI feels instant; network runs on pooled OkHttp.
+        ChatFlowNotificationHelper.cancel(context, messageId);
 
         boolean ok = ChatFlowApiClient.postSendMessage(context, messageId, conversationId, text);
         if (ok) {
-            ChatFlowNotificationHelper.cancel(context, messageId);
-            Log.i(TAG, "Reply sent for messageId=" + messageId);
+            Log.i(TAG, "Reply sent messageId=" + messageId);
         } else {
             Log.w(TAG, "Reply failed messageId=" + messageId);
         }
+        Log.d(SPEED_TAG, "End: " + System.currentTimeMillis() + " ms=" + (System.currentTimeMillis() - actionStart) + " action=reply");
     }
 }
