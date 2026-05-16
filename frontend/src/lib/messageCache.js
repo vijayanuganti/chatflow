@@ -4,7 +4,11 @@
  */
 
 import { mergeMessageStatus } from "./messageSeen";
-import { isOptimisticMessageId } from "./optimisticMessages";
+import {
+  isOptimisticMessageId,
+  ensureMessageTimestamp,
+  sortMessagesChronologically,
+} from "./optimisticMessages";
 
 const memory = new Map();
 const MAX_CONVERSATIONS = 40;
@@ -15,7 +19,7 @@ function storageKey(userId) {
 }
 
 function sortMessages(list) {
-  return [...list].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+  return sortMessagesChronologically(list);
 }
 
 function uniqueReadBy(a, b) {
@@ -43,7 +47,7 @@ export function mergeMessageLists(cached, fresh) {
 
   for (const m of cached || []) {
     if (m?.__pending && (m?.__tempId || isOptimisticMessageId(m?.id))) {
-      pending.push(m);
+      pending.push(ensureMessageTimestamp(m));
       continue;
     }
     if (m?.id) byId.set(String(m.id), m);

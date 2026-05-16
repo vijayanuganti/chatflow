@@ -43,8 +43,18 @@ import {
   patchConversationPrefs,
   updateConversationPreferences,
 } from "@/lib/conversationPreferences";
-import { loadCacheFromStorage } from "@/lib/messageCache";
-import { mergeIncomingLiveMessage } from "@/lib/optimisticMessages";
+import {
+  loadCacheFromStorage,
+  mergeMessageLists,
+  getCachedMessages,
+  setCachedMessages,
+} from "@/lib/messageCache";
+import {
+  mergeIncomingLiveMessage,
+  isOwnMessage,
+  shouldNotifyForMessage,
+  isViewingConversation,
+} from "@/lib/optimisticMessages";
 import { useOptimisticMessageSend } from "@/hooks/useOptimisticMessageSend";
 import {
   Dialog,
@@ -386,27 +396,34 @@ export default function AdminDashboard() {
   }, [myConvs]);
 
   const loadMessages = useCallback(async (convId) => {
+    if (!convId) return;
     try {
       const res = await api.get(`/conversations/${convId}/messages`);
-      setMessages(res.data);
-      // If admin is a participant, mark as read
+      if (!isViewingConversation(convId, selectedIdRef.current)) return;
+      setMessages((prev) => {
+        const cached = getCachedMessages(convId);
+        const next = mergeMessageLists(cached || prev, res.data);
+        if (user?.id) setCachedMessages(user.id, convId, next);
+        return next;
+      });
       const isMyChat = myConvsRef.current.find((c) => c.id === convId);
       if (isMyChat) api.post(`/conversations/${convId}/read`).catch(() => {});
     } catch (err) {
       toast.error(formatApiError(err));
     }
-  }, []);
+  }, [user?.id]);
 
+  const prevSelectedConvRef = useRef(null);
   useEffect(() => {
-    // Clear only when the *conversation id* changes - not when `selected` is
-    // replaced by a new object for the same chat (sidebar) or when
-    // `loadMessages` is recreated after `myConvs` updates (that was clearing the
-    // thread after every send).
     if (!selected?.id) {
       setMessages([]);
+      prevSelectedConvRef.current = null;
       return;
     }
-    setMessages([]);
+    if (prevSelectedConvRef.current === selected.id) return;
+    prevSelectedConvRef.current = selected.id;
+    const cached = getCachedMessages(selected.id);
+    setMessages(cached?.length ? cached : []);
     loadMessages(selected.id);
   }, [selected?.id, loadMessages]);
 
@@ -511,23 +528,21 @@ export default function AdminDashboard() {
   }, [navigate]);
 
   const handleIncoming = useCallback((msg) => {
+    if (!msg) return;
+    const own = isOwnMessage(msg, user.id);
     const recipientIds = Array.isArray(msg?.recipient_ids) ? msg.recipient_ids : [];
     const inRecipientList = recipientIds.some((id) => String(id) === String(user.id));
-    if (msg?.id && inRecipientList && String(msg.sender_id) !== String(user.id)) {
+    if (msg?.id && inRecipientList && !own) {
       api.post("/notifications/update-status", { message_id: msg.id, status: "delivered" }).catch(() => {});
     }
     const activeId = selectedIdRef.current;
-    // Surface a Chrome-style OS notification when the admin isn't already
-    // looking at this conversation. Admins are notified for chats they
-    // participate in (anything where they are a recipient).
-    // Admins receive WS copies of chats they do not participate in; those
-    // payloads omit them from recipient_ids, but they should still get alerts.
     const adminMonitoring =
-      user.role === "admin" && msg && String(msg.sender_id) !== String(user.id);
+      user.role === "admin" && !own;
     if (
-      msg &&
-      (inRecipientList || adminMonitoring) &&
-      !(document.visibilityState === "visible" && activeId === msg.conversation_id)
+      !own
+      && shouldNotifyForMessage(msg, user.id)
+      && (inRecipientList || adminMonitoring)
+      && !(document.visibilityState === "visible" && isViewingConversation(msg.conversation_id, activeId))
     ) {
       const sender = msg.sender_name || "Someone";
       const preview = msg.message_type === "text"
@@ -547,8 +562,9 @@ export default function AdminDashboard() {
       });
     }
     setMessages((prev) => {
-      if (!activeId || msg.conversation_id !== activeId) return prev;
+      if (!isViewingConversation(msg.conversation_id, activeId)) return prev;
       const { next, changed } = mergeIncomingLiveMessage(prev, msg, user.id);
+      if (changed && user?.id) setCachedMessages(user.id, activeId, next);
       return changed ? next : prev;
     });
     const updater = (prev) => {

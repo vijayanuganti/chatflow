@@ -1,5 +1,76 @@
 let tempIdCounter = 0;
 
+/** True when the payload was sent by the logged-in user. */
+export function isOwnMessage(message, userId) {
+  if (!message || userId == null) return false;
+  return String(message.sender_id) === String(userId);
+}
+
+/** Skip banners, toasts, and foreground tones for self-sent echoes. */
+export function shouldNotifyForMessage(message, userId) {
+  return !isOwnMessage(message, userId);
+}
+
+/** Whether the open thread matches this conversation id. */
+export function isViewingConversation(conversationId, activeConversationId) {
+  if (!conversationId || activeConversationId == null) return false;
+  return String(activeConversationId) === String(conversationId);
+}
+
+/** ISO timestamp for new optimistic rows (matches backend `created_at`). */
+export function createOptimisticTimestamp() {
+  return new Date().toISOString();
+}
+
+/** Normalize `created_at` / legacy keys so sort never treats a row as epoch 0. */
+export function ensureMessageTimestamp(message) {
+  if (!message) return message;
+  const raw = message.created_at ?? message.createdAt ?? message.timestamp;
+  let created_at;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    created_at = new Date(raw).toISOString();
+  } else if (typeof raw === "string" && raw.trim()) {
+    const t = new Date(raw).getTime();
+    created_at = Number.isFinite(t) ? new Date(t).toISOString() : createOptimisticTimestamp();
+  } else {
+    created_at = createOptimisticTimestamp();
+  }
+  const { createdAt, timestamp, ...rest } = message;
+  return { ...rest, created_at };
+}
+
+/** Milliseconds for chronological ordering. */
+export function getMessageTimeMs(message) {
+  if (!message) return 0;
+  const raw = message.created_at ?? message.createdAt ?? message.timestamp;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  const t = new Date(raw || 0).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+/**
+ * Strict ascending sort by time; pending/temp rows tie-break to the bottom at equal ms.
+ */
+export function sortMessagesChronologically(list) {
+  return [...(list || [])].sort((a, b) => {
+    const ta = getMessageTimeMs(a);
+    const tb = getMessageTimeMs(b);
+    if (ta !== tb) return ta - tb;
+    const aPending = a?.__pending || isOptimisticMessageId(a?.id) ? 1 : 0;
+    const bPending = b?.__pending || isOptimisticMessageId(b?.id) ? 1 : 0;
+    if (aPending !== bPending) return aPending - bPending;
+    return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
+  });
+}
+
+/** Force a new array reference and keep timeline order locked. */
+export function appendToMessageList(prev, message) {
+  return sortMessagesChronologically([
+    ...(prev || []),
+    ensureMessageTimestamp(message),
+  ]);
+}
+
 /** Client-side optimistic message id (prefixed for dedup with WebSocket echoes). */
 export function makeOptimisticMessageId() {
   const base = `temp-${Date.now()}`;
@@ -118,11 +189,16 @@ export function mergeIncomingLiveMessage(prev, incoming, currentUserId) {
     if (idx !== -1) {
       const next = prev.slice();
       next[idx] = finalizeOptimisticMessage(prev[idx], incoming);
-      return { next, changed: true };
+      return { next: sortMessagesChronologically(next), changed: true };
     }
+    // Own echo with no optimistic row: merge quietly (POST may have already applied).
+    if (prev.some((m) => String(m.id) === String(incoming.id))) {
+      return { next: prev, changed: false };
+    }
+    return { next: appendToMessageList(prev, incoming), changed: true };
   }
 
-  return { next: [...prev, incoming], changed: true };
+  return { next: appendToMessageList(prev, incoming), changed: true };
 }
 
 /**
@@ -132,17 +208,22 @@ export function mergeSentMessageResponse(prev, tempId, serverMessage) {
   if (!Array.isArray(prev) || !serverMessage?.id) return prev;
 
   if (prev.some((m) => String(m.id) === String(serverMessage.id) && String(m.__tempId || "") !== String(tempId))) {
-    return prev.filter((m) => String(m.__tempId) !== String(tempId) && String(m.id) !== String(tempId));
+    return sortMessagesChronologically(
+      prev.filter((m) => String(m.__tempId) !== String(tempId) && String(m.id) !== String(tempId)),
+    );
   }
 
   const idx = prev.findIndex((m) => String(m.__tempId) === String(tempId) || String(m.id) === String(tempId));
   if (idx === -1) {
-    return prev.some((m) => String(m.id) === String(serverMessage.id))
-      ? prev
-      : [...prev, finalizeOptimisticMessage({ __tempId: tempId }, serverMessage)];
+    if (prev.some((m) => String(m.id) === String(serverMessage.id))) {
+      return sortMessagesChronologically(
+        prev.filter((m) => String(m.__tempId) !== String(tempId) && String(m.id) !== String(tempId)),
+      );
+    }
+    return appendToMessageList(prev, finalizeOptimisticMessage({ __tempId: tempId }, serverMessage));
   }
 
   const next = prev.slice();
   next[idx] = finalizeOptimisticMessage(next[idx], serverMessage);
-  return next;
+  return sortMessagesChronologically(next);
 }

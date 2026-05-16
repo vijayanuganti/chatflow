@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { groupMessagesByDate } from "@/lib/chatDateGroups";
+import { sortMessagesChronologically } from "@/lib/optimisticMessages";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -89,12 +90,12 @@ export default function ChatWindow({
      renders chat A's messages with chat B's header (because the parent
      refetches asynchronously), which is what made some chats open in the
      middle of an older thread. */
-  const visibleMessages = useMemo(
-    () => (messages || []).filter(
+  const visibleMessages = useMemo(() => {
+    const filtered = (messages || []).filter(
       (m) => !conversation?.id || m.conversation_id === conversation.id,
-    ),
-    [messages, conversation?.id],
-  );
+    );
+    return sortMessagesChronologically(filtered);
+  }, [messages, conversation?.id]);
 
   /* Track whether the user is "near the bottom" so we only auto-scroll when
      it would feel natural. If they've scrolled up to read history we leave

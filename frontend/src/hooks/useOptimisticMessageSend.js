@@ -1,10 +1,15 @@
 import { useCallback } from "react";
 import { toast } from "sonner";
 import { api, formatApiError } from "@/lib/api";
-import { setCachedMessages } from "@/lib/messageCache";
+import { getCachedMessages, setCachedMessages } from "@/lib/messageCache";
 import {
   makeOptimisticMessageId,
   mergeSentMessageResponse,
+  appendToMessageList,
+  isViewingConversation,
+  createOptimisticTimestamp,
+  ensureMessageTimestamp,
+  sortMessagesChronologically,
 } from "@/lib/optimisticMessages";
 
 /**
@@ -18,26 +23,31 @@ export function useOptimisticMessageSend({
   conversations,
   onConversationMissing,
 }) {
-  const patchMessage = useCallback((tempId, patch) => {
+  const commitMessages = useCallback((conversationId, updater) => {
     setMessages((prev) => {
-      const next = prev.map((m) => (m.__tempId === tempId ? { ...m, ...patch } : m));
-      if (user?.id && selectedIdRef.current) {
-        const convId = next.find((m) => m.__tempId === tempId)?.conversation_id;
-        if (convId) setCachedMessages(user.id, convId, next);
-      }
-      return next;
-    });
-  }, [user?.id, selectedIdRef, setMessages]);
-
-  const applyServerMessage = useCallback((tempId, serverMessage, conversationId) => {
-    setMessages((prev) => {
-      const next = mergeSentMessageResponse(prev, tempId, serverMessage);
-      if (user?.id && selectedIdRef.current === conversationId) {
+      const raw = typeof updater === "function" ? updater(prev) : updater;
+      if (!Array.isArray(raw)) return prev;
+      const next = sortMessagesChronologically(raw);
+      if (next === prev) return prev;
+      if (user?.id && isViewingConversation(conversationId, selectedIdRef.current)) {
         setCachedMessages(user.id, conversationId, next);
       }
       return next;
     });
   }, [user?.id, selectedIdRef, setMessages]);
+
+  const patchMessage = useCallback((tempId, patch) => {
+    commitMessages(selectedIdRef.current, (prev) => (
+      prev.map((m) => (m.__tempId === tempId ? { ...m, ...patch } : m))
+    ));
+  }, [commitMessages, selectedIdRef]);
+
+  const applyServerMessage = useCallback((tempId, serverMessage, conversationId) => {
+    if (!conversationId) return;
+    commitMessages(conversationId, (prev) => (
+      mergeSentMessageResponse(prev, tempId, serverMessage)
+    ));
+  }, [commitMessages]);
 
   const sendMessage = useCallback((body, options = {}) => {
     const {
@@ -48,11 +58,12 @@ export function useOptimisticMessageSend({
     } = options;
 
     const tempId = existingTempId || makeOptimisticMessageId();
-    const nowIso = new Date().toISOString();
-    const conv = conversations?.find((c) => c.id === body.conversation_id);
+    const nowIso = createOptimisticTimestamp();
+    const convId = body.conversation_id;
+    const conv = conversations?.find((c) => c.id === convId);
 
     const updateConversationPreview = (previewSource, createdAt) => {
-      if (!setConversations) return;
+      if (!setConversations || !convId) return;
       const preview = previewSource.content || `[${previewSource.message_type}]`;
       const previewText = conv?.type === "group"
         ? `${previewSource.sender_name}: ${preview}`
@@ -60,7 +71,7 @@ export function useOptimisticMessageSend({
       setConversations((prev) => {
         let found = false;
         const updated = prev.map((c) => {
-          if (c.id === body.conversation_id) {
+          if (c.id === convId) {
             found = true;
             return { ...c, last_message: previewText, last_message_at: createdAt };
           }
@@ -79,11 +90,11 @@ export function useOptimisticMessageSend({
       (async () => {
         try {
           const res = await api.post("/messages", body);
-          applyServerMessage(tempId, res.data, body.conversation_id);
+          applyServerMessage(tempId, res.data, convId);
           updateConversationPreview(res.data, res.data.created_at);
         } catch (err) {
           toast.error(formatApiError(err));
-          setMessages((prev) => prev.map((m) => (
+          commitMessages(convId, (prev) => prev.map((m) => (
             m.__tempId === tempId
               ? { ...m, __pending: false, __error: true, __uploadProgress: undefined }
               : m
@@ -97,11 +108,11 @@ export function useOptimisticMessageSend({
       const recipientIds = conv
         ? (conv.participants || []).filter((p) => p !== user?.id)
         : [];
-      const optimistic = {
+      const optimistic = ensureMessageTimestamp({
         id: tempId,
         __tempId: tempId,
         __pending: true,
-        conversation_id: body.conversation_id,
+        conversation_id: convId,
         conversation_type: conv?.type,
         sender_id: user?.id,
         sender_name: user?.full_name,
@@ -115,14 +126,13 @@ export function useOptimisticMessageSend({
         recipient_ids: recipientIds,
         status: "sent",
         ...extraFields,
-      };
+      });
 
-      if (selectedIdRef.current === body.conversation_id) {
-        setMessages((prev) => {
-          const next = [...prev, optimistic];
-          if (user?.id) setCachedMessages(user.id, body.conversation_id, next);
-          return next;
-        });
+      if (convId && isViewingConversation(convId, selectedIdRef.current)) {
+        commitMessages(convId, (prev) => appendToMessageList(prev, optimistic));
+      } else if (convId && user?.id) {
+        const cached = getCachedMessages(convId) || [];
+        setCachedMessages(user.id, convId, appendToMessageList(cached, optimistic));
       }
 
       updateConversationPreview(optimistic, nowIso);
@@ -133,11 +143,11 @@ export function useOptimisticMessageSend({
     (async () => {
       try {
         const res = await api.post("/messages", body);
-        applyServerMessage(tempId, res.data, body.conversation_id);
+        applyServerMessage(tempId, res.data, convId);
         updateConversationPreview(res.data, res.data.created_at);
       } catch (err) {
         toast.error(formatApiError(err));
-        setMessages((prev) => prev.map((m) => (
+        commitMessages(convId, (prev) => prev.map((m) => (
           m.__tempId === tempId
             ? { ...m, __pending: false, __error: true, __uploadProgress: undefined }
             : m
@@ -151,10 +161,10 @@ export function useOptimisticMessageSend({
     user?.full_name,
     conversations,
     selectedIdRef,
-    setMessages,
     setConversations,
     onConversationMissing,
     applyServerMessage,
+    commitMessages,
   ]);
 
   return { sendMessage, patchMessage };

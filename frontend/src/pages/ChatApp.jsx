@@ -32,7 +32,12 @@ import {
   patchCachedMessageStatus,
   patchCachedMessageStatuses,
 } from "@/lib/messageCache";
-import { mergeIncomingLiveMessage } from "@/lib/optimisticMessages";
+import {
+  mergeIncomingLiveMessage,
+  isOwnMessage,
+  shouldNotifyForMessage,
+  isViewingConversation,
+} from "@/lib/optimisticMessages";
 import {
   markOpponentMessagesSeen,
   markMessageSeen,
@@ -156,10 +161,13 @@ export default function ChatApp() {
     }
   }, [user?.role]);
 
-  const syncMessagesToView = useCallback((convId, nextMessages) => {
-    if (selectedIdRef.current !== convId) return;
-    setMessages(nextMessages);
-    if (user?.id) setCachedMessages(user.id, convId, nextMessages);
+  const syncMessagesToView = useCallback((convId, serverMessages) => {
+    if (!isViewingConversation(convId, selectedIdRef.current)) return;
+    setMessages((prev) => {
+      const next = mergeMessageLists(prev, serverMessages);
+      if (user?.id) setCachedMessages(user.id, convId, next);
+      return next;
+    });
   }, [user?.id]);
 
   const loadMessages = useCallback(async (convId) => {
@@ -267,6 +275,7 @@ export default function ChatApp() {
 
   const maybeNotify = useCallback((msg) => {
     if (!msg) return;
+    if (!shouldNotifyForMessage(msg, user.id)) return;
     const ids = Array.isArray(msg.recipient_ids) ? msg.recipient_ids : [];
     if (!ids.some((id) => String(id) === String(user.id))) return;
     const conv = conversations.find((c) => c.id === msg.conversation_id);
@@ -331,25 +340,26 @@ export default function ChatApp() {
   }, [user.id]);
 
   const handleIncomingMessage = useCallback((msg) => {
+    if (!msg) return;
     const activeId = selectedIdRef.current;
+    const own = isOwnMessage(msg, user.id);
     const inOpenThread =
       document.visibilityState === "visible"
-      && activeId
-      && msg.conversation_id === activeId;
+      && isViewingConversation(msg.conversation_id, activeId);
 
     if (inOpenThread) {
-      ackMessageSeen(msg);
-    } else {
+      if (!own) ackMessageSeen(msg);
+    } else if (!own) {
       maybeNotify(msg);
     }
     ackMessageDelivered(msg);
     setMessages((prev) => {
-      if (!activeId || msg.conversation_id !== activeId) return prev;
+      if (!isViewingConversation(msg.conversation_id, activeId)) return prev;
 
       const { next, changed } = mergeIncomingLiveMessage(prev, msg, user.id);
       if (!changed) return prev;
 
-      if ((msg.recipient_ids || []).includes(user.id)) {
+      if (!own && (msg.recipient_ids || []).includes(user.id)) {
         api.post(`/conversations/${activeId}/read`).catch(() => {});
       }
       if (user?.id) setCachedMessages(user.id, activeId, next);

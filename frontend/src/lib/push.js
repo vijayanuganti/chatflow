@@ -225,6 +225,11 @@ export async function initCapacitorPush(userId, onNotificationAction, onMarkRead
     await PushNotifications.addListener("pushNotificationReceived", async (notification) => {
       const data = notification?.data || {};
       const convId = data.conversation_id ? String(data.conversation_id) : "";
+      const senderId = data.sender_id ? String(data.sender_id) : "";
+      if (activeUserId && senderId && senderId === String(activeUserId)) {
+        logPush("pushNotificationReceived: skip self-sent echo");
+        return;
+      }
       const title = notification?.title || data.title || "ChatFlow";
       const body = notification?.body || data.body || "";
       const appVisible = document.visibilityState === "visible";
