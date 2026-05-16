@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowLeft, MessageCircle, MoreVertical, Settings, LogOut, UserPlus, Sun, Moon, ShieldAlert } from "lucide-react";
+import { ArrowLeft, MessageCircle, MoreVertical, Settings, LogOut, UserPlus, Sun, Moon, ShieldAlert, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Avatar from "@/components/Avatar";
 import {
@@ -20,6 +20,7 @@ export default function TopBar({
   unreadTotal = 0,
   onCreateAccount,
   onRaiseComplaint,
+  onRefresh,
 }) {
   const { user, logout } = useAuth();
   const { toggleTheme, isDark } = useTheme();
@@ -48,11 +49,6 @@ export default function TopBar({
         )}
         <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-900 text-white sm:h-9 sm:w-9 sm:rounded-xl">
           <MessageCircle className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
-          {unreadTotal > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 h-5 min-w-[20px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center border-2 border-white">
-              {unreadTotal > 99 ? "99+" : unreadTotal}
-            </span>
-          )}
         </div>
         <div className="min-w-0">
           <div className="font-display text-sm font-semibold leading-tight truncate sm:text-base">{title}</div>
@@ -103,6 +99,11 @@ export default function TopBar({
             {canRaiseComplaint && (
               <DropdownMenuItem onClick={() => onRaiseComplaint?.()} data-testid="topbar-complaint-item">
                 <ShieldAlert /> Raise a complaint
+              </DropdownMenuItem>
+            )}
+            {onRefresh && (
+              <DropdownMenuItem onClick={() => onRefresh?.()} data-testid="topbar-refresh-item">
+                <RefreshCw /> Refresh
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onClick={() => onOpenSettings?.()} data-testid="topbar-settings-item">

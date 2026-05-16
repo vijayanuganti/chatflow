@@ -7,17 +7,21 @@ import {
   PowerOff,
   ShieldCheck,
   Stethoscope,
+  UtensilsCrossed,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Avatar from "@/components/Avatar";
 import MobilePageShell from "@/components/layout/MobilePageShell";
-import { medicalPath, resetPasswordPath } from "@/lib/appRoutes";
+import { dietPlanPath, medicalPath, resetPasswordPath } from "@/lib/appRoutes";
 import { api, formatApiError } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
+import SharedMediaSection from "@/components/SharedMediaSection";
 
 export default function UserAccountDetailPage() {
   const { userId } = useParams();
   const navigate = useNavigate();
+  const { user: me } = useAuth();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [toggleBusy, setToggleBusy] = useState(false);
@@ -83,10 +87,10 @@ export default function UserAccountDetailPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <DetailCard label="Phone number" value={<span className="font-mono">{user.phone_number || "—"}</span>} />
+            <DetailCard label="Phone number" value={<span className="font-mono">{user.phone_number || "-"}</span>} />
             <DetailCard
               label="Created at"
-              value={user.created_at ? new Date(user.created_at).toLocaleString() : "—"}
+              value={user.created_at ? new Date(user.created_at).toLocaleString() : "-"}
             />
             <DetailCard
               label="Created by"
@@ -168,7 +172,23 @@ export default function UserAccountDetailPage() {
               >
                 <Stethoscope className="h-4 w-4 mr-1.5" /> Edit medical profile
               </Button>
+              <Button
+                variant="outline"
+                className="w-full rounded-full h-11 sm:col-span-2"
+                onClick={() =>
+                  navigate(dietPlanPath("admin", user.id), {
+                    state: { client: user, backTo: `/admin/users/${user.id}` },
+                  })
+                }
+                data-testid="user-detail-diet-plan"
+              >
+                <UtensilsCrossed className="h-4 w-4 mr-1.5" /> Diet plan
+              </Button>
             </div>
+          )}
+
+          {user.role !== "admin" && user.id !== me?.id && (
+            <SharedMediaSection profileUserId={user.id} />
           )}
 
           {user.role !== "admin" && (

@@ -1,0 +1,29 @@
+/** WhatsApp-style date label for message dividers. */
+export function formatChatDateDivider(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return "Today";
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+export function groupMessagesByDate(messages) {
+  const groups = [];
+  let lastKey = null;
+  for (const m of messages || []) {
+    const key = formatChatDateDivider(m.created_at);
+    if (key !== lastKey) {
+      groups.push({ type: "divider", key: `${key}-${m.id}`, label: key });
+      lastKey = key;
+    }
+    groups.push({ type: "message", message: m });
+  }
+  return groups;
+}

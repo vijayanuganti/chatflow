@@ -332,7 +332,7 @@ export default function CreateAccountPage() {
                     <SelectContent>
                       {(batches || []).map((b) => (
                         <SelectItem key={b.id} value={b.id} disabled={!!b.is_full}>
-                          {(employeeMap[b.employee_id]?.full_name || me?.full_name || "Employee")} — {b.name} (
+                          {(employeeMap[b.employee_id]?.full_name || me?.full_name || "Employee")} - {b.name} (
                           {b.client_count || 0}/{b.max_clients || 20})
                           {b.is_full ? " · Full" : ""}
                         </SelectItem>

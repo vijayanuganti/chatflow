@@ -97,7 +97,7 @@ const READABLE_LABELS = {
 };
 
 export function humanizeMedicalValue(field, value) {
-  if (value === null || value === undefined || value === "") return "—";
+  if (value === null || value === undefined || value === "") return "-";
   if (READABLE_LABELS[field]) return READABLE_LABELS[field][value] || value;
   if (field === "height_cm") return `${value} cm`;
   if (field === "weight_kg") return `${value} kg`;

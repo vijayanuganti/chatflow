@@ -30,3 +30,18 @@ export function resetPasswordPath(userId) {
 export function userAccountPath(userId) {
   return `/admin/users/${userId}`;
 }
+
+export function newConversationPath() {
+  return "/chat/new-conversation";
+}
+
+/** Diet plan for self (client) or a specific client in chat. */
+export function dietPlanPath(role, clientId) {
+  if (role === "admin" && clientId) {
+    return `/admin/users/${clientId}/diet-plan`;
+  }
+  if (clientId) {
+    return `/chat/diet-plan/${clientId}`;
+  }
+  return "/chat/diet-plan";
+}

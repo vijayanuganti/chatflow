@@ -2,8 +2,7 @@ import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from
 import { useLocation, useNavigate } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
-import NewChatDialog from "@/components/NewChatDialog";
-import { createAccountPath, profilePath } from "@/lib/appRoutes";
+import { createAccountPath, newConversationPath } from "@/lib/appRoutes";
 import ComplaintDialog from "@/components/ComplaintDialog";
 import TopBar from "@/components/TopBar";
 import useChatSocket from "@/hooks/useChatSocket";
@@ -39,7 +38,13 @@ import {
   mergeMessageStatus,
 } from "@/lib/messageSeen";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { Plus, MessageSquare, UtensilsCrossed, Settings, Layers } from "lucide-react";
+import PanelBottomNav from "@/components/layout/PanelBottomNav";
+import { dietPlanPath, profilePath } from "@/lib/appRoutes";
+import {
+  patchConversationPrefs,
+  updateConversationPreferences,
+} from "@/lib/conversationPreferences";
 
 export default function ChatApp() {
   useMobileChatViewport();
@@ -61,10 +66,10 @@ export default function ChatApp() {
   useEffect(() => {
     if (user?.id) loadCacheFromStorage(user.id);
   }, [user?.id]);
-  const [newChatOpen, setNewChatOpen] = useState(false);
   const [complaintOpen, setComplaintOpen] = useState(false);
   const [selectedBatchId, setSelectedBatchId] = useState(null);
   const [batches, setBatches] = useState([]);
+  const [mobileSection, setMobileSection] = useState("chats"); // chats | diet | batches | settings
   const canCreateAccounts =
     user?.role === "admin" ||
     (user?.role === "employee" && !!user?.account_creation_access);
@@ -76,6 +81,31 @@ export default function ChatApp() {
     const target = conversations.find((c) => c.id === convId);
     if (target) setSelected(target);
   }, [location.state?.conversationId, conversations]);
+
+  // Return from full-screen new-conversation page with a started thread.
+  useEffect(() => {
+    const conv = location.state?.selectedConversation;
+    if (!conv?.id) return;
+    setConversations((prev) => (prev.some((c) => c.id === conv.id) ? prev : [conv, ...prev]));
+    setSelected(conv);
+    navigate("/chat", { replace: true, state: {} });
+  }, [location.state?.selectedConversation, navigate]);
+
+  const openNewConversation = useCallback(() => {
+    navigate(newConversationPath(), { state: { backTo: "/chat", panel: "chat" } });
+  }, [navigate]);
+
+  const handlePreferenceChange = useCallback(async (convId, patch) => {
+    try {
+      const data = await updateConversationPreferences(convId, patch);
+      setConversations((prev) => patchConversationPrefs(prev, convId, data));
+      if (patch.is_archived && selectedIdRef.current === convId) {
+        setSelected(null);
+      }
+    } catch (err) {
+      toast.error(formatApiError(err));
+    }
+  }, []);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -144,6 +174,15 @@ export default function ChatApp() {
       }
     }
   }, [user?.id, syncMessagesToView]);
+
+  const handleRefresh = useCallback(async () => {
+    const convId = selectedIdRef.current;
+    await Promise.all([
+      loadConversations(),
+      convId ? loadMessages(convId) : Promise.resolve(),
+    ]);
+    if (user?.id) loadCacheFromStorage(user.id);
+  }, [loadConversations, loadMessages, user?.id]);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
@@ -219,6 +258,8 @@ export default function ChatApp() {
     if (!msg) return;
     const ids = Array.isArray(msg.recipient_ids) ? msg.recipient_ids : [];
     if (!ids.some((id) => String(id) === String(user.id))) return;
+    const conv = conversations.find((c) => c.id === msg.conversation_id);
+    if (conv?.is_muted) return;
 
     const sender = msg.sender_name || "Someone";
     const preview = msg.message_type === "text"
@@ -258,7 +299,7 @@ export default function ChatApp() {
       data: { conversation_id: msg.conversation_id },
       silent: notificationToneSuppressesOsSound(),
     });
-  }, [user.id, conversations]);
+  }, [user.id, conversations, setSelected]);
 
   const ackMessageDelivered = useCallback((msg) => {
     if (!msg?.id) return;
@@ -582,35 +623,6 @@ export default function ChatApp() {
     })();
   };
 
-  const handleStartDirect = async (otherUser) => {
-    setNewChatOpen(false);
-    try {
-      const res = await api.post(`/conversations/start`, { other_user_id: otherUser.id });
-      const conv = { ...res.data.conversation, other_user: res.data.other_user, participants_info: [user, res.data.other_user] };
-      conv.unread_count = 0;
-      setConversations((prev) => prev.some((c) => c.id === conv.id) ? prev : [conv, ...prev]);
-      setSelected(conv);
-    } catch (err) {
-      toast.error(formatApiError(err));
-    }
-  };
-
-  const handleCreateGroup = async ({ name, member_ids }) => {
-    try {
-      const res = await api.post("/conversations/group", { name, member_ids });
-      await loadConversations();
-      setNewChatOpen(false);
-      // Find the new conv in our list after reload
-      setTimeout(() => {
-        setSelected((prev) => prev || res.data);
-      }, 100);
-      setSelected(res.data);
-    } catch (err) {
-      toast.error(formatApiError(err));
-      throw err;
-    }
-  };
-
   const filteredConversations = React.useMemo(() => {
     // Inactive clients shouldn't clutter chat lists for anyone except admin
     // (the admin's monitor view goes through AdminDashboard, not this page).
@@ -639,7 +651,9 @@ export default function ChatApp() {
   }, [user?.role, selectedBatchId, conversations, batches]);
 
   const unreadTotal = React.useMemo(
-    () => conversations.reduce((sum, c) => sum + Number(c.unread_count || 0), 0),
+    () => conversations
+      .filter((c) => !c.is_archived)
+      .reduce((sum, c) => sum + Number(c.unread_count || 0), 0),
     [conversations]
   );
 
@@ -670,6 +684,10 @@ export default function ChatApp() {
     if (selected?.id) pushSentinel();
   }, [selected?.id, pushSentinel]);
 
+  const showMobileFooter = !selected;
+  const isClient = user?.role === "client";
+  const isEmployee = user?.role === "employee";
+
   return (
     <div
       className="flex w-full min-h-0 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950"
@@ -679,7 +697,7 @@ export default function ChatApp() {
       <div className="shrink-0">
         <TopBar
           onOpenSettings={() => navigate(profilePath(user?.role))}
-          unreadTotal={unreadTotal}
+          onRefresh={handleRefresh}
           onCreateAccount={
             canCreateAccounts
               ? () =>
@@ -696,18 +714,19 @@ export default function ChatApp() {
         />
       </div>
 
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className={`flex min-h-0 flex-1 overflow-hidden ${showMobileFooter ? "pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0" : ""}`}>
         <div className={`${selected ? "hidden md:flex" : "flex"} h-full min-h-0 w-full flex-col md:w-auto md:flex-none`}>
           <ChatSidebar
             conversations={filteredConversations}
             onlineUsers={onlineUsers}
             selectedId={selected?.id}
-            onSelect={setSelected}
-            onNewChat={() => setNewChatOpen(true)}
+            onSelect={(c) => { setSelected(c); setMobileSection("chats"); }}
+            onNewChat={openNewConversation}
             batches={batches}
             selectedBatchId={selectedBatchId}
             onSelectBatch={setSelectedBatchId}
             onBatchesChanged={loadBatches}
+            onPreferenceChange={handlePreferenceChange}
           />
         </div>
         <main className={`${selected ? "flex" : "hidden md:flex"} min-h-0 flex-1 flex-col overflow-hidden`}>
@@ -727,22 +746,90 @@ export default function ChatApp() {
       {!selected && (
         <button
           type="button"
-          onClick={() => setNewChatOpen(true)}
+          onClick={openNewConversation}
           data-testid="new-chat-fab"
-          className="fixed z-30 h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white shadow-lg flex items-center justify-center bottom-[max(1rem,calc(1rem+env(safe-area-inset-bottom,0px)))] right-[max(1rem,calc(1rem+env(safe-area-inset-right,0px)))] sm:bottom-[max(1.5rem,calc(1.5rem+env(safe-area-inset-bottom,0px)))] sm:right-[max(1.5rem,calc(1.5rem+env(safe-area-inset-right,0px)))]"
+          className={`fixed z-30 h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white shadow-lg flex items-center justify-center right-[max(1rem,calc(1rem+env(safe-area-inset-right,0px)))] sm:right-[max(1.5rem,calc(1.5rem+env(safe-area-inset-right,0px)))] ${
+            showMobileFooter && (isClient || isEmployee)
+              ? "bottom-[calc(3.5rem+env(safe-area-inset-bottom)+1rem)] md:bottom-[max(1rem,calc(1rem+env(safe-area-inset-bottom,0px)))]"
+              : "bottom-[max(1rem,calc(1rem+env(safe-area-inset-bottom,0px)))] sm:bottom-[max(1.5rem,calc(1.5rem+env(safe-area-inset-bottom,0px)))]"
+          }`}
           title="New chat"
         >
           <Plus className="h-5 w-5 sm:h-6 sm:w-6" />
         </button>
       )}
 
-      <NewChatDialog
-        open={newChatOpen}
-        onOpenChange={setNewChatOpen}
-        onSelectUser={handleStartDirect}
-        onCreateGroup={handleCreateGroup}
-        onlineUsers={onlineUsers}
-      />
+      {isClient && (
+        <PanelBottomNav
+          hidden={!showMobileFooter}
+          testId="client-bottom-nav"
+          items={[
+            {
+              id: "chats",
+              label: "Chats",
+              icon: MessageSquare,
+              active: mobileSection === "chats",
+              badge: unreadTotal,
+              testId: "client-nav-chats",
+              onClick: () => setMobileSection("chats"),
+            },
+            {
+              id: "diet",
+              label: "My Diet",
+              icon: UtensilsCrossed,
+              active: mobileSection === "diet",
+              testId: "client-nav-diet",
+              onClick: () => navigate(dietPlanPath("client"), { state: { backTo: "/chat", startFromDayOne: true } }),
+            },
+            {
+              id: "settings",
+              label: "Settings",
+              icon: Settings,
+              active: mobileSection === "settings",
+              testId: "client-nav-settings",
+              onClick: () => navigate(profilePath("client")),
+            },
+          ]}
+        />
+      )}
+
+      {isEmployee && (
+        <PanelBottomNav
+          hidden={!showMobileFooter}
+          testId="employee-bottom-nav"
+          items={[
+            {
+              id: "chats",
+              label: "Chats",
+              icon: MessageSquare,
+              active: mobileSection === "chats",
+              badge: unreadTotal,
+              testId: "employee-nav-chats",
+              onClick: () => setMobileSection("chats"),
+            },
+            {
+              id: "batches",
+              label: "Batches",
+              icon: Layers,
+              active: mobileSection === "batches",
+              testId: "employee-nav-batches",
+              onClick: () => {
+                setMobileSection("batches");
+                document.querySelector("[data-testid='batch-boards']")?.scrollIntoView({ behavior: "smooth" });
+              },
+            },
+            {
+              id: "settings",
+              label: "Settings",
+              icon: Settings,
+              active: mobileSection === "settings",
+              testId: "employee-nav-settings",
+              onClick: () => navigate(profilePath("employee")),
+            },
+          ]}
+        />
+      )}
+
       {user?.role === "client" && (
         <ComplaintDialog open={complaintOpen} onOpenChange={setComplaintOpen} />
       )}

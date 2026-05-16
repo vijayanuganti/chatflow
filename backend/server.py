@@ -336,14 +336,26 @@ def _send_fcm_multicast_blocking(tokens: List[str], title: str, body: str, data:
     return messaging.send_each_for_multicast(message)
 
 
+async def _conversation_muted_for_user(user_id: str, conversation_id: str) -> bool:
+    pref = await db.conversation_preferences.find_one(
+        {"user_id": user_id, "conversation_id": conversation_id},
+        {"is_muted": 1, "_id": 0},
+    )
+    return bool(pref and pref.get("is_muted"))
+
+
 async def send_fcm_notification(
     user_id: str,
     title: str,
     body: str,
     data: Optional[Dict] = None,
+    *,
+    conversation_id: Optional[str] = None,
 ) -> None:
     """Send an FCM v1 notification+data payload to all tokens for a user."""
     if not _init_firebase():
+        return
+    if conversation_id and await _conversation_muted_for_user(user_id, conversation_id):
         return
 
     doc = await db.users.find_one({"id": user_id}, {"fcm_tokens": 1, "_id": 0})
@@ -752,6 +764,12 @@ class MessageBody(BaseModel):
     message_type: str = "text"
     file_url: Optional[str] = None
     file_name: Optional[str] = None
+
+
+class ConversationPreferencesBody(BaseModel):
+    is_pinned: Optional[bool] = None
+    is_archived: Optional[bool] = None
+    is_muted: Optional[bool] = None
 
 
 class NotificationSendBody(BaseModel):
@@ -2425,6 +2443,29 @@ async def create_group(body: CreateGroupBody, user: dict = Depends(get_current_u
     return conv
 
 
+def _sort_conversations_for_viewer(convs: List[dict]) -> List[dict]:
+    """Pinned threads first (most recent activity), then the rest."""
+
+    def by_recent(c: dict) -> str:
+        return c.get("last_message_at") or c.get("created_at") or ""
+
+    pinned = sorted([c for c in convs if c.get("is_pinned")], key=by_recent, reverse=True)
+    rest = sorted([c for c in convs if not c.get("is_pinned")], key=by_recent, reverse=True)
+    return pinned + rest
+
+
+async def _load_conversation_preferences(viewer_id: str, conv_ids: List[str]) -> Dict[str, dict]:
+    if not viewer_id or not conv_ids:
+        return {}
+    prefs_map: Dict[str, dict] = {}
+    async for pref in db.conversation_preferences.find(
+        {"user_id": viewer_id, "conversation_id": {"$in": conv_ids}},
+        {"_id": 0},
+    ):
+        prefs_map[pref["conversation_id"]] = pref
+    return prefs_map
+
+
 async def _enrich_conversations(convs: List[dict], viewer_id: Optional[str]) -> List[dict]:
     user_ids = set()
     for c in convs:
@@ -2437,6 +2478,7 @@ async def _enrich_conversations(convs: List[dict], viewer_id: Optional[str]) -> 
             users_map[u["id"]] = u
 
     unread_map: Dict[str, int] = {}
+    prefs_map: Dict[str, dict] = {}
     if viewer_id:
         pipeline = [
             {"$match": {"recipient_ids": viewer_id, "read_by": {"$ne": viewer_id}}},
@@ -2444,6 +2486,7 @@ async def _enrich_conversations(convs: List[dict], viewer_id: Optional[str]) -> 
         ]
         async for row in db.messages.aggregate(pipeline):
             unread_map[row["_id"]] = int(row["count"])
+        prefs_map = await _load_conversation_preferences(viewer_id, [c["id"] for c in convs])
 
     result = []
     for c in convs:
@@ -2452,12 +2495,18 @@ async def _enrich_conversations(convs: List[dict], viewer_id: Optional[str]) -> 
         if c["type"] == "direct" and viewer_id:
             other_id = next((p for p in c["participants"] if p != viewer_id), None)
             other = users_map.get(other_id) if other_id else None
+        pref = prefs_map.get(c["id"], {})
         result.append({
             **c,
             "participants_info": parts,
             "other_user": other,
             "unread_count": unread_map.get(c["id"], 0) if viewer_id else 0,
+            "is_pinned": bool(pref.get("is_pinned")),
+            "is_archived": bool(pref.get("is_archived")),
+            "is_muted": bool(pref.get("is_muted")),
         })
+    if viewer_id:
+        return _sort_conversations_for_viewer(result)
     return result
 
 
@@ -2467,6 +2516,50 @@ async def list_conversations(user: dict = Depends(get_current_user)):
         {"participants": user["id"]}, {"_id": 0}
     ).sort("last_message_at", -1).to_list(500)
     return await _enrich_conversations(convs, user["id"])
+
+
+@api_router.patch("/conversations/{conv_id}/preferences")
+async def update_conversation_preferences(
+    conv_id: str,
+    body: ConversationPreferencesBody,
+    user: dict = Depends(get_current_user),
+):
+    conv = await db.conversations.find_one({"id": conv_id}, {"_id": 0, "participants": 1})
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if user["role"] != "admin" and user["id"] not in conv.get("participants", []):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No preference fields provided")
+
+    pref_id = f"{user['id']}_{conv_id}"
+    existing = await db.conversation_preferences.find_one(
+        {"user_id": user["id"], "conversation_id": conv_id},
+        {"_id": 0},
+    )
+    doc = {
+        "id": pref_id,
+        "user_id": user["id"],
+        "conversation_id": conv_id,
+        "is_pinned": bool((existing or {}).get("is_pinned")),
+        "is_archived": bool((existing or {}).get("is_archived")),
+        "is_muted": bool((existing or {}).get("is_muted")),
+        **updates,
+        "updated_at": now_iso(),
+    }
+    await db.conversation_preferences.update_one(
+        {"user_id": user["id"], "conversation_id": conv_id},
+        {"$set": doc},
+        upsert=True,
+    )
+    return {
+        "conversation_id": conv_id,
+        "is_pinned": doc["is_pinned"],
+        "is_archived": doc["is_archived"],
+        "is_muted": doc["is_muted"],
+    }
 
 
 @api_router.get("/conversations/{conv_id}/messages")
@@ -2537,6 +2630,7 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
                     "message_id": msg["id"],
                     "sender_avatar_url": sender_avatar,
                 },
+                conversation_id=conv["id"],
             )
         )
 
@@ -3215,6 +3309,9 @@ async def on_startup():
         await db.audit_logs.create_index("action")
         await db.diet_plans.create_index([("client_id", 1), ("day_number", 1)], unique=True)
         await db.diet_plans.create_index([("client_id", 1), ("date", 1)])
+        await db.conversation_preferences.create_index(
+            [("user_id", 1), ("conversation_id", 1)], unique=True
+        )
         await db.complaints.create_index([("status", 1), ("created_at", -1)])
         await db.complaints.create_index("client_id")
         await db.complaints.create_index("employee_id")

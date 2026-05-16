@@ -233,7 +233,7 @@ export default function ProfileSettingsPage() {
               </div>
               <div>
                 <div className="font-display font-semibold text-lg dark:text-gray-100">{form.full_name || "Your name"}</div>
-                <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">@{user?.username} Â· {user?.role}</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">@{user?.username} | {user?.role}</div>
               </div>
             </div>
             <div className="space-y-2">
@@ -244,7 +244,7 @@ export default function ProfileSettingsPage() {
               <Label>Phone number</Label>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
-                <Input data-testid="profile-phone-input" value={user?.phone_number || ""} disabled readOnly className="pl-10 h-11 rounded-xl bg-gray-50 dark:bg-gray-900 dark:text-gray-300" />
+                <Input data-testid="profile-phone-input" value={user?.phone_number || ""} disabled readOnly className="w-full pl-10 h-11 rounded-xl bg-gray-50 dark:bg-gray-900 dark:text-gray-300" />
               </div>
               <p className="text-[11px] text-gray-400 dark:text-gray-500">
                 Phone numbers are managed by your administrator. Contact them to change yours.
@@ -516,7 +516,7 @@ export default function ProfileSettingsPage() {
                 leftIcon={null}
                 value={passForm.current_password}
                 onChange={(e) => setPassForm({ ...passForm, current_password: e.target.value })}
-                className="h-11 rounded-xl"
+                className="w-full h-11 rounded-xl"
               />
             </div>
             <div className="space-y-2">
@@ -526,7 +526,7 @@ export default function ProfileSettingsPage() {
                 leftIcon={null}
                 value={passForm.new_password}
                 onChange={(e) => setPassForm({ ...passForm, new_password: e.target.value })}
-                className="h-11 rounded-xl"
+                className="w-full h-11 rounded-xl"
               />
             </div>
             <Button onClick={changePassword} disabled={saving} data-testid="change-password-btn" className="w-full rounded-full bg-emerald-900 hover:bg-emerald-950 h-11">

@@ -14,7 +14,9 @@ import {
   Video as VideoIcon,
   FileText,
   Music,
+  ChevronDown,
 } from "lucide-react";
+import { groupMessagesByDate } from "@/lib/chatDateGroups";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -34,8 +36,7 @@ import { formatWhatsAppLastSeen } from "@/lib/datetime";
 import { useAuth } from "@/context/AuthContext";
 import Avatar from "./Avatar";
 import MessageBubble from "./MessageBubble";
-import DietPlanDialog from "./DietPlanDialog";
-import { medicalPath } from "@/lib/appRoutes";
+import { dietPlanPath, medicalPath } from "@/lib/appRoutes";
 import VoiceRecorder from "./VoiceRecorder";
 import { toast } from "sonner";
 import { Capacitor } from "@capacitor/core";
@@ -71,7 +72,6 @@ export default function ChatWindow({
   const audioInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const lastTypingPingRef = useRef(0);
-  const [dietOpen, setDietOpen] = useState(false);
   const [lightbox, setLightbox] = useState(null);
   const cameraInputRef = useRef(null);
 
@@ -107,16 +107,22 @@ export default function ChatWindow({
      it would feel natural. If they've scrolled up to read history we leave
      them alone. */
   const stickToBottomRef = useRef(true);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return undefined;
     const onScroll = () => {
       const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
       stickToBottomRef.current = dist < 80;
+      setShowScrollDown(dist >= 80);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
+
+  useEffect(() => {
+    if (stickToBottomRef.current) setShowScrollDown(false);
+  }, [conversation?.id, visibleMessages.length]);
 
   /* Helper: pin the scroll container to the bottom across multiple frames.
      One write isn't enough on slow phones because images/videos finish
@@ -386,6 +392,17 @@ export default function ChatWindow({
     }
   }, [conversation, onSendMessage]);
 
+  const messageGroups = useMemo(() => groupMessagesByDate(visibleMessages), [visibleMessages]);
+
+  const scrollToLatest = useCallback(() => {
+    stickToBottomRef.current = true;
+    setShowScrollDown(false);
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    requestAnimationFrame(() => pinToBottom());
+  }, [pinToBottom]);
+
   if (!conversation) {
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950">
@@ -410,18 +427,10 @@ export default function ChatWindow({
   const headerName = isGroup ? conversation.name : otherUser?.full_name;
   const typingArr = Object.entries(typingUsers || {}).filter(([uid]) => uid !== user.id);
   const othersTypingCount = typingArr.length;
-  const groupTypingLabel = othersTypingCount === 1
-    ? `${typingArr[0][1]} is typing`
-    : othersTypingCount > 1
-      ? `${typingArr.map(([, n]) => n).join(", ")} are typing`
-      : null;
-
-  const directTypingName = othersTypingCount > 0 && !isGroup ? (typingArr[0][1] || "Someone") : null;
 
   const headerStatusLine = (() => {
     if (readOnly && !othersTypingCount) return { kind: "text", value: "Admin read-only view" };
-    if (othersTypingCount > 0 && isGroup) return { kind: "text", value: groupTypingLabel };
-    if (othersTypingCount > 0 && !isGroup) return { kind: "typing", label: directTypingName };
+    if (othersTypingCount > 0) return { kind: "typing" };
     if (readOnly) return { kind: "text", value: "Admin read-only view" };
     if (isGroup) return { kind: "text", value: `${conversation.participants.length} members` };
     if (isOnline) return { kind: "text", value: "online" };
@@ -434,6 +443,18 @@ export default function ChatWindow({
   // For read-receipts in groups
   const totalRecipients = isGroup ? (conversation.participants?.length || 1) - 1 : 1;
   const showSenderNames = isGroup || readOnly;
+
+  const openDietPlan = () => {
+    const dietClient =
+      user?.role === "client"
+        ? { id: user.id, full_name: user.full_name }
+        : { id: otherUser?.id, full_name: otherUser?.full_name };
+    const path =
+      user?.role === "client"
+        ? dietPlanPath(user.role)
+        : dietPlanPath(user?.role, otherUser?.id);
+    navigate(path, { state: { client: dietClient, backTo: "/chat" } });
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950" data-testid="chat-window">
@@ -476,7 +497,7 @@ export default function ChatWindow({
           <div className="text-xs text-gray-500 truncate min-h-[1rem] flex items-center gap-1">
             {headerStatusLine.kind === "typing" ? (
               <span className="inline-flex items-center gap-1 text-emerald-800/90" data-testid="header-typing">
-                <span>{headerStatusLine.label || "Someone"} is typing</span>
+                <span>typing...</span>
                 <span className="inline-flex items-center gap-0.5 translate-y-px">
                   <span className="typing-dot typing-dot-header" />
                   <span className="typing-dot typing-dot-header" />
@@ -484,7 +505,7 @@ export default function ChatWindow({
                 </span>
               </span>
             ) : (
-              <span className={othersTypingCount > 0 && isGroup ? "text-emerald-800/90" : undefined}>{headerStatusLine.value}</span>
+              <span>{headerStatusLine.value}</span>
             )}
           </div>
         </div>
@@ -529,7 +550,7 @@ export default function ChatWindow({
               size="sm"
               variant="outline"
               className="rounded-full hidden sm:inline-flex"
-              onClick={() => setDietOpen(true)}
+              onClick={openDietPlan}
               data-testid="chat-header-diet-btn"
               title="Diet plan"
             >
@@ -540,7 +561,7 @@ export default function ChatWindow({
               size="icon"
               variant="outline"
               className="rounded-full sm:hidden"
-              onClick={() => setDietOpen(true)}
+              onClick={openDietPlan}
               data-testid="chat-header-diet-btn-mobile"
               title="Diet plan"
             >
@@ -551,33 +572,30 @@ export default function ChatWindow({
         </div>
       </div>
 
-      {!isGroup && (
-        (otherUser?.role === "client" && (user?.role === "admin" || user?.role === "employee"))
-        || (user?.role === "client" && otherUser?.role === "employee")
-      ) && (
-        <DietPlanDialog
-          open={dietOpen}
-          onOpenChange={setDietOpen}
-          client={user?.role === "client" ? user : otherUser}
-        />
-      )}
-
       {/* Messages */}
-      <div ref={scrollRef} className="chat-bg min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5" data-testid="messages-container">
+      <div className="relative min-h-0 flex-1">
+        <div ref={scrollRef} className="chat-bg h-full space-y-2 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5" data-testid="messages-container">
         {visibleMessages.length === 0 && (
           <div className="text-center text-sm text-gray-400 py-10" data-testid="empty-messages">
             No messages yet. {readOnly ? "Conversation is quiet." : "Say hi!"}
           </div>
         )}
-        {visibleMessages.map((m) => {
-          // In admin read-only view, we still show messages aligned by sender:
-          // a fixed "left" participant and "right" participant based on ordering
+        {messageGroups.map((item) => {
+          if (item.type === "divider") {
+            return (
+              <div key={item.key} className="flex justify-center py-2" data-testid="message-date-divider">
+                <span className="text-[11px] font-medium px-3 py-1 rounded-full bg-white/90 dark:bg-gray-900/90 text-gray-600 dark:text-gray-300 shadow-sm border border-gray-200/80 dark:border-gray-700/80">
+                  {item.label}
+                </span>
+              </div>
+            );
+          }
+          const m = item.message;
           let mine;
           if (readOnly && !isGroup) {
             const p = conversation.participants || [];
-            mine = m.sender_id === p[p.length - 1]; // last participant is "right" side
+            mine = m.sender_id === p[p.length - 1];
           } else if (readOnly && isGroup) {
-            // Anchor by sender: admin sees all alternating — put "current user in convo" right by sender hashing? simpler: all left except creator
             mine = m.sender_id === conversation.created_by;
           } else {
             mine = m.sender_id === user.id;
@@ -594,6 +612,18 @@ export default function ChatWindow({
             />
           );
         })}
+        </div>
+        {showScrollDown && (
+          <button
+            type="button"
+            onClick={scrollToLatest}
+            className="absolute bottom-4 right-3 z-10 h-10 w-10 rounded-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-lg flex items-center justify-center text-emerald-900 dark:text-emerald-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-transform active:scale-95"
+            data-testid="scroll-to-bottom-btn"
+            aria-label="Scroll to latest messages"
+          >
+            <ChevronDown className="h-5 w-5" />
+          </button>
+        )}
       </div>
 
       <ImageLightbox

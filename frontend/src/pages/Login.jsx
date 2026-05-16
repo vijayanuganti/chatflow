@@ -110,16 +110,10 @@ export default function LoginPage() {
 
   return (
     <div
-      className="flex min-h-dvh flex-col bg-white dark:bg-gray-950"
+      className="min-h-screen overflow-y-auto overflow-x-hidden flex flex-col max-w-[100vw] bg-white dark:bg-gray-950 pt-[calc(env(safe-area-inset-top,0px)+1.5rem)] pb-[max(1rem,env(safe-area-inset-bottom,0px))]"
       data-testid="login-page"
     >
-      {/* Match app chrome: reserve space for the OS status bar (signal, wifi, battery). */}
-      <div
-        className="shrink-0 w-full bg-white dark:bg-gray-950"
-        style={{ minHeight: "max(env(safe-area-inset-top, 0px), 36px)" }}
-        aria-hidden
-      />
-      <div className="grid min-h-0 flex-1 grid-rows-1 lg:grid-cols-2 lg:min-h-0">
+      <div className="flex flex-col w-full lg:grid lg:grid-cols-2">
       {/* Brand panel */}
       <div className="hidden lg:flex min-h-0 flex-col justify-between py-12 pl-[max(3rem,env(safe-area-inset-left,0px))] pr-[max(3rem,env(safe-area-inset-right,0px))] pb-[max(3rem,env(safe-area-inset-bottom,0px))] bg-emerald-900 text-white relative overflow-hidden">
         <div className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-emerald-700 opacity-30 blur-3xl" />
@@ -157,9 +151,9 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* Form panel — scroll when keyboard / short viewport; respect home indicator. */}
-      <div className="flex min-h-0 flex-col overflow-y-auto overscroll-y-contain bg-white dark:bg-gray-950 py-6 pl-[max(1rem,env(safe-area-inset-left,0px))] pr-[max(1rem,env(safe-area-inset-right,0px))] sm:py-8 sm:pl-[max(2rem,env(safe-area-inset-left,0px))] sm:pr-[max(2rem,env(safe-area-inset-right,0px))] lg:py-12 lg:pl-[max(3rem,env(safe-area-inset-left,0px))] lg:pr-[max(3rem,env(safe-area-inset-right,0px))] pb-[max(1.5rem,calc(1.5rem+env(safe-area-inset-bottom,0px)))]">
-        <div className="m-auto w-full max-w-md">
+      {/* Form panel */}
+      <div className="flex flex-col bg-white dark:bg-gray-950 p-6 md:p-12 pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))]">
+        <div className="m-auto w-full max-w-md min-w-0">
           <div className="lg:hidden flex items-center gap-3 mb-6">
             <div className="h-10 w-10 rounded-xl bg-emerald-900 text-white flex items-center justify-center">
               <MessageCircle className="h-6 w-6" />
@@ -172,10 +166,10 @@ export default function LoginPage() {
             Sign in with your phone number or username.
           </p>
 
-          <form onSubmit={handleSubmit} className="space-y-5" data-testid="login-form">
-            <div className="space-y-2">
+          <form onSubmit={handleSubmit} className="space-y-5 w-full min-w-0" data-testid="login-form">
+            <div className="space-y-2 w-full min-w-0">
               <Label htmlFor="identifier">Phone or username</Label>
-              <div className="flex items-stretch gap-2">
+              <div className="flex w-full min-w-0 items-stretch gap-2">
                 {/* Country code selector — disabled when the input looks like
                     a username (we don't need a dial code in that case). */}
                 <Popover open={countryOpen} onOpenChange={setCountryOpen}>
@@ -252,10 +246,10 @@ export default function LoginPage() {
                   <Input
                     id="identifier"
                     data-testid="login-identifier-input"
-                    className="pl-10 h-12 rounded-xl"
+                    className="w-full pl-10 h-12 rounded-xl"
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
-                    placeholder={isUsername ? "your_username" : "98765 43210"}
+                    placeholder="Enter your number"
                     inputMode={isUsername ? "text" : "tel"}
                     autoComplete={isUsername ? "username" : "tel"}
                     required
@@ -274,10 +268,10 @@ export default function LoginPage() {
               <PasswordInput
                 id="password"
                 data-testid="login-password-input"
-                className="h-12 rounded-xl"
+                className="w-full h-12 rounded-xl"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
+                placeholder="Enter your password"
                 autoComplete="current-password"
                 required
               />

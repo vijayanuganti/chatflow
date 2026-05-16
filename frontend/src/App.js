@@ -12,6 +12,8 @@ import CreateAccountPage from "@/pages/CreateAccountPage";
 import MedicalProfilePage from "@/pages/MedicalProfilePage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import UserAccountDetailPage from "@/pages/UserAccountDetailPage";
+import NewConversationPage from "@/pages/NewConversationPage";
+import DietPlanPage from "@/pages/DietPlanPage";
 import { Toaster } from "@/components/ui/sonner";
 import PushNotificationBootstrap from "@/components/PushNotificationBootstrap";
 import InAppMessageBanner from "@/components/InAppMessageBanner";
@@ -117,6 +119,30 @@ function App() {
               }
             />
             <Route
+              path="/chat/new-conversation"
+              element={
+                <Protected roles={["employee", "client", "admin"]}>
+                  <NewConversationPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/chat/diet-plan"
+              element={
+                <Protected roles={["employee", "client", "admin"]}>
+                  <DietPlanPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/chat/diet-plan/:clientId"
+              element={
+                <Protected roles={["employee", "client", "admin"]}>
+                  <DietPlanPage />
+                </Protected>
+              }
+            />
+            <Route
               path="/admin/profile"
               element={
                 <Protected roles={["admin"]}>
@@ -145,6 +171,14 @@ function App() {
               element={
                 <Protected roles={["admin"]}>
                   <MedicalProfilePage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/admin/users/:userId/diet-plan"
+              element={
+                <Protected roles={["admin"]}>
+                  <DietPlanPage />
                 </Protected>
               }
             />

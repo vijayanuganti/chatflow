@@ -2,7 +2,7 @@
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
-import NewChatDialog from "@/components/NewChatDialog";
+import { newConversationPath } from "@/lib/appRoutes";
 import TopBar from "@/components/TopBar";
 import useChatSocket from "@/hooks/useChatSocket";
 import useDoubleBackToExit from "@/hooks/useDoubleBackToExit";
@@ -37,6 +37,11 @@ import {
   userAccountPath,
 } from "@/lib/appRoutes";
 import {
+  patchConversationPrefs,
+  updateConversationPreferences,
+} from "@/lib/conversationPreferences";
+import { loadCacheFromStorage } from "@/lib/messageCache";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -54,7 +59,7 @@ function pathForAdminTab(t) {
 }
 
 function formatStorageBytes(n) {
-  if (n == null || Number.isNaN(Number(n))) return "â€”";
+  if (n == null || Number.isNaN(Number(n))) return "-";
   const v = Number(n);
   if (v < 1024) return `${Math.round(v)} B`;
   if (v < 1024 ** 2) return `${(v / 1024).toFixed(1)} KB`;
@@ -76,7 +81,7 @@ function StorageMeter({ title, usedBytes, quotaBytes, freeBytes, percentUsed, su
             {formatStorageBytes(usedBytes)} used
             {quotaBytes != null && (
               <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
-                {" "}Â· {formatStorageBytes(freeBytes)} free
+                {" "} |  {formatStorageBytes(freeBytes)} free
               </span>
             )}
           </div>
@@ -178,10 +183,9 @@ export default function AdminDashboard() {
   }, [selected?.id]);
   const [activityTarget, setActivityTarget] = useState(null);
   const [activityData, setActivityData] = useState(null);
-  const [newChatOpen, setNewChatOpen] = useState(false);
   const [permissionSavingId, setPermissionSavingId] = useState(null);
   const [activeSavingId, setActiveSavingId] = useState(null);
-  const [clientStatusFilter, setClientStatusFilter] = useState("all"); // all | active | inactive
+  const [usersRoleFilter, setUsersRoleFilter] = useState("all"); // all | employees | clients | inactive_clients
   const [newBatchOpen, setNewBatchOpen] = useState(false);
   const [moveClientTarget, setMoveClientTarget] = useState(null); // client doc
   const [complaints, setComplaints] = useState([]);
@@ -332,7 +336,7 @@ export default function AdminDashboard() {
     })();
   }, []);
 
-  // Service worker tells us when the admin taps a chat notification â€” jump to
+  // Service worker tells us when the admin taps a chat notification - jump to
   // My Chats and focus that conversation.
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
@@ -379,7 +383,7 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    // Clear only when the *conversation id* changes â€” not when `selected` is
+    // Clear only when the *conversation id* changes - not when `selected` is
     // replaced by a new object for the same chat (sidebar) or when
     // `loadMessages` is recreated after `myConvs` updates (that was clearing the
     // thread after every send).
@@ -418,6 +422,22 @@ export default function AdminDashboard() {
     void handleAccountCreated();
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.state, location.pathname, handleAccountCreated, navigate]);
+
+  useEffect(() => {
+    const pending = location.state?.pendingChat;
+    if (!pending?.selectedConv) return;
+    goToTab("mychats", {
+      selectedConv: pending.selectedConv,
+      mobileChatStep: pending.mobileChatStep || "chat",
+    });
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.state?.pendingChat, navigate, location.pathname, goToTab]);
+
+  const openNewConversation = useCallback(() => {
+    navigate(newConversationPath(), {
+      state: { backTo: "/admin/mychats", panel: "admin" },
+    });
+  }, [navigate]);
 
   const toggleActive = useCallback(async (target, nextActive) => {
     if (!target || target.role === "admin") return;
@@ -635,49 +655,45 @@ export default function AdminDashboard() {
     });
   };
 
-  const handleStartDirect = async (otherUser) => {
-    setNewChatOpen(false);
-    try {
-      const res = await api.post("/conversations/start", { other_user_id: otherUser.id });
-      const conv = { ...res.data.conversation, other_user: res.data.other_user, participants_info: [user, res.data.other_user] };
-      conv.unread_count = 0;
-      setMyConvs((prev) => prev.some((c) => c.id === conv.id) ? prev : [conv, ...prev]);
-      goToTab("mychats", { selectedConv: conv, mobileChatStep: "chat" });
-    } catch (err) {
-      toast.error(formatApiError(err));
-    }
-  };
-
-  const handleCreateGroup = async ({ name, member_ids }) => {
-    try {
-      const res = await api.post("/conversations/group", { name, member_ids });
-      await loadOverview();
-      goToTab("mychats", { selectedConv: res.data, mobileChatStep: "chat" });
-      setNewChatOpen(false);
-    } catch (err) {
-      toast.error(formatApiError(err));
-      throw err;
-    }
-  };
-
   const isSelectedAdminChat = selected && myConvs.find((c) => c.id === selected.id);
   const currentConvs = tab === "mychats" ? myConvs : allConvs;
 
-  const topbarTitle = (() => {
-    if (tab === "overview") return "Admin Â· Overview";
-    if (tab === "more") return "Admin Â· Settings";
-    if (tab === "batches") return "Admin Â· Batches";
-    if (tab === "chats") return "Admin Â· Monitor";
-    if (tab === "mychats") return "Admin Â· My Chats";
-    if (tab === "users") return "Admin Â· Users";
-    if (tab === "activity") return "Admin Â· Activity";
-    if (tab === "accounts") return "Admin Â· Accounts";
-    if (tab === "permissions") return "Admin Â· Permissions";
-    if (tab === "inactive") return "Admin Â· Inactive clients";
-    if (tab === "complaints") return "Admin Â· Complaint box";
-    if (tab === "storage") return "Admin Â· Storage";
-    return "Admin";
-  })();
+  const topbarTitle = "ChatFlow";
+
+  const handlePreferenceChange = useCallback(async (convId, patch) => {
+    try {
+      const data = await updateConversationPreferences(convId, patch);
+      setMyConvs((prev) => patchConversationPrefs(prev, convId, data));
+      if (patch.is_archived && selectedIdRef.current === convId) {
+        setSelected(null);
+        setMobileChatStep("list");
+      }
+    } catch (err) {
+      toast.error(formatApiError(err));
+    }
+  }, []);
+
+  const handleRefresh = useCallback(async () => {
+    const convId = selectedIdRef.current;
+    await loadOverview();
+    if (convId && tab === "mychats") {
+      try {
+        const res = await api.get(`/conversations/${convId}/messages`);
+        setMessages(res.data);
+      } catch {
+        /* keep cached messages */
+      }
+    }
+    if (user?.id) loadCacheFromStorage(user.id);
+  }, [loadOverview, tab, user?.id]);
+
+  const filterUsersForTab = useCallback((u) => {
+    if (usersRoleFilter === "all") return true;
+    if (usersRoleFilter === "employees") return u.role === "employee";
+    if (usersRoleFilter === "clients") return u.role === "client" && u.is_active !== false;
+    if (usersRoleFilter === "inactive_clients") return u.role === "client" && u.is_active === false;
+    return true;
+  }, [usersRoleFilter]);
 
   const usersById = useMemo(() => {
     const m = {};
@@ -726,7 +742,9 @@ export default function AdminDashboard() {
     }
   }, [deleteConvTarget, loadOverview, loadStorage]);
 
-  const unreadTotal = myConvs.reduce((sum, c) => sum + Number(c.unread_count || 0), 0);
+  const unreadTotal = myConvs
+    .filter((c) => !c.is_archived)
+    .reduce((sum, c) => sum + Number(c.unread_count || 0), 0);
 
   useEffect(() => {
     const base = topbarTitle || "Admin";
@@ -802,7 +820,7 @@ export default function AdminDashboard() {
           onOpenSettings={() => navigate(profilePath("admin"))}
           title={topbarTitle}
           onBack={topbarOnBack}
-          unreadTotal={unreadTotal}
+          onRefresh={handleRefresh}
           onCreateAccount={() =>
             navigate(createAccountPath("admin"), {
               state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/accounts" },
@@ -821,7 +839,7 @@ export default function AdminDashboard() {
             <div className="h-10 w-10 rounded-xl bg-emerald-700/40 flex items-center justify-center">
               <MessageCircle className="h-5 w-5" strokeWidth={1.5} />
             </div>
-            <span className="font-display text-lg font-semibold hidden lg:inline">Admin</span>
+            <span className="font-display text-lg font-semibold hidden lg:inline">ChatFlow</span>
           </div>
         <NavButton icon={LayoutDashboard} label="Overview" active={tab === "overview"} onClick={() => goToTab("overview")} testId="admin-nav-overview" />
         <NavButton icon={UserPlus} label="Accounts" active={tab === "accounts"} onClick={() => goToTab("accounts")} testId="admin-nav-accounts" />
@@ -844,24 +862,24 @@ export default function AdminDashboard() {
         {/* Content */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {tab === "overview" && (
-          <div className="p-4 sm:p-6 lg:p-10 space-y-6 overflow-y-auto" data-testid="admin-overview-pane">
+          <div className="p-4 sm:p-6 lg:p-10 space-y-6 overflow-y-auto overflow-x-hidden w-full min-w-0 max-w-full" data-testid="admin-overview-pane">
             <div>
               <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin panel</div>
               <h1 className="font-display text-2xl sm:text-4xl font-semibold mt-1 dark:text-gray-100">Hi, {user?.full_name?.split(" ")[0] || "Admin"}.</h1>
               <p className="text-gray-500 dark:text-gray-400 mt-1">Monitor conversations and chat with anyone on the platform.</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-              <StatCard icon={Users} label="Total users" value={stats?.total_users ?? "â€”"} testId="stat-total-users" />
-              <StatCard icon={Briefcase} label="Employees" value={stats?.employees ?? "â€”"} testId="stat-employees" accent="bg-amber-50 text-amber-900" />
-              <StatCard icon={UserCircle2} label="Clients" value={stats?.clients ?? "â€”"} testId="stat-clients" accent="bg-sky-50 text-sky-900" />
-              <StatCard icon={UserCheck} label="Active clients" value={stats?.active_clients ?? "â€”"} testId="stat-active-clients" accent="bg-emerald-50 text-emerald-900" />
+              <StatCard icon={Users} label="Total users" value={stats?.total_users ?? "-"} testId="stat-total-users" />
+              <StatCard icon={Briefcase} label="Employees" value={stats?.employees ?? "-"} testId="stat-employees" accent="bg-amber-50 text-amber-900" />
+              <StatCard icon={UserCircle2} label="Clients" value={stats?.clients ?? "-"} testId="stat-clients" accent="bg-sky-50 text-sky-900" />
+              <StatCard icon={UserCheck} label="Active clients" value={stats?.active_clients ?? "-"} testId="stat-active-clients" accent="bg-emerald-50 text-emerald-900" />
               <button
                 type="button"
                 onClick={() => goToTab("inactive")}
                 className="text-left"
                 data-testid="stat-inactive-clients-btn"
               >
-                <StatCard icon={UserX} label="Inactive clients" value={stats?.inactive_clients ?? "â€”"} testId="stat-inactive-clients" accent="bg-rose-50 text-rose-900" />
+                <StatCard icon={UserX} label="Inactive clients" value={stats?.inactive_clients ?? "-"} testId="stat-inactive-clients" accent="bg-rose-50 text-rose-900" />
               </button>
               <button
                 type="button"
@@ -869,14 +887,14 @@ export default function AdminDashboard() {
                 className="text-left"
                 data-testid="stat-complaints-btn"
               >
-                <StatCard icon={Inbox} label="Open complaints" value={stats?.complaints_pending ?? "â€”"} testId="stat-complaints-open" accent="bg-rose-50 text-rose-900" />
+                <StatCard icon={Inbox} label="Open complaints" value={stats?.complaints_pending ?? "-"} testId="stat-complaints-open" accent="bg-rose-50 text-rose-900" />
               </button>
             </div>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
               <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 min-w-0">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="font-display text-lg sm:text-xl font-semibold dark:text-gray-100">Latest activity</h2>
-                  <Button variant="ghost" className="text-xs sm:text-sm px-2 sm:px-3" onClick={() => goToTab("chats")} data-testid="overview-view-all-chats">View all â†’</Button>
+                  <Button variant="ghost" className="text-xs sm:text-sm px-2 sm:px-3" onClick={() => goToTab("chats")} data-testid="overview-view-all-chats">View all -></Button>
                 </div>
                 <div className="divide-y divide-gray-100 dark:divide-gray-800">
                   {allConvs.slice(0, 6).map((c) => (
@@ -893,7 +911,7 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-sm truncate dark:text-gray-100">
-                          {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(" â†” ")}
+                          {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(", ")}
                         </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{c.last_message || "No messages"}</div>
                       </div>
@@ -919,7 +937,7 @@ export default function AdminDashboard() {
                     <div className="font-semibold dark:text-gray-100">Create account</div>
                     <div className="text-xs text-gray-600 dark:text-gray-300 mt-1">Add employee or client</div>
                   </button>
-                  <button onClick={() => setNewChatOpen(true)} data-testid="overview-new-chat-btn" className="p-4 rounded-2xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/15 text-left min-w-0">
+                  <button onClick={openNewConversation} data-testid="overview-new-chat-btn" className="p-4 rounded-2xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/15 text-left min-w-0">
                     <Plus className="h-5 w-5 text-emerald-900 dark:text-emerald-300 mb-2" />
                     <div className="font-semibold dark:text-gray-100">Start a chat</div>
                     <div className="text-xs text-gray-600 dark:text-gray-300 mt-1">Direct or group with anyone</div>
@@ -1131,12 +1149,14 @@ export default function AdminDashboard() {
                   setSelected(c);
                   setMobileChatStep("chat");
                 }}
-                onNewChat={() => setNewChatOpen(true)}
+                onNewChat={openNewConversation}
                 adminView={tab === "chats"}
                 batches={[]}
                 selectedBatchId={null}
                 onSelectBatch={undefined}
                 onBatchesChanged={undefined}
+                onPreferenceChange={tab === "mychats" ? handlePreferenceChange : undefined}
+                readOnlyPrefs={tab === "chats"}
               />
             </div>
             <main className={`flex min-h-0 flex-1 flex-col overflow-hidden ${mobileChatStep !== "chat" ? "hidden md:flex" : ""}`}>
@@ -1197,7 +1217,7 @@ export default function AdminDashboard() {
                     <Avatar name={activityData.user.full_name} avatarUrl={activityData.user.avatar_url} online={onlineUsers[activityData.user.id]} status={activityData.user.status} size={64} />
                     <div className="min-w-0">
                       <h1 className="font-display text-2xl font-semibold dark:text-gray-100 truncate">{activityData.user.full_name}</h1>
-                      <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">@{activityData.user.username} Â· {activityData.user.role}</div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">@{activityData.user.username}  |  {activityData.user.role}</div>
                       {activityData.user.bio && <p className="mt-2 text-sm text-gray-600 dark:text-gray-300 max-w-md">{activityData.user.bio}</p>}
                     </div>
                   </div>
@@ -1225,7 +1245,7 @@ export default function AdminDashboard() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-sm truncate dark:text-gray-100">
-                              {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(" â†” ")}
+                              {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(", ")}
                             </div>
                             <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{c.last_message || "No messages"}</div>
                           </div>
@@ -1247,7 +1267,7 @@ export default function AdminDashboard() {
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-accounts-pane">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
               <div>
-                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin Â· Accounts</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin  |  Accounts</div>
                 <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Create accounts</h1>
                 <p className="text-gray-500 dark:text-gray-400 mt-1">Provision employees and clients. Only authorised users may sign in.</p>
               </div>
@@ -1266,9 +1286,9 @@ export default function AdminDashboard() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
-              <StatCard icon={Users} label="Total users" value={stats?.total_users ?? "â€”"} testId="accounts-stat-total" />
-              <StatCard icon={Briefcase} label="Employees" value={stats?.employees ?? "â€”"} testId="accounts-stat-employees" accent="bg-amber-50 text-amber-900" />
-              <StatCard icon={UserCircle2} label="Clients" value={stats?.clients ?? "â€”"} testId="accounts-stat-clients" accent="bg-sky-50 text-sky-900" />
+              <StatCard icon={Users} label="Total users" value={stats?.total_users ?? "-"} testId="accounts-stat-total" />
+              <StatCard icon={Briefcase} label="Employees" value={stats?.employees ?? "-"} testId="accounts-stat-employees" accent="bg-amber-50 text-amber-900" />
+              <StatCard icon={UserCircle2} label="Clients" value={stats?.clients ?? "-"} testId="accounts-stat-clients" accent="bg-sky-50 text-sky-900" />
             </div>
 
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
@@ -1291,12 +1311,12 @@ export default function AdminDashboard() {
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-sm truncate dark:text-gray-100">{u.full_name}</div>
                           <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                            @{u.username} Â· {u.phone_number || "no phone"}
+                            @{u.username}  |  {u.phone_number || "no phone"}
                           </div>
                         </div>
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">
-                        Created {u.created_at ? new Date(u.created_at).toLocaleString() : "â€”"}
+                        Created {u.created_at ? new Date(u.created_at).toLocaleString() : "-"}
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400 hidden lg:block">
                         by {u.created_by ? (usersById[u.created_by]?.full_name || "Unknown") : <span className="italic">system</span>}
@@ -1317,7 +1337,7 @@ export default function AdminDashboard() {
         {tab === "permissions" && (
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-permissions-pane">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin Â· Permissions</div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin  |  Permissions</div>
               <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Delegated permissions</h1>
               <p className="text-gray-500 dark:text-gray-400 mt-1">
                 Grant trusted employees the ability to create client accounts. Revoke at any time.
@@ -1340,7 +1360,7 @@ export default function AdminDashboard() {
                       <Avatar name={e.full_name} avatarUrl={e.avatar_url} status={e.status} online={onlineUsers[e.id]} size={40} />
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-sm truncate dark:text-gray-100">{e.full_name}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">@{e.username} Â· {e.phone_number || "no phone"}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">@{e.username}  |  {e.phone_number || "no phone"}</div>
                       </div>
                       <span className={`hidden sm:inline text-[11px] px-2 py-1 rounded-full ${granted ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-500/20 dark:text-emerald-200" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}`}>
                         {granted ? "Can create clients" : "No creation access"}
@@ -1362,11 +1382,11 @@ export default function AdminDashboard() {
         {tab === "inactive" && (
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-inactive-pane">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-rose-700 dark:text-rose-300">Admin Â· Archive</div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-rose-700 dark:text-rose-300">Admin  |  Archive</div>
               <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Inactive clients</h1>
               <p className="text-gray-500 dark:text-gray-400 mt-1">
                 Clients whose service period has ended. Their chats and batch
-                history are preserved here â€” reactivate them whenever you want
+                history are preserved here - reactivate them whenever you want
                 to grant access again.
               </p>
             </div>
@@ -1394,7 +1414,7 @@ export default function AdminDashboard() {
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-sm truncate dark:text-gray-100">{u.full_name}</div>
                             <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                              @{u.username} Â· <span className="font-mono">{u.phone_number || "â€”"}</span>
+                              @{u.username}  |  <span className="font-mono">{u.phone_number || "-"}</span>
                             </div>
                             {u.inactive_at && (
                               <div className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5">
@@ -1448,12 +1468,12 @@ export default function AdminDashboard() {
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-complaints-pane">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
               <div>
-                <div className="text-[10px] uppercase tracking-[0.2em] text-rose-700 dark:text-rose-300">Admin Â· Complaint box</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-rose-700 dark:text-rose-300">Admin  |  Complaint box</div>
                 <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Complaint box</h1>
                 <p className="text-gray-500 dark:text-gray-400 mt-1 max-w-xl">
                   Complaints raised by clients about their dietitians or the
                   service. Mark them solved once you've reached out and the
-                  client confirms â€” they'll still see them in their history.
+                  client confirms - they'll still see them in their history.
                 </p>
               </div>
               <Button
@@ -1472,9 +1492,9 @@ export default function AdminDashboard() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
-              <StatCard icon={Inbox} label="Pending" value={stats?.complaints_pending ?? "â€”"} testId="complaints-stat-pending" accent="bg-rose-50 text-rose-900" />
-              <StatCard icon={CheckCircle2} label="Solved" value={stats?.complaints_solved ?? "â€”"} testId="complaints-stat-solved" accent="bg-emerald-50 text-emerald-900" />
-              <StatCard icon={Users} label="Active clients" value={stats?.active_clients ?? "â€”"} testId="complaints-stat-active" accent="bg-sky-50 text-sky-900" />
+              <StatCard icon={Inbox} label="Pending" value={stats?.complaints_pending ?? "-"} testId="complaints-stat-pending" accent="bg-rose-50 text-rose-900" />
+              <StatCard icon={CheckCircle2} label="Solved" value={stats?.complaints_solved ?? "-"} testId="complaints-stat-solved" accent="bg-emerald-50 text-emerald-900" />
+              <StatCard icon={Users} label="Active clients" value={stats?.active_clients ?? "-"} testId="complaints-stat-active" accent="bg-sky-50 text-sky-900" />
             </div>
 
             <div className="inline-flex rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden text-xs" data-testid="complaints-filter">
@@ -1502,7 +1522,7 @@ export default function AdminDashboard() {
             <div className="space-y-3">
               {complaintsLoading && complaints.length === 0 && (
                 <div className="py-10 text-center text-sm text-gray-400 dark:text-gray-500" data-testid="complaints-loading">
-                  Loading complaintsâ€¦
+                  Loading complaints...
                 </div>
               )}
               {!complaintsLoading && complaints.length === 0 && (
@@ -1527,7 +1547,7 @@ export default function AdminDashboard() {
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-storage-pane">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
               <div>
-                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin Â· Storage</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin  |  Storage</div>
                 <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Storage & cleanup</h1>
                 <p className="text-gray-500 dark:text-gray-400 mt-1 max-w-2xl">
                   Database footprint (MongoDB) and chat uploads bucket (S3 <code className="text-xs">uploads/</code>).
@@ -1549,7 +1569,7 @@ export default function AdminDashboard() {
             </div>
 
             {storageLoading && !storage && (
-              <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Loading storageâ€¦</div>
+              <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Loading storage...</div>
             )}
 
             {storage && (
@@ -1563,7 +1583,7 @@ export default function AdminDashboard() {
                   subtitle={
                     storage.database?.error
                       ? storage.database.error
-                      : `${storage.database?.collections ?? "â€”"} collections Â· ${storage.database?.objects ?? "â€”"} objects`
+                      : `${storage.database?.collections ?? "-"} collections  |  ${storage.database?.objects ?? "-"} objects`
                   }
                   testId="storage-meter-db"
                 />
@@ -1578,7 +1598,7 @@ export default function AdminDashboard() {
                       ? storage.object_storage.error
                       : (storage.object_storage?.configured
                         ? `${storage.object_storage?.object_count ?? 0} objects under ${storage.object_storage?.prefix || "uploads/"} in ${storage.object_storage?.bucket || "bucket"}`
-                        : "S3 not configured â€” uploads are stored on the server disk (not counted here).")
+                        : "S3 not configured - uploads are stored on the server disk (not counted here).")
                   }
                   testId="storage-meter-s3"
                 />
@@ -1588,7 +1608,7 @@ export default function AdminDashboard() {
             <div className="rounded-2xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/50 dark:bg-rose-950/20 p-4 sm:p-6 space-y-4 max-w-4xl">
               <div className="flex items-center gap-2 text-rose-900 dark:text-rose-200 font-display font-semibold">
                 <Trash2 className="h-5 w-5" />
-                Free space â€” delete data
+                Free space - delete data
               </div>
               <p className="text-sm text-rose-900/90 dark:text-rose-200/90">
                 Deleting a user removes their account, complaints, diet days, and chat they participated in (direct chats are removed entirely; in groups their messages are removed).
@@ -1596,14 +1616,14 @@ export default function AdminDashboard() {
               </p>
               <div className="space-y-2">
                 <div className="text-xs font-medium text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                  Conversations (first 80 â€” use Monitor for full list)
+                  Conversations (first 80 - use Monitor for full list)
                 </div>
                 <div className="max-h-64 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
                   {(allConvs || []).slice(0, 80).map((c) => (
                     <div key={c.id} className="px-3 py-2 flex items-center justify-between gap-2 text-sm">
                       <div className="min-w-0">
                         <div className="font-medium truncate dark:text-gray-100">
-                          {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(" â†” ")}
+                          {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(", ")}
                         </div>
                         <div className="text-[11px] text-gray-500 dark:text-gray-400 font-mono truncate">{c.id}</div>
                       </div>
@@ -1647,22 +1667,23 @@ export default function AdminDashboard() {
                 </Button>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                <div className="inline-flex rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden text-xs w-full sm:w-auto" data-testid="users-status-filter">
+                <div className="inline-flex rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden text-xs w-full sm:w-auto" data-testid="users-role-filter">
                   {[
                     { id: "all", label: "All" },
-                    { id: "active", label: "Active clients" },
-                    { id: "inactive", label: "Inactive clients" },
+                    { id: "employees", label: "Employees" },
+                    { id: "clients", label: "Clients" },
+                    { id: "inactive_clients", label: "Inactive Clients" },
                   ].map((opt) => (
                     <button
                       key={opt.id}
                       type="button"
-                      onClick={() => setClientStatusFilter(opt.id)}
+                      onClick={() => setUsersRoleFilter(opt.id)}
                       className={`px-3 py-1.5 flex-1 sm:flex-none whitespace-nowrap ${
-                        clientStatusFilter === opt.id
+                        usersRoleFilter === opt.id
                           ? "bg-emerald-900 text-white"
                           : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
                       }`}
-                      data-testid={`users-status-filter-${opt.id}`}
+                      data-testid={`users-role-filter-${opt.id}`}
                     >
                       {opt.label}
                     </button>
@@ -1684,20 +1705,14 @@ export default function AdminDashboard() {
             </div>
             <div className="md:hidden space-y-3">
               {users
-                .filter((u) => {
-                  if (clientStatusFilter === "all") return true;
-                  if (u.role !== "client") return false;
-                  return clientStatusFilter === "active"
-                    ? u.is_active !== false
-                    : u.is_active === false;
-                })
+                .filter(filterUsersForTab)
                 .map((u) => (
                 <div key={u.id} className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4" data-testid={`admin-user-card-${u.id}`}>
                   <div className="flex items-center gap-3">
                     <Avatar name={u.full_name} avatarUrl={u.avatar_url} online={onlineUsers[u.id]} status={u.status} size={40} />
                     <div className="min-w-0 flex-1">
                       <div className="font-medium truncate dark:text-gray-100">{u.full_name}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">@{u.username} Â· {u.phone_number || "â€”"}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">@{u.username}  |  {u.phone_number || "-"}</div>
                     </div>
                     <span className={`inline-flex text-[11px] px-2 py-1 rounded-full shrink-0 ${
                       u.role === "admin" ? "bg-amber-100 text-amber-900 dark:bg-amber-500/20 dark:text-amber-200"
@@ -1708,7 +1723,7 @@ export default function AdminDashboard() {
                   <div className="mt-3 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 gap-2 flex-wrap">
                     <span className="inline-flex items-center gap-2">
                       <span className={`h-2 w-2 rounded-full ${onlineUsers[u.id] ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600"}`} />
-                      {onlineUsers[u.id] ? "Online" : "Offline"} Â· {u.status || "available"}
+                      {onlineUsers[u.id] ? "Online" : "Offline"}  |  {u.status || "available"}
                     </span>
                     {u.role !== "admin" && (
                       <span
@@ -1795,13 +1810,7 @@ export default function AdminDashboard() {
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800 dark:text-gray-200">
                   {users
-                    .filter((u) => {
-                      if (clientStatusFilter === "all") return true;
-                      if (u.role !== "client") return false;
-                      return clientStatusFilter === "active"
-                        ? u.is_active !== false
-                        : u.is_active === false;
-                    })
+                    .filter(filterUsersForTab)
                     .map((u) => (
                     <tr key={u.id} data-testid={`admin-user-row-${u.id}`}>
                       <td className="px-4 py-3">
@@ -1813,7 +1822,7 @@ export default function AdminDashboard() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-gray-300 font-mono text-xs">{u.phone_number || "â€”"}</td>
+                      <td className="px-4 py-3 text-gray-600 dark:text-gray-300 font-mono text-xs">{u.phone_number || "-"}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex text-xs px-2 py-1 rounded-full ${
                           u.role === "admin" ? "bg-amber-100 text-amber-900"
@@ -1828,7 +1837,7 @@ export default function AdminDashboard() {
                       </td>
                       <td className="px-4 py-3">
                         {u.role === "admin" ? (
-                          <span className="text-xs text-gray-400">â€”</span>
+                          <span className="text-xs text-gray-400">-</span>
                         ) : (
                           <span
                             className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${
@@ -1846,7 +1855,7 @@ export default function AdminDashboard() {
                       <td className="px-4 py-3">
                         <span className="inline-flex items-center gap-2 text-xs">
                           <span className={`h-2 w-2 rounded-full ${onlineUsers[u.id] ? "bg-emerald-500" : "bg-gray-300"}`} />
-                          {onlineUsers[u.id] ? "Online" : "Offline"} Â· {u.status || "available"}
+                          {onlineUsers[u.id] ? "Online" : "Offline"}  |  {u.status || "available"}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">
@@ -1855,7 +1864,7 @@ export default function AdminDashboard() {
                           : <span className="italic">system</span>}
                       </td>
                       <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">
-                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : "â€”"}
+                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : "-"}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="inline-flex gap-2">
@@ -1939,13 +1948,6 @@ export default function AdminDashboard() {
         )}
       </div>
 
-      <NewChatDialog
-        open={newChatOpen}
-        onOpenChange={setNewChatOpen}
-        onSelectUser={handleStartDirect}
-        onCreateGroup={handleCreateGroup}
-        onlineUsers={onlineUsers}
-      />
       <Dialog open={!!deleteUserTarget} onOpenChange={(v) => !v && !deleteBusy && setDeleteUserTarget(null)}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-md bg-white dark:bg-gray-950" data-testid="delete-user-dialog">
           <DialogHeader>
@@ -2025,7 +2027,7 @@ export default function AdminDashboard() {
       {tab === "mychats" && mobileChatStep === "list" && (
         <button
           type="button"
-          onClick={() => setNewChatOpen(true)}
+          onClick={openNewConversation}
           data-testid="admin-mychats-fab"
           className="md:hidden fixed right-4 bottom-[calc(56px+env(safe-area-inset-bottom)+1rem)] h-12 w-12 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white shadow-lg flex items-center justify-center z-30"
           title="New chat"
@@ -2050,6 +2052,7 @@ export default function AdminDashboard() {
           icon={MessageSquare}
           label="Chats"
           active={tab === "mychats"}
+          badge={unreadTotal}
           onClick={() => goToTab("mychats", { mobileChatStep: "list" })}
           testId="admin-nav-mobile-chats"
         />
@@ -2115,7 +2118,7 @@ function AdminMoreTile({ icon: Icon, title, subtitle, onClick, testId }) {
   );
 }
 
-function BottomNavButton({ icon: Icon, label, active, onClick, testId }) {
+function BottomNavButton({ icon: Icon, label, active, onClick, testId, badge = 0 }) {
   return (
     <button
       type="button"
@@ -2124,13 +2127,21 @@ function BottomNavButton({ icon: Icon, label, active, onClick, testId }) {
       className="flex h-14 min-h-[56px] flex-1 touch-manipulation flex-col items-center justify-center gap-0.5 select-none transition-transform active:scale-[0.97]"
     >
       <span
-        className={`flex items-center justify-center h-7 w-12 rounded-full transition-colors ${
+        className={`relative flex items-center justify-center h-7 w-12 rounded-full transition-colors ${
           active
             ? "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300"
             : "text-gray-500 dark:text-gray-400"
         }`}
       >
         <Icon className="h-[18px] w-[18px]" strokeWidth={active ? 2.2 : 1.7} />
+        {badge > 0 ? (
+          <span
+            className="absolute -top-1 -right-0.5 h-4 min-w-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] font-semibold flex items-center justify-center border-2 border-white dark:border-gray-950"
+            data-testid={`${testId}-badge`}
+          >
+            {badge > 99 ? "99+" : badge}
+          </span>
+        ) : null}
       </span>
       <span
         className={`text-[10.5px] leading-none ${
@@ -2167,9 +2178,9 @@ function ComplaintCard({ complaint, saving, onMarkSolved, onReopen }) {
               {complaint.client?.full_name || "Client"}
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-              {complaint.client?.phone_number || "â€”"}
-              {" Â· "}
-              {complaint.created_at ? new Date(complaint.created_at).toLocaleString() : "â€”"}
+              {complaint.client?.phone_number || "-"}
+              {"  |  "}
+              {complaint.created_at ? new Date(complaint.created_at).toLocaleString() : "-"}
             </div>
           </div>
         </div>
@@ -2227,8 +2238,8 @@ function ComplaintCard({ complaint, saving, onMarkSolved, onReopen }) {
           </p>
           {complaint.resolver?.full_name && (
             <div className="text-[11px] text-emerald-700 dark:text-emerald-200 mt-2">
-              â€” {complaint.resolver.full_name}
-              {complaint.resolved_at ? ` Â· ${new Date(complaint.resolved_at).toLocaleString()}` : ""}
+              - {complaint.resolver.full_name}
+              {complaint.resolved_at ? `  |  ${new Date(complaint.resolved_at).toLocaleString()}` : ""}
             </div>
           )}
         </div>
@@ -2377,7 +2388,7 @@ function NewBatchDialog({ open, onOpenChange, employee, onCreated }) {
             className="w-full h-11 rounded-full bg-emerald-900 hover:bg-emerald-950"
             data-testid="admin-new-batch-submit"
           >
-            {saving ? "Creatingâ€¦" : "Create batch"}
+            {saving ? "Creating..." : "Create batch"}
           </Button>
         </form>
       </DialogContent>
@@ -2457,7 +2468,7 @@ function MoveClientDialog({ open, onOpenChange, client, currentEmployeeId, curre
               className="h-11 w-full rounded-xl border border-gray-200 dark:border-gray-700 px-3 bg-white dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
               data-testid="admin-move-employee-select"
             >
-              <option value="">Select employeeâ€¦</option>
+              <option value="">Select employee...</option>
               {(employees || []).map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.full_name}{e.id === currentEmployeeId ? " (current)" : ""}
@@ -2475,7 +2486,7 @@ function MoveClientDialog({ open, onOpenChange, client, currentEmployeeId, curre
               data-testid="admin-move-batch-select"
             >
               <option value="">
-                {!targetEmployee ? "Pick an employee first" : loadingBatches ? "Loadingâ€¦" : "Select batchâ€¦"}
+                {!targetEmployee ? "Pick an employee first" : loadingBatches ? "Loading..." : "Select batch..."}
               </option>
               {batches.map((b) => {
                 const full = (b.client_count || 0) >= (b.max_clients || 20);
@@ -2483,7 +2494,7 @@ function MoveClientDialog({ open, onOpenChange, client, currentEmployeeId, curre
                 return (
                   <option key={b.id} value={b.id} disabled={full && !isCurrent}>
                     {b.name} ({b.client_count || 0}/{b.max_clients || 20})
-                    {full ? " Â· full" : ""}{isCurrent ? " Â· current" : ""}
+                    {full ? "  |  full" : ""}{isCurrent ? "  |  current" : ""}
                   </option>
                 );
               })}
@@ -2496,7 +2507,7 @@ function MoveClientDialog({ open, onOpenChange, client, currentEmployeeId, curre
             data-testid="admin-move-client-submit"
           >
             <ArrowRightLeft className="h-4 w-4 mr-1.5" />
-            {saving ? "Movingâ€¦" : "Move client"}
+            {saving ? "Moving..." : "Move client"}
           </Button>
         </form>
       </DialogContent>
