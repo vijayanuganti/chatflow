@@ -458,6 +458,40 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  const myConvsRef = useRef(myConvs);
+  useEffect(() => {
+    myConvsRef.current = myConvs;
+  }, [myConvs]);
+
+  const loadMessages = useCallback(async (convId) => {
+    if (!convId) return;
+    try {
+      const res = await api.get(`/conversations/${convId}/messages`);
+      if (!isViewingConversation(convId, selectedIdRef.current)) return;
+      setMessages((prev) => {
+        const cached = getCachedMessages(convId);
+        const next = mergeMessageLists(cached || prev, res.data);
+        if (user?.id) setCachedMessages(user.id, convId, next);
+        return next;
+      });
+      const isMyChat = myConvsRef.current.find((c) => c.id === convId);
+      if (isMyChat) api.post(`/conversations/${convId}/read`).catch(() => {});
+    } catch (err) {
+      toast.error(formatApiError(err));
+    }
+  }, [user?.id]);
+
+  const loadActivity = useCallback(async (u) => {
+    if (!u?.id) return;
+    setActivityTarget(u);
+    try {
+      const res = await api.get(`/admin/users/${u.id}/activity`);
+      setActivityData(res.data);
+    } catch (err) {
+      toast.error(formatApiError(err));
+    }
+  }, []);
+
   /** Sync open chat from URL (?c=) after browser / system back. */
   useEffect(() => {
     if (tab !== "chats" && tab !== "mychats") return;
@@ -572,6 +606,7 @@ export default function AdminDashboard() {
     activityData?.conversations,
     selected?.id,
     loadMessages,
+    loadActivity,
   ]);
 
   useEffect(() => { loadOverview(); }, [loadOverview]);
@@ -613,29 +648,6 @@ export default function AdminDashboard() {
     loadStorage();
   }, [tab, loadStorage]);
 
-  const myConvsRef = useRef(myConvs);
-  useEffect(() => {
-    myConvsRef.current = myConvs;
-  }, [myConvs]);
-
-  const loadMessages = useCallback(async (convId) => {
-    if (!convId) return;
-    try {
-      const res = await api.get(`/conversations/${convId}/messages`);
-      if (!isViewingConversation(convId, selectedIdRef.current)) return;
-      setMessages((prev) => {
-        const cached = getCachedMessages(convId);
-        const next = mergeMessageLists(cached || prev, res.data);
-        if (user?.id) setCachedMessages(user.id, convId, next);
-        return next;
-      });
-      const isMyChat = myConvsRef.current.find((c) => c.id === convId);
-      if (isMyChat) api.post(`/conversations/${convId}/read`).catch(() => {});
-    } catch (err) {
-      toast.error(formatApiError(err));
-    }
-  }, [user?.id]);
-
   const prevSelectedConvRef = useRef(null);
   useEffect(() => {
     if (!selected?.id) {
@@ -656,16 +668,6 @@ export default function AdminDashboard() {
       c.id === selected.id ? { ...c, unread_count: 0 } : c
     )));
   }, [selected?.id]);
-
-  const loadActivity = async (u) => {
-    setActivityTarget(u);
-    try {
-      const res = await api.get(`/admin/users/${u.id}/activity`);
-      setActivityData(res.data);
-    } catch (err) {
-      toast.error(formatApiError(err));
-    }
-  };
 
   const handleAccountCreated = useCallback(async () => {
     await Promise.all([loadOverview(), loadEmployees()]);
@@ -788,7 +790,7 @@ export default function AdminDashboard() {
         { push: true },
       );
     },
-    [navigate],
+    [navigate, loadActivity],
   );
 
   const openActivityConversations = useCallback(() => {
