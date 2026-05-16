@@ -127,7 +127,7 @@ select,
     display: none;
 }
 
-/* Message bubble tails */
+/* Message bubbles */
 .bubble-sent {
     background: #d9fdd3;
     border-radius: 16px 16px 4px 16px;
@@ -148,6 +148,10 @@ html.dark .bubble-received {
     background: #1f2937;
     border-color: #374151;
     color: #f3f4f6;
+}
+.message-row-selected {
+    background-color: rgba(11, 116, 232, 0.09);
+    border-radius: 8px;
 }
 
 /* Typing dots */
@@ -278,6 +282,25 @@ html.dark[data-chat-theme="dots"] .chat-bg {
     background-color: #0b0f14;
     background-image: radial-gradient(rgba(248, 250, 252, 0.05) 1px, transparent 1px);
     background-size: 14px 14px;
+}
+
+/* Foreground banners/toasts: below OS status bar (WebView may report 0 safe-area). */
+.notification-viewport-top {
+    top: max(3rem, calc(env(safe-area-inset-top, 0px) + 0.75rem)) !important;
+}
+
+.animate-banner-drop {
+    animation: banner-drop 0.28s ease-out;
+}
+@keyframes banner-drop {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .animate-in-up {

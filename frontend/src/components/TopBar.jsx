@@ -40,7 +40,7 @@ export default function TopBar({
         style={{ minHeight: "max(env(safe-area-inset-top, 0px), 36px)" }}
         aria-hidden
       />
-      <div className="flex min-h-[44px] flex-1 items-center justify-between gap-2 px-3 sm:h-12 sm:px-4">
+      <div className="flex min-h-[56px] flex-1 items-center justify-between gap-2 px-3 sm:px-4">
       <div className="flex min-w-0 items-center gap-2">
         {onBack && (
           <Button size="icon" variant="ghost" className="h-10 w-10 shrink-0 touch-manipulation rounded-full" onClick={onBack} data-testid="topbar-back-btn" title="Back">

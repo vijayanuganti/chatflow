@@ -350,6 +350,7 @@ export function getWsUrl(explicitToken) {
 
 export function fileUrl(path) {
   if (!path) return "";
+  if (path.startsWith("blob:") || path.startsWith("data:")) return path;
   if (path.startsWith("http://") || path.startsWith("https://")) return path;
   const backend = resolveBackendUrl();
   return backend ? `${backend}${path}` : path;

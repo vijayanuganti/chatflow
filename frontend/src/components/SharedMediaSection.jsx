@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ExternalLink, FileText, Loader2 } from "lucide-react";
 import { api, fileUrl, formatApiError } from "@/lib/api";
+import { openDocumentExternally } from "@/lib/openDocument";
 import { categorizeSharedMessages } from "@/lib/sharedMedia";
 import { toast } from "sonner";
 import ImageLightbox from "./ImageLightbox";
@@ -130,16 +131,18 @@ export default function SharedMediaSection({
             </a>
           ))}
           {tab === "documents" && items.map((m) => (
-            <a
+            <button
               key={m.id}
-              href={fileUrl(m.file_url)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-900/50"
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                void openDocumentExternally(m.file_url, m.file_name);
+              }}
+              className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-900/50"
             >
               <FileText className="h-5 w-5 text-sky-600 shrink-0" />
               <span className="text-sm truncate dark:text-gray-200">{m.file_name || "Document"}</span>
-            </a>
+            </button>
           ))}
           {tab === "links" && items.map((m) => (
             <div key={m.id} className="px-3 py-2 space-y-1">

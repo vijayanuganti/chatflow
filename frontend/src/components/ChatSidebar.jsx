@@ -17,6 +17,7 @@ import Avatar from "./Avatar";
 import { useAuth } from "@/context/AuthContext";
 import { partitionConversations } from "@/lib/conversationPreferences";
 import { loadChatListScroll, saveChatListScroll } from "@/lib/chatListScroll";
+import { hapticSelectionStart } from "@/lib/selectionHaptics";
 
 function formatLastTime(iso) {
   if (!iso) return "";
@@ -60,6 +61,7 @@ function ConversationRow({
     clearTimeout(longPressRef.current);
     longPressRef.current = setTimeout(() => {
       didLongPressRef.current = true;
+      void hapticSelectionStart();
       onLongPressSelect?.(c);
     }, 480);
   };
@@ -83,9 +85,9 @@ function ConversationRow({
 
   return (
     <div
-      className={`w-full text-left px-4 py-3 flex gap-3 items-center transition-colors border-b border-gray-50 dark:border-gray-800/60 ${
+      className={`w-full text-left px-4 py-3 flex gap-3 items-center border-b border-gray-50 dark:border-gray-800/60 transition-colors duration-200 ease-out ${
         isSelectionHighlight
-          ? "bg-emerald-100/80 dark:bg-emerald-900/50"
+          ? "bg-emerald-200/70 dark:bg-emerald-800/55 ring-1 ring-inset ring-emerald-500/35"
           : isActiveChat
             ? "bg-emerald-50 dark:bg-emerald-900/30"
             : "hover:bg-gray-50 dark:hover:bg-gray-900/50"
@@ -151,30 +153,31 @@ function ConversationRow({
   );
 }
 
-function SelectionActionBar({ conversation, onClear, onPreferenceChange }) {
+function SelectionActionBar({ conversation, selectionCount = 1, onClear, onPreferenceChange }) {
   if (!conversation) return null;
   const run = (patch) => onPreferenceChange?.(conversation.id, patch);
+  const countLabel = selectionCount === 1 ? "1 selected" : `${selectionCount} selected`;
 
   return (
     <div
-      className="flex items-center gap-1 px-2 py-2 border-b border-emerald-800/20 bg-emerald-900 text-white min-h-[52px]"
+      className="flex items-center gap-0.5 px-2 py-2 bg-emerald-900 text-white min-h-[58px]"
       data-testid="chat-list-selection-bar"
+      role="toolbar"
+      aria-label="Conversation selection"
     >
       <Button
         type="button"
         size="icon"
         variant="ghost"
-        className="h-10 w-10 shrink-0 rounded-full text-white hover:bg-white/15"
+        className="h-10 w-10 shrink-0 rounded-full text-white hover:bg-white/15 touch-manipulation"
         onClick={onClear}
         data-testid="chat-list-selection-clear"
         aria-label="Clear selection"
       >
         <ArrowLeft className="h-5 w-5" />
       </Button>
-      <span className="flex-1 text-sm font-medium truncate px-1">
-        {conversation.type === "group"
-          ? conversation.name
-          : conversation.other_user?.full_name || "Chat"}
+      <span className="flex-1 text-sm font-medium truncate px-1 tabular-nums" data-testid="chat-list-selection-count">
+        {countLabel}
       </span>
       <Button
         type="button"
@@ -261,7 +264,7 @@ export default function ChatSidebar({
     });
   }, [sourceList, q, adminView]);
 
-  const showBatches = !adminView && user?.role === "employee" && !showArchived && !inSelectionMode;
+  const showBatches = !adminView && user?.role === "employee" && !showArchived;
 
   useLayoutEffect(() => {
     const el = listRef.current;
@@ -301,14 +304,6 @@ export default function ChatSidebar({
           <div className="text-xs text-gray-500 dark:text-gray-400 capitalize">{user?.role}</div>
         </div>
       </div>
-
-      {inSelectionMode ? (
-        <SelectionActionBar
-          conversation={selectedConversation}
-          onClear={clearSelection}
-          onPreferenceChange={onPreferenceChange}
-        />
-      ) : null}
 
       {showBatches && (
         <div className="p-3 border-b border-gray-100 dark:border-gray-800" data-testid="batch-boards">
@@ -351,7 +346,7 @@ export default function ChatSidebar({
         </div>
       )}
 
-      {!adminView && archivedList.length > 0 && !inSelectionMode && (
+      {!adminView && archivedList.length > 0 && (
         <div className="px-3 pt-2 border-b border-gray-100 dark:border-gray-800">
           <button
             type="button"
@@ -365,21 +360,30 @@ export default function ChatSidebar({
         </div>
       )}
 
-      {!inSelectionMode && (
-        <div className="p-3 border-b border-gray-100 dark:border-gray-800">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500 pointer-events-none" />
-            <Input
-              data-testid="chat-search-input"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder={showArchived ? "Search archived" : "Search conversations"}
-              className="pl-9 h-10 rounded-xl bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-              type="search"
-            />
+      <div className="shrink-0 border-b border-gray-100 dark:border-gray-800">
+        {inSelectionMode ? (
+          <SelectionActionBar
+            conversation={selectedConversation}
+            selectionCount={1}
+            onClear={clearSelection}
+            onPreferenceChange={onPreferenceChange}
+          />
+        ) : (
+          <div className="p-3" data-testid="chat-search-slot">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500 pointer-events-none" />
+              <Input
+                data-testid="chat-search-input"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder={showArchived ? "Search archived" : "Search conversations"}
+                className="pl-9 h-10 rounded-xl bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+                type="search"
+              />
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {showArchived && !inSelectionMode && (
         <div className="px-4 py-2 text-[10px] uppercase tracking-[0.2em] text-gray-400 border-b border-gray-50 dark:border-gray-800">

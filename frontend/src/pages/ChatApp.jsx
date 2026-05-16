@@ -32,6 +32,7 @@ import {
   patchCachedMessageStatus,
   patchCachedMessageStatuses,
 } from "@/lib/messageCache";
+import { mergeIncomingLiveMessage } from "@/lib/optimisticMessages";
 import {
   markOpponentMessagesSeen,
   markMessageSeen,
@@ -47,6 +48,7 @@ import {
   patchConversationPrefs,
   updateConversationPreferences,
 } from "@/lib/conversationPreferences";
+import { useOptimisticMessageSend } from "@/hooks/useOptimisticMessageSend";
 
 export default function ChatApp() {
   useMobileChatViewport();
@@ -342,36 +344,16 @@ export default function ChatApp() {
     }
     ackMessageDelivered(msg);
     setMessages((prev) => {
-      if (activeId && msg.conversation_id === activeId) {
-        if (prev.some((m) => m.id === msg.id)) return prev;
-        // If this is the server echo of one of MY messages and a pending
-        // optimistic copy exists, replace the optimistic copy in place rather
-        // than appending a duplicate. We match by sender + type + content +
-        // file_url within a small window so reorderings don't sneak in.
-        if (msg.sender_id === user.id) {
-          const idx = prev.findIndex((m) => (
-            m.__pending &&
-            m.conversation_id === msg.conversation_id &&
-            m.message_type === msg.message_type &&
-            (m.content || "") === (msg.content || "") &&
-            (m.file_url || "") === (msg.file_url || "")
-          ));
-          if (idx !== -1) {
-            const next = prev.slice();
-            const old = next[idx];
-            next[idx] = old?.__tempId ? { ...msg, __tempId: old.__tempId } : msg;
-            if (user?.id) setCachedMessages(user.id, activeId, next);
-            return next;
-          }
-        }
-        if ((msg.recipient_ids || []).includes(user.id)) {
-          api.post(`/conversations/${activeId}/read`).catch(() => {});
-        }
-        const next = [...prev, msg];
-        if (user?.id) setCachedMessages(user.id, activeId, next);
-        return next;
+      if (!activeId || msg.conversation_id !== activeId) return prev;
+
+      const { next, changed } = mergeIncomingLiveMessage(prev, msg, user.id);
+      if (!changed) return prev;
+
+      if ((msg.recipient_ids || []).includes(user.id)) {
+        api.post(`/conversations/${activeId}/read`).catch(() => {});
       }
-      return prev;
+      if (user?.id) setCachedMessages(user.id, activeId, next);
+      return next;
     });
     setConversations((prev) => {
       const exists = prev.find((c) => c.id === msg.conversation_id);
@@ -530,107 +512,14 @@ export default function ChatApp() {
     wsSendTyping(conversationId, isTyping);
   }, [wsSendTyping]);
 
-  /**
-   * Send a message optimistically (WhatsApp-style).
-   *
-   * Behaviour:
-   *  - Immediately append a placeholder message with `__pending: true` so the
-   *    user sees the bubble straight away (with a clock icon).
-   *  - Update the sidebar preview right away.
-   *  - Fire the POST in the background. On success replace the placeholder
-   *    (matched by `__tempId`) with the canonical message returned by the
-   *    server. If the WebSocket echo arrives first, `handleIncomingMessage`
-   *    already replaces the temp.
-   *  - On failure we keep the bubble in place but mark it `__error: true` so
-   *    the bubble shows an error indicator, plus a toast for context.
-   */
-  const handleSendMessage = (body) => {
-    const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const nowIso = new Date().toISOString();
-    const conv = conversations.find((c) => c.id === body.conversation_id);
-    const recipientIds = conv
-      ? (conv.participants || []).filter((p) => p !== user.id)
-      : [];
-    const optimistic = {
-      id: tempId,
-      __tempId: tempId,
-      __pending: true,
-      conversation_id: body.conversation_id,
-      conversation_type: conv?.type,
-      sender_id: user.id,
-      sender_name: user.full_name,
-      content: body.content || "",
-      message_type: body.message_type,
-      file_url: body.file_url,
-      file_name: body.file_name,
-      created_at: nowIso,
-      read_by: [user.id],
-      recipient_ids: recipientIds,
-      status: "sent",
-    };
-
-    if (selectedIdRef.current === body.conversation_id) {
-      setMessages((prev) => {
-        const next = [...prev, optimistic];
-        if (user?.id) setCachedMessages(user.id, body.conversation_id, next);
-        return next;
-      });
-    }
-
-    setConversations((prev) => {
-      const preview = optimistic.content || `[${optimistic.message_type}]`;
-      const previewText = conv?.type === "group"
-        ? `${optimistic.sender_name}: ${preview}` : preview;
-      const updated = prev.map((c) => c.id === body.conversation_id
-        ? { ...c, last_message: previewText, last_message_at: nowIso }
-        : c
-      );
-      updated.sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || ""));
-      return updated;
-    });
-
-    (async () => {
-      try {
-        const res = await api.post("/messages", body);
-        setMessages((prev) => {
-          const idx = prev.findIndex((m) => m.__tempId === tempId);
-          let next;
-          if (idx === -1) {
-            next = prev.some((m) => m.id === res.data.id) ? prev : [...prev, res.data];
-          } else {
-            next = prev.slice();
-            const old = next[idx];
-            next[idx] = { ...res.data, __tempId: old.__tempId };
-          }
-          if (user?.id && selectedIdRef.current === body.conversation_id) {
-            setCachedMessages(user.id, body.conversation_id, next);
-          }
-          return next;
-        });
-        setConversations((prev) => {
-          const preview = res.data.content || `[${res.data.message_type}]`;
-          const previewText = res.data.conversation_type === "group"
-            ? `${res.data.sender_name}: ${preview}` : preview;
-          let found = false;
-          const updated = prev.map((c) => {
-            if (c.id === res.data.conversation_id) {
-              found = true;
-              return { ...c, last_message: previewText, last_message_at: res.data.created_at };
-            }
-            return c;
-          });
-          if (!found) { loadConversations(); return prev; }
-          updated.sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || ""));
-          return updated;
-        });
-      } catch (err) {
-        toast.error(formatApiError(err));
-        setMessages((prev) => prev.map((m) => (
-          m.__tempId === tempId ? { ...m, __pending: false, __error: true } : m
-        )));
-      }
-    })();
-  };
+  const { sendMessage: handleSendMessage, patchMessage } = useOptimisticMessageSend({
+    user,
+    selectedIdRef,
+    setMessages,
+    setConversations,
+    conversations,
+    onConversationMissing: loadConversations,
+  });
 
   const filteredConversations = React.useMemo(() => {
     // Inactive clients shouldn't clutter chat lists for anyone except admin
@@ -724,7 +613,7 @@ export default function ChatApp() {
       style={{ height: "var(--visual-vh, 100dvh)" }}
       data-testid="chat-app"
     >
-      <div className={`shrink-0 ${listSelection ? "hidden md:block" : ""}`}>
+      <div className="shrink-0">
         <TopBar
           onOpenSettings={() => {
             if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
@@ -771,6 +660,7 @@ export default function ChatApp() {
             conversation={selected}
             messages={messages}
             onSendMessage={handleSendMessage}
+            onPatchMessage={patchMessage}
             typingUsers={(selected && typingUsers[selected.id]) || {}}
             onlineUsers={onlineUsers}
             lastSeenByUser={lastSeenByUser}

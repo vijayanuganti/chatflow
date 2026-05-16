@@ -17,6 +17,66 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
   changes are persisted with actor, target and timestamp.
 - **Show/hide password** toggles on every password field.
 - Real-time messaging (WebSocket), uploads (S3), admin monitoring, batches.
+- **Per-user chat preferences** — pin, archive, and mute conversations (WhatsApp-style long-press selection on mobile).
+- **Contact profiles & shared media** — avatar quick view, full profile pages, and Media / Documents / Links tabs.
+- **Role-aware mobile shells** — fixed ChatFlow header, panel footers (Chats · Diet · Settings for clients; Chats · Batches · Settings for employees), and native back-button handling.
+
+---
+
+## Chat & mobile UX
+
+### Conversation list (`ChatSidebar`)
+
+- **Pin / Archive / Mute** — stored per user in `conversation_preferences`; list responses include `is_pinned`, `is_archived`, `is_muted` and pinned chats sort first.
+- **Long-press selection (mobile)** — long-press a row to enter selection mode:
+  - The **search bar slot only** swaps to an emerald action bar: **←** clear, **“1 selected”**, and **Pin / Mute / Archive**.
+  - The **ChatFlow top bar** and **bottom navigation** stay visible (unchanged shell).
+  - Selected rows get a subtle emerald highlight.
+  - **Haptic feedback** on long-press via `@capacitor/haptics` (`frontend/src/lib/selectionHaptics.js`).
+- **Hardware / system back** — when a row is selected, back clears selection before closing a chat or leaving the list (`useDoubleBackToExit` in `ChatApp` / `AdminDashboard`).
+- **Archived view** — toggle to browse archived chats; search applies within the active list.
+- **List scroll preservation** — scroll position is saved/restored across navigation (`frontend/src/lib/chatListScroll.js`).
+- No per-row ⋯ menus on the conversation list (actions are selection-only).
+
+### Chat thread (`ChatWindow`)
+
+- **Date dividers** — Today / Yesterday / `DD/MM/YYYY` (`frontend/src/lib/chatDateGroups.js`).
+- **Scroll-to-bottom** floating button when scrolled up.
+- **Typing indicator** — shows `typing...` only.
+- **In-chat search** — find messages with highlighted matches.
+- **Starred messages** — star/unstar stored in `localStorage` per conversation (`frontend/src/lib/starredMessages.js`).
+- **Header tap** — opens the contact **User profile** page (mute toggle + shared media).
+
+### Profiles & shared media
+
+- **Avatar tap** (list or thread) — `ProfileQuickView` sheet.
+- **Full profile** — `/chat/contact/:userId` (client/employee) or `/admin/contact/:userId` (`UserProfilePage.jsx`) with mute control and `SharedMediaSection` (Media / Documents / Links).
+- **Public user API** — `GET /api/users/{user_id}/public` for safe contact fields.
+
+### Top bar & admin panel
+
+- App title is always **ChatFlow** (not “Admin | Overview”, etc.).
+- **Refresh** in the three-dots menu re-fetches conversations, messages, and cache (no logout).
+- **Admin → Users** filter: All | Employees | Clients | Inactive Clients.
+- **Unread badge** on the admin mobile footer **Chats** tab (not on the logo).
+
+### Mobile footers (`PanelBottomNav`)
+
+| Role     | Tabs                          |
+| -------- | ----------------------------- |
+| Client   | Chats · My Diet · Settings    |
+| Employee | Chats · Batches · Settings    |
+| Admin    | Overview · Chats · Users · …  |
+
+Footers hide only when a **conversation thread** is open, not during list selection.
+
+### Client diet
+
+- **My Diet** opens `DietPlanPage` from **Day 1** (`startFromDayOne` on `DietPlanContent`).
+
+### Push notifications
+
+- FCM push is **skipped** for conversations the user has **muted** (`conversation_id` passed into the notification path).
 
 ---
 
@@ -31,6 +91,8 @@ Native shells live under `frontend/android` and `frontend/ios` (Capacitor 8).
 - **API URL on a physical device:** set `REACT_APP_BACKEND_URL` to an address the phone can reach (for example `http://192.168.x.x:8001`), rebuild, then `npm run build:mobile`. Add that origin to backend `CORS_ORIGINS` in production.
 - **CORS for the native shell:** when `CORS_ORIGINS` is unset in development, FastAPI allows `capacitor://localhost` and `ionic://localhost` in addition to `http://localhost:3000` and `http://127.0.0.1:3000`.
 - **Camera and photos:** profile avatar and chat “Photo” attachments use `@capacitor/camera` in the native app (`frontend/src/lib/nativeMedia.js`). iOS privacy strings are in `frontend/ios/App/App/Info.plist`. Video and other file types still use the web file picker unless you extend them.
+- **Haptics:** `@capacitor/haptics` for chat-list long-press selection (`selectionHaptics.js`). After adding or upgrading native plugins, run `npm run cap:sync` from `frontend/`.
+- **System back:** `frontend/src/hooks/useDoubleBackToExit.js` traps back at the app root and delegates drill-up (clear selection → close chat → admin sub-panels) before normal history.
 - **Capacitor CLI** 8.x may warn that **Node 22+** is expected; upgrade Node if `npx cap` misbehaves.
 
 ---
@@ -105,6 +167,21 @@ Indexes: `username` (unique), `phone_number` (unique).
 
 Indexes: `timestamp DESC`, `actor_user_id`, `target_user_id`, `action`.
 
+### `conversation_preferences`
+Per-user, per-conversation settings (not global for the thread).
+
+| Field              | Type   | Notes                                      |
+| ------------------ | ------ | ------------------------------------------ |
+| `id`               | string | `{user_id}_{conversation_id}`              |
+| `user_id`          | string | Viewer who owns this preference row.       |
+| `conversation_id`  | string | Conversation UUID.                         |
+| `is_pinned`        | bool   | Pinned chats appear first in the list.     |
+| `is_archived`      | bool   | Hidden from main list; archived view only. |
+| `is_muted`         | bool   | Suppresses FCM for that conversation.      |
+| `updated_at`       | iso    | Last change.                               |
+
+Index: `(user_id, conversation_id)` unique.
+
 ### Migrations
 On startup `_migrate_user_documents` runs:
 
@@ -142,11 +219,16 @@ On startup `_migrate_user_documents` runs:
 - `GET  /api/admin/audit-logs?action=...&limit=...`
 - `GET  /api/admin/stats`, `/admin/conversations`, `/admin/employees`, `/admin/batches`, `/admin/employees/{id}/batches`, `/admin/users/{id}/activity`.
 
-### Messaging (unchanged)
-- `GET  /api/conversations`, `POST /api/conversations/start`, `POST /api/conversations/group`
+### Messaging & conversations
+- `GET  /api/conversations` — each row may include `is_pinned`, `is_archived`, `is_muted` for the current user; pinned-first sort applied server-side.
+- `PATCH /api/conversations/{conv_id}/preferences` — body `{ is_pinned?, is_archived?, is_muted? }` (partial update).
+- `POST /api/conversations/start`, `POST /api/conversations/group`
 - `GET  /api/conversations/{id}/messages`, `POST /api/conversations/{id}/read`
 - `POST /api/messages`, `POST /api/upload`, `GET /api/files/{id}`
 - `WS   /api/ws?token=...`
+
+### Public profiles
+- `GET /api/users/{user_id}/public` — contact-safe profile fields for profile pages.
 
 ---
 
@@ -161,20 +243,38 @@ chatflow/
 │  └─ uploads/                  ← local dev fallback for files
 └─ frontend/
    └─ src/
-      ├─ App.js                 ← /login, /chat, /admin/:section
+      ├─ App.js                      ← /login, /chat, /admin/:section, contact routes
       ├─ context/
-      │  └─ AuthContext.jsx     ← session + role propagation
-      ├─ lib/api.js             ← axios instance + helpers
+      │  └─ AuthContext.jsx          ← session + role propagation
+      ├─ hooks/
+      │  └─ useDoubleBackToExit.js   ← Android / browser back + sentinel
+      ├─ lib/
+      │  ├─ api.js                   ← axios instance + helpers
+      │  ├─ appRoutes.js             ← role-aware paths (profile, contact, diet, …)
+      │  ├─ conversationPreferences.js
+      │  ├─ chatListScroll.js
+      │  ├─ chatDateGroups.js
+      │  ├─ sharedMedia.js
+      │  ├─ starredMessages.js
+      │  ├─ selectionHaptics.js
+      │  └─ nativeMedia.js
       ├─ pages/
-      │  ├─ Login.jsx           ← phone + password (show/hide), no registration
-      │  ├─ ChatApp.jsx         ← client / employee chat
-      │  └─ AdminDashboard.jsx  ← overview / accounts / permissions / audit / batches / monitor / users
+      │  ├─ Login.jsx
+      │  ├─ ChatApp.jsx              ← client / employee / admin-on-/chat
+      │  ├─ AdminDashboard.jsx
+      │  ├─ UserProfilePage.jsx      ← contact info + shared media
+      │  └─ DietPlanPage.jsx
       └─ components/
-         ├─ PasswordInput.jsx       ← eye-icon show/hide
-         ├─ CreateAccountDialog.jsx ← shared by admin & permitted employees
-         ├─ ResetPasswordDialog.jsx ← admin-only password reset
-         ├─ TopBar.jsx              ← create-account entry point for permitted users
-         └─ ProfileDialog.jsx       ← self-service: name/status/avatar/password
+         ├─ ChatSidebar.jsx          ← list, search, long-press selection bar
+         ├─ ChatWindow.jsx           ← thread, dividers, in-chat search, stars
+         ├─ TopBar.jsx               ← ChatFlow branding, refresh, 56px toolbar
+         ├─ ProfileQuickView.jsx
+         ├─ SharedMediaSection.jsx
+         ├─ layout/PanelBottomNav.jsx
+         ├─ PasswordInput.jsx
+         ├─ CreateAccountDialog.jsx
+         ├─ ResetPasswordDialog.jsx
+         └─ ProfileDialog.jsx
 ```
 
 ---

@@ -44,6 +44,8 @@ import {
   updateConversationPreferences,
 } from "@/lib/conversationPreferences";
 import { loadCacheFromStorage } from "@/lib/messageCache";
+import { mergeIncomingLiveMessage } from "@/lib/optimisticMessages";
+import { useOptimisticMessageSend } from "@/hooks/useOptimisticMessageSend";
 import {
   Dialog,
   DialogContent,
@@ -61,8 +63,15 @@ function pathForAdminTab(t) {
   return t === "overview" ? "/admin" : `/admin/${t}`;
 }
 
+/** ASCII-only stat display (avoids em-dash mojibake in Android WebView). */
+function formatStatValue(value) {
+  if (value == null || value === "") return "0";
+  if (typeof value === "number" && Number.isNaN(value)) return "0";
+  return String(value);
+}
+
 function formatStorageBytes(n) {
-  if (n == null || Number.isNaN(Number(n))) return "-";
+  if (n == null || Number.isNaN(Number(n))) return "0";
   const v = Number(n);
   if (v < 1024) return `${Math.round(v)} B`;
   if (v < 1024 ** 2) return `${(v / 1024).toFixed(1)} KB`;
@@ -538,10 +547,9 @@ export default function AdminDashboard() {
       });
     }
     setMessages((prev) => {
-      if (activeId && msg.conversation_id === activeId && !prev.some((m) => m.id === msg.id)) {
-        return [...prev, msg];
-      }
-      return prev;
+      if (!activeId || msg.conversation_id !== activeId) return prev;
+      const { next, changed } = mergeIncomingLiveMessage(prev, msg, user.id);
+      return changed ? next : prev;
     });
     const updater = (prev) => {
       const preview = msg.content || `[${msg.message_type}]`;
@@ -644,22 +652,14 @@ export default function AdminDashboard() {
     enabled: Boolean(user?.id),
   });
 
-  const handleSendMessage = async (body) => {
-    const res = await api.post("/messages", body);
-    setMessages((prev) => prev.some((m) => m.id === res.data.id) ? prev : [...prev, res.data]);
-    setMyConvs((prev) => {
-      const preview = res.data.content || `[${res.data.message_type}]`;
-      const previewText = res.data.conversation_type === "group" ? `${res.data.sender_name}: ${preview}` : preview;
-      let found = false;
-      const updated = prev.map((c) => {
-        if (c.id === res.data.conversation_id) { found = true; return { ...c, last_message: previewText, last_message_at: res.data.created_at }; }
-        return c;
-      });
-      if (!found) { loadOverview(); return prev; }
-      updated.sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || ""));
-      return updated;
-    });
-  };
+  const { sendMessage: handleSendMessage, patchMessage } = useOptimisticMessageSend({
+    user,
+    selectedIdRef,
+    setMessages,
+    setConversations: setMyConvs,
+    conversations: myConvs,
+    onConversationMissing: loadOverview,
+  });
 
   const isSelectedAdminChat = selected && myConvs.find((c) => c.id === selected.id);
   const currentConvs = tab === "mychats" ? myConvs : allConvs;
@@ -841,7 +841,7 @@ export default function AdminDashboard() {
       style={{ height: "var(--visual-vh, 100dvh)" }}
       data-testid="admin-dashboard"
     >
-      <div className={`shrink-0 ${mobileInChat || listSelection ? "hidden md:block" : ""}`}>
+      <div className={`shrink-0 ${mobileInChat ? "hidden md:block" : ""}`}>
         <TopBar
           onOpenSettings={() => navigate(profilePath("admin"))}
           title={topbarTitle}
@@ -895,17 +895,17 @@ export default function AdminDashboard() {
               <p className="text-gray-500 dark:text-gray-400 mt-1">Monitor conversations and chat with anyone on the platform.</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-              <StatCard icon={Users} label="Total users" value={stats?.total_users ?? "-"} testId="stat-total-users" />
-              <StatCard icon={Briefcase} label="Employees" value={stats?.employees ?? "-"} testId="stat-employees" accent="bg-amber-50 text-amber-900" />
-              <StatCard icon={UserCircle2} label="Clients" value={stats?.clients ?? "-"} testId="stat-clients" accent="bg-sky-50 text-sky-900" />
-              <StatCard icon={UserCheck} label="Active clients" value={stats?.active_clients ?? "-"} testId="stat-active-clients" accent="bg-emerald-50 text-emerald-900" />
+              <StatCard icon={Users} label="Total users" value={formatStatValue(stats?.total_users)} testId="stat-total-users" />
+              <StatCard icon={Briefcase} label="Employees" value={formatStatValue(stats?.employees)} testId="stat-employees" accent="bg-amber-50 text-amber-900" />
+              <StatCard icon={UserCircle2} label="Clients" value={formatStatValue(stats?.clients)} testId="stat-clients" accent="bg-sky-50 text-sky-900" />
+              <StatCard icon={UserCheck} label="Active clients" value={formatStatValue(stats?.active_clients)} testId="stat-active-clients" accent="bg-emerald-50 text-emerald-900" />
               <button
                 type="button"
                 onClick={() => goToTab("inactive")}
                 className="text-left"
                 data-testid="stat-inactive-clients-btn"
               >
-                <StatCard icon={UserX} label="Inactive clients" value={stats?.inactive_clients ?? "-"} testId="stat-inactive-clients" accent="bg-rose-50 text-rose-900" />
+                <StatCard icon={UserX} label="Inactive clients" value={formatStatValue(stats?.inactive_clients)} testId="stat-inactive-clients" accent="bg-rose-50 text-rose-900" />
               </button>
               <button
                 type="button"
@@ -913,7 +913,7 @@ export default function AdminDashboard() {
                 className="text-left"
                 data-testid="stat-complaints-btn"
               >
-                <StatCard icon={Inbox} label="Open complaints" value={stats?.complaints_pending ?? "-"} testId="stat-complaints-open" accent="bg-rose-50 text-rose-900" />
+                <StatCard icon={Inbox} label="Open complaints" value={formatStatValue(stats?.complaints_pending)} testId="stat-complaints-open" accent="bg-rose-50 text-rose-900" />
               </button>
             </div>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -1144,6 +1144,7 @@ export default function AdminDashboard() {
                 conversation={selected}
                 messages={messages}
                 onSendMessage={handleSendMessage}
+                onPatchMessage={patchMessage}
                 typingUsers={(selected && typingUsers[selected.id]) || {}}
                 onlineUsers={onlineUsers}
                 lastSeenByUser={lastSeenByUser}
@@ -1195,6 +1196,7 @@ export default function AdminDashboard() {
                 conversation={selected}
                 messages={messages}
                 onSendMessage={handleSendMessage}
+                onPatchMessage={patchMessage}
                 typingUsers={(selected && typingUsers[selected.id]) || {}}
                 onlineUsers={onlineUsers}
                 lastSeenByUser={lastSeenByUser}
@@ -1317,9 +1319,9 @@ export default function AdminDashboard() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
-              <StatCard icon={Users} label="Total users" value={stats?.total_users ?? "-"} testId="accounts-stat-total" />
-              <StatCard icon={Briefcase} label="Employees" value={stats?.employees ?? "-"} testId="accounts-stat-employees" accent="bg-amber-50 text-amber-900" />
-              <StatCard icon={UserCircle2} label="Clients" value={stats?.clients ?? "-"} testId="accounts-stat-clients" accent="bg-sky-50 text-sky-900" />
+              <StatCard icon={Users} label="Total users" value={formatStatValue(stats?.total_users)} testId="accounts-stat-total" />
+              <StatCard icon={Briefcase} label="Employees" value={formatStatValue(stats?.employees)} testId="accounts-stat-employees" accent="bg-amber-50 text-amber-900" />
+              <StatCard icon={UserCircle2} label="Clients" value={formatStatValue(stats?.clients)} testId="accounts-stat-clients" accent="bg-sky-50 text-sky-900" />
             </div>
 
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
@@ -1523,9 +1525,9 @@ export default function AdminDashboard() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
-              <StatCard icon={Inbox} label="Pending" value={stats?.complaints_pending ?? "-"} testId="complaints-stat-pending" accent="bg-rose-50 text-rose-900" />
-              <StatCard icon={CheckCircle2} label="Solved" value={stats?.complaints_solved ?? "-"} testId="complaints-stat-solved" accent="bg-emerald-50 text-emerald-900" />
-              <StatCard icon={Users} label="Active clients" value={stats?.active_clients ?? "-"} testId="complaints-stat-active" accent="bg-sky-50 text-sky-900" />
+              <StatCard icon={Inbox} label="Pending" value={formatStatValue(stats?.complaints_pending)} testId="complaints-stat-pending" accent="bg-rose-50 text-rose-900" />
+              <StatCard icon={CheckCircle2} label="Solved" value={formatStatValue(stats?.complaints_solved)} testId="complaints-stat-solved" accent="bg-emerald-50 text-emerald-900" />
+              <StatCard icon={Users} label="Active clients" value={formatStatValue(stats?.active_clients)} testId="complaints-stat-active" accent="bg-sky-50 text-sky-900" />
             </div>
 
             <div className="inline-flex rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden text-xs" data-testid="complaints-filter">
@@ -1614,7 +1616,7 @@ export default function AdminDashboard() {
                   subtitle={
                     storage.database?.error
                       ? storage.database.error
-                      : `${storage.database?.collections ?? "-"} collections  |  ${storage.database?.objects ?? "-"} objects`
+                      : `${formatStatValue(storage.database?.collections)} collections  |  ${formatStatValue(storage.database?.objects)} objects`
                   }
                   testId="storage-meter-db"
                 />
@@ -2092,7 +2094,7 @@ export default function AdminDashboard() {
 
       {/* Mobile bottom nav (Flutter-style BottomNavigationBar) */}
       <div
-        className={`md:hidden fixed bottom-0 left-0 right-0 z-20 flex items-stretch justify-around border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_18px_rgba(0,0,0,0.06)] backdrop-blur dark:border-gray-800 dark:bg-gray-950/95 dark:shadow-[0_-4px_18px_rgba(0,0,0,0.5)] ${mobileInChat || listSelection ? "hidden" : ""}`}
+        className={`md:hidden fixed bottom-0 left-0 right-0 z-20 flex items-stretch justify-around border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_18px_rgba(0,0,0,0.06)] backdrop-blur dark:border-gray-800 dark:bg-gray-950/95 dark:shadow-[0_-4px_18px_rgba(0,0,0,0.5)] ${mobileInChat ? "hidden" : ""}`}
         data-testid="admin-bottom-nav"
       >
         <BottomNavButton

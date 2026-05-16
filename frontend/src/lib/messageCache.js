@@ -4,6 +4,7 @@
  */
 
 import { mergeMessageStatus } from "./messageSeen";
+import { isOptimisticMessageId } from "./optimisticMessages";
 
 const memory = new Map();
 const MAX_CONVERSATIONS = 40;
@@ -41,7 +42,7 @@ export function mergeMessageLists(cached, fresh) {
   const pending = [];
 
   for (const m of cached || []) {
-    if (m?.__pending && m?.__tempId) {
+    if (m?.__pending && (m?.__tempId || isOptimisticMessageId(m?.id))) {
       pending.push(m);
       continue;
     }

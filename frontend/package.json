@@ -4,11 +4,15 @@
   "private": true,
   "homepage": "/",
   "dependencies": {
+    "@capacitor-community/file-opener": "^8.0.0",
     "@capacitor/android": "^8.3.4",
     "@capacitor/app": "^8.1.0",
+    "@capacitor/browser": "^8.0.3",
     "@capacitor/camera": "^8.2.0",
     "@capacitor/cli": "^8.3.4",
     "@capacitor/core": "^8.3.4",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/haptics": "^8.0.2",
     "@capacitor/ios": "^8.3.4",
     "@capacitor/push-notifications": "^8.0.4",
     "@capacitor/splash-screen": "^8.0.1",
@@ -70,6 +74,7 @@
     "test": "craco test",
     "cap:sync": "npx cap sync",
     "cap:copy": "npx cap copy",
+    "icons:generate": "node scripts/generate-brand-icon.mjs && node scripts/generate-brand-splash.mjs && npx capacitor-assets generate --iconBackgroundColor \"#064e3b\" --splashBackgroundColor \"#ffffff\" && node scripts/copy-pwa-icons.mjs",
     "build:mobile": "npm run build && npx cap copy && npx cap sync",
     "cap:android": "npx cap open android",
     "cap:ios": "npx cap open ios",
@@ -89,9 +94,11 @@
   },
   "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
+    "@capacitor/assets": "^3.0.5",
     "@craco/craco": "^7.1.0",
     "@emergentbase/visual-edits": "https://assets.emergent.sh/npm/emergentbase-visual-edits-1.0.8.tgz",
     "@eslint/js": "9.23.0",
+    "@napi-rs/canvas": "^1.0.0",
     "autoprefixer": "^10.4.20",
     "eslint": "9.23.0",
     "eslint-plugin-import": "2.31.0",
@@ -100,6 +107,7 @@
     "eslint-plugin-react-hooks": "5.2.0",
     "globals": "15.15.0",
     "postcss": "^8.4.49",
+    "sharp": "^0.33.5",
     "tailwindcss": "^3.4.17"
   },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"

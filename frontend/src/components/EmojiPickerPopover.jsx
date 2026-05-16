@@ -14,7 +14,12 @@ const EMOJI_GROUPS = [
 /**
  * WhatsApp-style emoji button — inserts emoji at textarea cursor.
  */
-export default function EmojiPickerPopover({ disabled, onPick }) {
+export default function EmojiPickerPopover({
+  disabled,
+  onPick,
+  triggerClassName,
+  triggerIcon,
+}) {
   const [open, setOpen] = React.useState(false);
 
   const handlePick = (emoji) => {
@@ -29,13 +34,13 @@ export default function EmojiPickerPopover({ disabled, onPick }) {
           type="button"
           size="icon"
           variant="ghost"
-          className="shrink-0 rounded-full text-gray-500 hover:text-emerald-900 dark:hover:text-emerald-300"
+          className={triggerClassName || "shrink-0 rounded-full text-gray-500 hover:text-emerald-900 dark:hover:text-emerald-300"}
           disabled={disabled}
           data-testid="chat-emoji-btn"
           title="Emoji"
           aria-label="Emoji"
         >
-          <Smile className="h-5 w-5" strokeWidth={1.5} />
+          {triggerIcon || <Smile className="h-5 w-5" strokeWidth={1.5} />}
         </Button>
       </PopoverTrigger>
       <PopoverContent
