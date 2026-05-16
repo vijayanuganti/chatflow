@@ -2520,6 +2520,7 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
         else:
             fcm_title = (user.get("full_name") or "New message")[:80]
             fcm_body = preview
+        sender_avatar = (user.get("avatar_url") or "").strip()
         asyncio.create_task(
             send_fcm_notification(
                 recipient_id,
@@ -2529,6 +2530,7 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
                     "type": "new_message",
                     "conversation_id": conv["id"],
                     "message_id": msg["id"],
+                    "sender_avatar_url": sender_avatar,
                 },
             )
         )
@@ -2582,8 +2584,13 @@ async def _apply_message_status_update(message_id: str, new_status: str, actor_i
 
     current = (msg.get("status") or "sent").strip().lower()
     if MESSAGE_STATUS_ORDER.get(new_status, -1) <= MESSAGE_STATUS_ORDER.get(current, 0):
-        # Idempotent retry — re-push so sender UI can catch up if the first WS event was missed.
-        await _notify_sender_message_status(msg, current, actor_id)
+        # Idempotent retry — re-push WS so sender ticks update (e.g. duplicate "seen").
+        notify_status = (
+            new_status
+            if MESSAGE_STATUS_ORDER.get(new_status, 0) >= MESSAGE_STATUS_ORDER.get(current, 0)
+            else current
+        )
+        await _notify_sender_message_status(msg, notify_status, actor_id)
         return {"message_id": message_id, "status": current, "conversation_id": msg["conversation_id"]}
 
     update_fields: Dict[str, Any] = {"status": new_status}
