@@ -12,6 +12,19 @@ export default function DietPlanPage() {
   const { user: me } = useAuth();
 
   const backTo = location.state?.backTo ?? "/chat";
+  const pendingChat = location.state?.pendingChat;
+
+  const handleBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    if (pendingChat?.selectedConv?.id) {
+      navigate(backTo, { replace: true, state: { pendingChat } });
+      return;
+    }
+    navigate(backTo);
+  };
   const resolvedClientId =
     adminClientId || chatClientId || (me?.role === "client" ? me.id : null);
 
@@ -60,7 +73,7 @@ export default function DietPlanPage() {
     <MobilePageShell
       title={client ? `Diet plan | ${client.full_name}` : "Diet plan"}
       description={description}
-      backTo={backTo}
+      onBack={handleBack}
       testId="diet-plan-page"
     >
       {client?.id ? (

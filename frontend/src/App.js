@@ -15,10 +15,12 @@ import UserAccountDetailPage from "@/pages/UserAccountDetailPage";
 import NewConversationPage from "@/pages/NewConversationPage";
 import DietPlanPage from "@/pages/DietPlanPage";
 import UserProfilePage from "@/pages/UserProfilePage";
+import RaiseComplaintPage from "@/pages/RaiseComplaintPage";
 import { Toaster } from "@/components/ui/sonner";
 import PushNotificationBootstrap from "@/components/PushNotificationBootstrap";
 import InAppMessageBanner from "@/components/InAppMessageBanner";
 import SplashScreenBootstrap from "@/components/SplashScreenBootstrap";
+import PanelErrorBoundary from "@/components/PanelErrorBoundary";
 import { initNativeAuthSync } from "@/lib/nativeAuthSync";
 import { initAppForegroundSync } from "@/lib/activeChatState";
 import { syncConversationSoundsFromNative } from "@/lib/conversationSounds";
@@ -33,15 +35,28 @@ function Protected({ children, roles }) {
     );
   }
   if (!user) return <Navigate to="/login" replace />;
-  if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
+  const role = (user.role || "").toLowerCase();
+  if (roles && !roles.includes(role)) return <Navigate to="/" replace />;
   return children;
+}
+
+function AuthLoadingScreen() {
+  return (
+    <div
+      className="flex min-h-screen items-center justify-center bg-gray-50 text-gray-500 dark:bg-gray-950 dark:text-gray-400"
+      data-testid="loading-screen"
+    >
+      Loading...
+    </div>
+  );
 }
 
 function RoleRouter() {
   const { user, loading } = useAuth();
-  if (loading) return null;
+  if (loading) return <AuthLoadingScreen />;
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role === "admin") return <Navigate to="/admin" replace />;
+  const role = (user.role || "").toLowerCase();
+  if (role === "admin") return <Navigate to="/admin" replace />;
   return <Navigate to="/chat" replace />;
 }
 
@@ -124,6 +139,14 @@ function App() {
               element={
                 <Protected roles={["employee", "client", "admin"]}>
                   <NewConversationPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/chat/complaint"
+              element={
+                <Protected roles={["client"]}>
+                  <RaiseComplaintPage />
                 </Protected>
               }
             />
@@ -211,7 +234,9 @@ function App() {
               path="/admin/:section?"
               element={
                 <Protected roles={["admin"]}>
-                  <AdminDashboard />
+                  <PanelErrorBoundary fallbackPath="/login">
+                    <AdminDashboard />
+                  </PanelErrorBoundary>
                 </Protected>
               }
             />

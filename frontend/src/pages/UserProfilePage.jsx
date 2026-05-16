@@ -16,7 +16,20 @@ export default function UserProfilePage() {
   const navigate = useNavigate();
   const { user: me } = useAuth();
   const backTo = location.state?.backTo || "/chat";
+  const pendingChat = location.state?.pendingChat;
   const conversationId = location.state?.conversationId;
+
+  const handleBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    if (pendingChat?.selectedConv?.id) {
+      navigate(backTo, { replace: true, state: { pendingChat } });
+      return;
+    }
+    navigate(backTo);
+  };
 
   const [profile, setProfile] = useState(location.state?.profile || null);
   const [loading, setLoading] = useState(!profile);
@@ -69,7 +82,7 @@ export default function UserProfilePage() {
     <MobilePageShell
       title="Contact info"
       description={displayName}
-      backTo={backTo}
+      onBack={handleBack}
       testId="user-profile-page"
     >
       {loading && !profile ? (

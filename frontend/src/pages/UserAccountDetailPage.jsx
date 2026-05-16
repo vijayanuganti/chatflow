@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   KeyRound,
   Loader2,
@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import Avatar from "@/components/Avatar";
 import MobilePageShell from "@/components/layout/MobilePageShell";
-import { dietPlanPath, medicalPath, resetPasswordPath } from "@/lib/appRoutes";
+import { dietPlanPath, medicalPath, resetPasswordPath, resolveBackTo } from "@/lib/appRoutes";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
@@ -20,8 +20,10 @@ import SharedMediaSection from "@/components/SharedMediaSection";
 
 export default function UserAccountDetailPage() {
   const { userId } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { user: me } = useAuth();
+  const backTo = resolveBackTo(location.state, "/admin/accounts");
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [toggleBusy, setToggleBusy] = useState(false);
@@ -33,11 +35,11 @@ export default function UserAccountDetailPage() {
       setData(res.data);
     } catch (err) {
       toast.error(formatApiError(err));
-      navigate("/admin/accounts", { replace: true });
+      navigate(backTo, { replace: true });
     } finally {
       setLoading(false);
     }
-  }, [userId, navigate]);
+  }, [userId, navigate, backTo]);
 
   useEffect(() => {
     void load();
@@ -65,7 +67,7 @@ export default function UserAccountDetailPage() {
     <MobilePageShell
       title="Account details"
       description="Account lineage and the most recent admin actions on this user."
-      backTo="/admin/accounts"
+      backTo={backTo}
       testId="user-account-detail-page"
     >
       {loading && !user ? (

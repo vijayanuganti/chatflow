@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import { notificationNavigationTarget } from "@/lib/appRoutes";
 import { syncNativeAuthForPush } from "@/lib/nativeAuthSync";
 import {
   initCapacitorPush,
@@ -13,12 +14,17 @@ import {
  */
 export default function PushNotificationBootstrap() {
   const { user } = useAuth();
+  const userRef = useRef(user);
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
 
   useEffect(() => {
     navigateRef.current = navigate;
   }, [navigate]);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -31,9 +37,12 @@ export default function PushNotificationBootstrap() {
       user.id,
       (notification) => {
         const convId = notification?.data?.conversation_id;
-        navigateRef.current("/chat", {
-          state: convId ? { conversationId: convId } : undefined,
-        });
+        const role = userRef.current?.role;
+        const target = notificationNavigationTarget(role, convId);
+        navigateRef.current(
+          { pathname: target.pathname, search: target.search || "" },
+          { state: target.state },
+        );
       },
       (detail) => {
         const convId = detail?.conversationId;

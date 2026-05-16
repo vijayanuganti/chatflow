@@ -68,15 +68,30 @@ function decodeJwtPayload(token) {
   }
 }
 
-/** JWT `bid` must match this install (invalidates tokens from another browser / profile). */
+/** Persist JWT browser id locally so the next request sends a matching header. */
+export function syncBrowserIdFromToken(token) {
+  const p = decodeJwtPayload(token);
+  const bid = p?.bid != null ? String(p.bid).trim() : "";
+  if (!bid) return false;
+  try {
+    localStorage.setItem(BROWSER_ID_KEY, bid);
+    sessionStorage.setItem(BROWSER_ID_KEY, bid);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/** JWT `bid` must match this install; align storage from the token when possible. */
 function tokenMatchesThisInstall(token) {
   const p = decodeJwtPayload(token);
   if (!p) return false;
   const bid = p.bid;
   if (bid == null || String(bid).trim() === "") return false;
+  const bidStr = String(bid).trim();
   const install = getOrCreateBrowserId();
-  if (!install) return false;
-  return String(bid) === install;
+  if (install === bidStr) return true;
+  return syncBrowserIdFromToken(token);
 }
 
 let didMigrateSessionToLocal = false;
@@ -100,20 +115,14 @@ export function getStoredAccessToken() {
   try {
     const st = (sessionStorage.getItem(AUTH_TOKEN_KEY) || "").trim();
     if (st) {
-      if (!tokenMatchesThisInstall(st)) {
-        clearAuthSession();
-        return null;
-      }
+      if (!tokenMatchesThisInstall(st)) return null;
       return st;
     }
 
     const remember = (localStorage.getItem(AUTH_REMEMBER_KEY) || "").trim();
     const lt = (localStorage.getItem(AUTH_TOKEN_KEY) || "").trim();
     if (!lt) return null;
-    if (!tokenMatchesThisInstall(lt)) {
-      clearAuthSession();
-      return null;
-    }
+    if (!tokenMatchesThisInstall(lt)) return null;
     // Explicit "this browser is not remembered" — do not hydrate from localStorage.
     if (remember === "0") return null;
 
@@ -142,6 +151,7 @@ export function getStoredAccessToken() {
 export function setStoredAccessToken(token, remember = true) {
   try {
     if (token) {
+      syncBrowserIdFromToken(token);
       sessionStorage.setItem(AUTH_TOKEN_KEY, token);
       if (remember) {
         localStorage.setItem(AUTH_TOKEN_KEY, token);

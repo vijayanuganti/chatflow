@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
+import { SplashScreen } from "@capacitor/splash-screen";
 import { MessageCircle, Phone, User as UserIcon, Loader2, ShieldCheck, Search, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -98,8 +100,11 @@ export default function LoginPage() {
         }
       }
       login(res.data.user, res.data.access_token, staySignedIn);
+      if (Capacitor.isNativePlatform()) {
+        void SplashScreen.hide({ fadeOutDuration: 0 }).catch(() => {});
+      }
       toast.success(`Welcome back, ${res.data.user.full_name}!`);
-      if (res.data.user.role === "admin") navigate("/admin", { replace: true });
+      if ((res.data.user.role || "").toLowerCase() === "admin") navigate("/admin", { replace: true });
       else navigate("/chat", { replace: true });
     } catch (err) {
       toast.error(formatApiError(err));

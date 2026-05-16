@@ -71,12 +71,10 @@ export default function NewConversationPage() {
 
   const finishWithConversation = (conv) => {
     if (panel === "admin") {
-      navigate("/admin/mychats", {
-        replace: true,
-        state: {
-          pendingChat: { selectedConv: conv, mobileChatStep: "chat" },
-        },
-      });
+      navigate(
+        { pathname: "/admin/mychats", search: `?c=${encodeURIComponent(conv.id)}` },
+        { push: true },
+      );
       return;
     }
     navigate("/chat", {

@@ -1,10 +1,11 @@
-import React, { useCallback, useContext, useEffect, useState } from "react";
+import React, { useCallback, useContext, useEffect, useRef, useState } from "react";
 import {
   api,
   clearAuthSession,
   getStoredAccessToken,
   setStoredAccessToken,
   setStoredUser,
+  syncBrowserIdFromToken,
   AUTH_TOKEN_KEY,
   AUTH_USER_KEY,
   AUTH_REMEMBER_KEY,
@@ -12,6 +13,13 @@ import {
 import { syncNativeAuthForPush, clearNativeAuth } from "../lib/nativeAuthSync";
 
 const AuthContext = React.createContext(null);
+
+function normalizeUser(userData) {
+  if (!userData || typeof userData !== "object") return userData;
+  const u = { ...userData };
+  if (typeof u.role === "string") u.role = u.role.trim().toLowerCase();
+  return u;
+}
 
 /**
  * JWT is kept in `sessionStorage` for every tab. When "Stay signed in" is on
@@ -22,6 +30,7 @@ const AuthContext = React.createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUserState] = useState(null);
   const [loading, setLoading] = useState(true);
+  const bootGenerationRef = useRef(0);
 
   /** Updates React state and mirrors the user into storage when non-null. */
   const setUser = useCallback((next) => {
@@ -43,8 +52,10 @@ export function AuthProvider({ children }) {
     let cancelled = false;
 
     async function boot() {
+      const generation = ++bootGenerationRef.current;
+
       if (!getStoredAccessToken()) {
-        if (!cancelled) {
+        if (!cancelled && generation === bootGenerationRef.current) {
           setUserState(null);
           setLoading(false);
         }
@@ -53,8 +64,8 @@ export function AuthProvider({ children }) {
 
       try {
         const res = await api.get("/auth/verify");
-        if (!cancelled) {
-          const u = res.data?.user || null;
+        if (!cancelled && generation === bootGenerationRef.current) {
+          const u = normalizeUser(res.data?.user || null);
           setUserState(u);
           if (u) {
             const remember = (() => {
@@ -71,10 +82,14 @@ export function AuthProvider({ children }) {
           }
         }
       } catch {
-        clearAuthSession();
-        if (!cancelled) setUserState(null);
+        if (!cancelled && generation === bootGenerationRef.current) {
+          clearAuthSession();
+          setUserState(null);
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && generation === bootGenerationRef.current) {
+          setLoading(false);
+        }
       }
     }
 
@@ -106,7 +121,7 @@ export function AuthProvider({ children }) {
       api
         .get("/auth/verify")
         .then((res) => {
-          const u = res.data?.user || null;
+          const u = normalizeUser(res.data?.user || null);
           setUserState(u);
           if (u) {
             setStoredUser(u, readRemember());
@@ -136,10 +151,16 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = useCallback((userData, accessToken, staySignedIn = true) => {
-    if (accessToken) setStoredAccessToken(accessToken, staySignedIn);
+    // Ignore any in-flight session restore so it cannot overwrite this login.
+    bootGenerationRef.current += 1;
+    if (accessToken) {
+      syncBrowserIdFromToken(accessToken);
+      setStoredAccessToken(accessToken, staySignedIn);
+    }
     if (userData) setStoredUser(userData, staySignedIn);
     else clearAuthSession();
-    setUserState(userData || null);
+    setUserState(normalizeUser(userData) || null);
+    setLoading(false);
     void syncNativeAuthForPush();
   }, []);
 

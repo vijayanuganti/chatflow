@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Loader2, ShieldAlert, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import MobilePageShell from "@/components/layout/MobilePageShell";
@@ -9,7 +9,13 @@ import MedicalProfileFields, {
   formToMedicalProfile,
   MEDICAL_PROFILE_DEFAULTS,
 } from "@/components/MedicalProfileFields";
-import { medicalPath, panelBase, profilePath, userAccountPath } from "@/lib/appRoutes";
+import {
+  medicalPath,
+  panelBase,
+  profilePath,
+  resolveBackTo,
+  userAccountPath,
+} from "@/lib/appRoutes";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
@@ -17,17 +23,33 @@ import { toast } from "sonner";
 export default function MedicalProfilePage() {
   const { userId: routeUserId } = useParams();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const { user: me } = useAuth();
 
   const userId = routeUserId || me?.id;
   const initialMode = searchParams.get("mode") === "edit" ? "edit" : "view";
 
-  const backTo = useMemo(() => {
+  const defaultBackTo = useMemo(() => {
     if (me?.role === "admin" && routeUserId) return userAccountPath(routeUserId);
     if (me?.role === "client") return profilePath("client");
     return panelBase(me?.role);
   }, [me?.role, routeUserId]);
+
+  const backTo = resolveBackTo(location.state, defaultBackTo);
+  const pendingChat = location.state?.pendingChat;
+
+  const handleBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    if (pendingChat?.selectedConv?.id) {
+      navigate(backTo, { replace: true, state: { pendingChat } });
+      return;
+    }
+    navigate(backTo);
+  };
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -138,7 +160,7 @@ export default function MedicalProfilePage() {
     <MobilePageShell
       title="Medical profile"
       description={description}
-      backTo={backTo}
+      onBack={handleBack}
       testId="medical-profile-page"
       footer={footer}
     >

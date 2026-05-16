@@ -37,7 +37,10 @@ export default function useMobileChatViewport() {
       // With `interactive-widget=resizes-content`, `innerHeight` tracks the
       // visible area when the keyboard opens. `vv.height` + `offsetTop` would
       // double-apply and fight scroll-into-view on the focused input.
-      html.style.setProperty("--visual-vh", `${window.innerHeight}px`);
+      const inner = window.innerHeight || 0;
+      const client = document.documentElement?.clientHeight || 0;
+      const h = Math.max(inner, client, 320);
+      html.style.setProperty("--visual-vh", `${h}px`);
       html.style.setProperty("--vv-offset-top", "0px");
       html.style.setProperty("--vv-offset-left", "0px");
     };

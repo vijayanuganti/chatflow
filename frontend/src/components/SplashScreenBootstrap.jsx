@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Capacitor } from "@capacitor/core";
 import { SplashScreen } from "@capacitor/splash-screen";
@@ -12,7 +12,7 @@ const MIN_SPLASH_MS = 3000;
  * as soon as React paints so this overlay is always what the user sees.
  */
 export default function SplashScreenBootstrap() {
-  const { loading } = useAuth();
+  const { loading, user } = useAuth();
   const bootStartRef = useRef(Date.now());
   const hiddenRef = useRef(false);
   const nativeHiddenRef = useRef(false);
@@ -35,19 +35,28 @@ export default function SplashScreenBootstrap() {
     return () => cancelAnimationFrame(id);
   }, []);
 
+  const dismissSplash = useCallback(() => {
+    if (hiddenRef.current) return;
+    hiddenRef.current = true;
+    setVisible(false);
+  }, []);
+
+  /** Hide as soon as auth finishes, or immediately once the user is signed in. */
   useEffect(() => {
-    if (!Capacitor.isNativePlatform() || loading || hiddenRef.current) return undefined;
+    if (!Capacitor.isNativePlatform() || hiddenRef.current) return undefined;
+
+    if (user?.id) {
+      dismissSplash();
+      return undefined;
+    }
+
+    if (loading) return undefined;
 
     const elapsed = Date.now() - bootStartRef.current;
     const delay = Math.max(0, MIN_SPLASH_MS - elapsed);
-
-    const timer = window.setTimeout(() => {
-      hiddenRef.current = true;
-      setVisible(false);
-    }, delay);
-
+    const timer = window.setTimeout(dismissSplash, delay);
     return () => window.clearTimeout(timer);
-  }, [loading]);
+  }, [loading, user?.id, dismissSplash]);
 
   if (!Capacitor.isNativePlatform() || !visible) return null;
 

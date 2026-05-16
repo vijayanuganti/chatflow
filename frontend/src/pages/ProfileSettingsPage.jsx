@@ -54,6 +54,14 @@ export default function ProfileSettingsPage() {
   const { user, setUser } = useAuth();
   const { theme, setTheme, chatTheme, setChatTheme } = useTheme();
   const backTo = panelBase(user?.role);
+
+  const handleBack = () => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate(backTo);
+  };
   const [tab, setTab] = useState("profile");
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -172,7 +180,7 @@ export default function ProfileSettingsPage() {
     <MobilePageShell
       title="Profile & Settings"
       description="Manage your identity on ChatFlow."
-      backTo={backTo}
+      onBack={handleBack}
       testId="profile-settings-page"
     >
         <Tabs value={tab} onValueChange={setTab} className="min-w-0 w-full">

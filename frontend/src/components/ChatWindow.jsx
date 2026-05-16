@@ -30,7 +30,14 @@ import { formatWhatsAppLastSeen } from "@/lib/datetime";
 import { useAuth } from "@/context/AuthContext";
 import Avatar from "./Avatar";
 import MessageBubble from "./MessageBubble";
-import { dietPlanPath, medicalPath, userProfilePath } from "@/lib/appRoutes";
+import {
+  adminChatTabBackTo,
+  buildPendingChatState,
+  dietPlanPath,
+  medicalPath,
+  panelBase,
+  userProfilePath,
+} from "@/lib/appRoutes";
 import { toast } from "sonner";
 import { Capacitor } from "@capacitor/core";
 import { setActiveChatState, clearActiveChatState } from "@/lib/activeChatState";
@@ -48,11 +55,33 @@ export default function ChatWindow({
   sendTyping,
   readOnly = false,
   onBack,
+  /** Base path for profile / diet / medical back navigation (e.g. /chat, /admin/mychats). */
+  chatBackTo,
+  /** Admin tab when embedded in AdminDashboard (chats | mychats | batches). */
+  adminChatTab = null,
   /** When true (e.g. admin full-screen chat with TopBar hidden), reserve space under the OS status bar. */
   statusBarInset = false,
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
+
+  const resolvedBackTo =
+    chatBackTo ??
+    (user?.role === "admin" && adminChatTab
+      ? adminChatTabBackTo(adminChatTab)
+      : panelBase(user?.role));
+
+  const subPageState = (extra = {}) => {
+    const pendingChat =
+      adminChatTab && conversation?.id
+        ? buildPendingChatState({ tab: adminChatTab, conversation })
+        : undefined;
+    return {
+      backTo: resolvedBackTo,
+      ...(pendingChat ? { pendingChat } : {}),
+      ...extra,
+    };
+  };
   const [threadSearchOpen, setThreadSearchOpen] = useState(false);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [selectedMessage, setSelectedMessage] = useState(null);
@@ -461,7 +490,7 @@ export default function ChatWindow({
     if (!conversation || isGroup || !otherUser?.id) return;
     navigate(userProfilePath(user?.role, otherUser.id), {
       state: {
-        backTo: user?.role === "admin" ? "/admin/mychats" : "/chat",
+        ...subPageState(),
         conversationId: conversation.id,
         profile: otherUser,
         isMuted: !!conversation.is_muted,
@@ -486,7 +515,7 @@ export default function ChatWindow({
       user?.role === "client"
         ? dietPlanPath(user.role)
         : dietPlanPath(user?.role, otherUser?.id);
-    navigate(path, { state: { client: dietClient, backTo: "/chat" } });
+    navigate(path, { state: subPageState({ client: dietClient }) });
   };
 
   return (
@@ -574,7 +603,9 @@ export default function ChatWindow({
               size="sm"
               variant="outline"
               className="rounded-full hidden sm:inline-flex"
-              onClick={() => navigate(medicalPath(user?.role, otherUser.id))}
+              onClick={() =>
+                navigate(medicalPath(user?.role, otherUser.id), { state: subPageState() })
+              }
               data-testid="chat-header-medical-btn"
               title="View medical profile"
             >
@@ -585,7 +616,9 @@ export default function ChatWindow({
               size="icon"
               variant="outline"
               className="rounded-full sm:hidden"
-              onClick={() => navigate(medicalPath(user?.role, otherUser.id))}
+              onClick={() =>
+                navigate(medicalPath(user?.role, otherUser.id), { state: subPageState() })
+              }
               data-testid="chat-header-medical-btn-mobile"
               title="View medical profile"
             >

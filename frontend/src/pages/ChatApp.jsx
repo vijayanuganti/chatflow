@@ -1,12 +1,16 @@
 import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
-import { createAccountPath, newConversationPath } from "@/lib/appRoutes";
-import ComplaintDialog from "@/components/ComplaintDialog";
+import {
+  createAccountPath,
+  newConversationPath,
+  newConversationState,
+  raiseComplaintPath,
+} from "@/lib/appRoutes";
 import TopBar from "@/components/TopBar";
 import useChatSocket from "@/hooks/useChatSocket";
-import useDoubleBackToExit from "@/hooks/useDoubleBackToExit";
+import usePanelMobileBack from "@/hooks/usePanelMobileBack";
 import useMobileChatViewport from "@/hooks/useMobileChatViewport";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -48,6 +52,11 @@ import { Plus, MessageSquare, UtensilsCrossed, Settings, Layers } from "lucide-r
 import PanelBottomNav from "@/components/layout/PanelBottomNav";
 import ProfileQuickView from "@/components/ProfileQuickView";
 import { dietPlanPath, profilePath, userProfilePath } from "@/lib/appRoutes";
+import {
+  chatListTarget,
+  chatOpenTarget,
+  getChatConversationId,
+} from "@/lib/chatMobileNav";
 import { saveChatListScroll } from "@/lib/chatListScroll";
 import {
   patchConversationPrefs,
@@ -60,6 +69,8 @@ export default function ChatApp() {
   const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const chatConvIdFromUrl = getChatConversationId(searchParams);
   const [conversations, setConversations] = useState([]);
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -75,7 +86,6 @@ export default function ChatApp() {
   useEffect(() => {
     if (user?.id) loadCacheFromStorage(user.id);
   }, [user?.id]);
-  const [complaintOpen, setComplaintOpen] = useState(false);
   const [selectedBatchId, setSelectedBatchId] = useState(null);
   const [batches, setBatches] = useState([]);
   const [mobileSection, setMobileSection] = useState("chats"); // chats | diet | batches | settings
@@ -86,13 +96,39 @@ export default function ChatApp() {
     user?.role === "admin" ||
     (user?.role === "employee" && !!user?.account_creation_access);
 
-  // Open conversation when user taps a push notification (including cold start).
+  // Open conversation from push notification or ?c= in URL.
   useEffect(() => {
-    const convId = location.state?.conversationId;
+    const convId = chatConvIdFromUrl || location.state?.conversationId;
     if (!convId || conversations.length === 0) return;
     const target = conversations.find((c) => c.id === convId);
     if (target) setSelected(target);
-  }, [location.state?.conversationId, conversations]);
+  }, [chatConvIdFromUrl, location.state?.conversationId, conversations]);
+
+  /** Sync list view when ?c= is cleared (browser / system back). */
+  useEffect(() => {
+    if (chatConvIdFromUrl) return;
+    setSelected((prev) => (prev ? null : prev));
+  }, [chatConvIdFromUrl]);
+
+  const openChat = useCallback(
+    (conv) => {
+      if (!conv?.id) return;
+      setListSelection(null);
+      setSelected(conv);
+      setMobileSection("chats");
+      navigate(chatOpenTarget(conv.id), { push: true });
+    },
+    [navigate],
+  );
+
+  const closeChat = useCallback(() => {
+    if (chatConvIdFromUrl) {
+      navigate(-1);
+      return;
+    }
+    setSelected(null);
+    navigate(chatListTarget(), { replace: true });
+  }, [chatConvIdFromUrl, navigate]);
 
   // Return from full-screen new-conversation page with a started thread.
   useEffect(() => {
@@ -100,11 +136,11 @@ export default function ChatApp() {
     if (!conv?.id) return;
     setConversations((prev) => (prev.some((c) => c.id === conv.id) ? prev : [conv, ...prev]));
     setSelected(conv);
-    navigate("/chat", { replace: true, state: {} });
+    navigate(chatOpenTarget(conv.id), { replace: true });
   }, [location.state?.selectedConversation, navigate]);
 
   const openNewConversation = useCallback(() => {
-    navigate(newConversationPath(), { state: { backTo: "/chat", panel: "chat" } });
+    navigate(newConversationPath(), { state: newConversationState(user?.role) });
   }, [navigate]);
 
   const handlePreferenceChange = useCallback(async (convId, patch) => {
@@ -569,23 +605,25 @@ export default function ChatApp() {
     document.title = unreadTotal > 0 ? `(${unreadTotal}) ChatFlow` : "ChatFlow";
   }, [unreadTotal]);
 
-  // System back button: when a chat is open it returns to the conversation
-  // list. At the list itself the back press is trapped (the hook re-pushes
-  // its sentinel) so the user never falls back onto /login or some stale
-  // browser entry — they leave the app via the system home / task switcher
-  // just like a native app.
-  const pushSentinel = useDoubleBackToExit({
-    onBeforeExitBack: () => {
-      if (listSelection) {
-        setListSelection(null);
-        return true;
-      }
-      if (selectedIdRef.current) {
-        setSelected(null);
-        return true;
-      }
-      return false;
-    },
+  const handlePanelBack = useCallback(() => {
+    if (listSelection) {
+      setListSelection(null);
+      return true;
+    }
+    if (chatConvIdFromUrl) {
+      navigate(-1);
+      return true;
+    }
+    return false;
+  }, [listSelection, chatConvIdFromUrl, navigate]);
+
+  usePanelMobileBack({
+    enabled: user?.role === "client" || user?.role === "employee",
+    onBack: handlePanelBack,
+    onExitApp: () =>
+      (user?.role === "client" || user?.role === "employee") &&
+      !chatConvIdFromUrl &&
+      location.pathname === "/chat",
   });
 
   const openUserProfile = useCallback((profileUser, conv) => {
@@ -605,15 +643,7 @@ export default function ChatApp() {
     setQuickView({ conv, user: profileUser });
   }, []);
 
-  // Whenever a new conversation is selected we re-anchor the sentinel so a
-  // subsequent system Back press is guaranteed to land in our handler (and
-  // thus close the chat) rather than walk through the browser's accumulated
-  // history.
-  useEffect(() => {
-    if (selected?.id) pushSentinel();
-  }, [selected?.id, pushSentinel]);
-
-  const showMobileFooter = !selected;
+  const showMobileFooter = !selected && !chatConvIdFromUrl;
   const isClient = user?.role === "client";
   const isEmployee = user?.role === "employee";
 
@@ -642,7 +672,11 @@ export default function ChatApp() {
                   })
               : undefined
           }
-          onRaiseComplaint={user?.role === "client" ? () => setComplaintOpen(true) : undefined}
+          onRaiseComplaint={
+            user?.role === "client"
+              ? () => navigate(raiseComplaintPath(), { push: true })
+              : undefined
+          }
         />
       </div>
 
@@ -652,7 +686,7 @@ export default function ChatApp() {
             conversations={filteredConversations}
             onlineUsers={onlineUsers}
             selectedId={selected?.id}
-            onSelect={(c) => { setListSelection(null); setSelected(c); setMobileSection("chats"); }}
+            onSelect={(c) => openChat(c)}
             onNewChat={openNewConversation}
             batches={batches}
             selectedBatchId={selectedBatchId}
@@ -665,7 +699,7 @@ export default function ChatApp() {
             listScrollRef={listScrollRef}
           />
         </div>
-        <main className={`${selected ? "flex" : "hidden md:flex"} min-h-0 flex-1 flex-col overflow-hidden`}>
+        <main className={`${selected || chatConvIdFromUrl ? "flex" : "hidden md:flex"} min-h-0 flex-1 flex-col overflow-hidden`}>
           <ChatWindow
             conversation={selected}
             messages={messages}
@@ -675,7 +709,8 @@ export default function ChatApp() {
             onlineUsers={onlineUsers}
             lastSeenByUser={lastSeenByUser}
             sendTyping={sendTyping}
-            onBack={() => setSelected(null)}
+            onBack={closeChat}
+            chatBackTo="/chat"
           />
         </main>
       </div>
@@ -708,7 +743,11 @@ export default function ChatApp() {
               active: mobileSection === "chats",
               badge: unreadTotal,
               testId: "client-nav-chats",
-              onClick: () => { setListSelection(null); setMobileSection("chats"); },
+              onClick: () => {
+                setListSelection(null);
+                setMobileSection("chats");
+                navigate(chatListTarget(), { replace: true });
+              },
             },
             {
               id: "diet",
@@ -718,7 +757,10 @@ export default function ChatApp() {
               testId: "client-nav-diet",
               onClick: () => {
                 if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
-                navigate(dietPlanPath("client"), { state: { backTo: "/chat", startFromDayOne: true } });
+                navigate(dietPlanPath("client"), {
+                  push: true,
+                  state: { backTo: "/chat", startFromDayOne: true },
+                });
               },
             },
             {
@@ -729,7 +771,7 @@ export default function ChatApp() {
               testId: "client-nav-settings",
               onClick: () => {
                 if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
-                navigate(profilePath("client"));
+                navigate(profilePath("client"), { push: true });
               },
             },
           ]}
@@ -748,7 +790,11 @@ export default function ChatApp() {
               active: mobileSection === "chats",
               badge: unreadTotal,
               testId: "employee-nav-chats",
-              onClick: () => { setListSelection(null); setMobileSection("chats"); },
+              onClick: () => {
+                setListSelection(null);
+                setMobileSection("chats");
+                navigate(chatListTarget(), { replace: true });
+              },
             },
             {
               id: "batches",
@@ -769,7 +815,7 @@ export default function ChatApp() {
               testId: "employee-nav-settings",
               onClick: () => {
                 if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
-                navigate(profilePath("employee"));
+                navigate(profilePath("employee"), { push: true });
               },
             },
           ]}
@@ -786,7 +832,7 @@ export default function ChatApp() {
         onChat={() => {
           const c = quickView?.conv;
           setQuickView(null);
-          if (c) { setListSelection(null); setSelected(c); }
+          if (c) openChat(c);
         }}
         onInfo={() => {
           const { conv, user: u } = quickView || {};
@@ -795,9 +841,6 @@ export default function ChatApp() {
         }}
       />
 
-      {user?.role === "client" && (
-        <ComplaintDialog open={complaintOpen} onOpenChange={setComplaintOpen} />
-      )}
     </div>
   );
 }
