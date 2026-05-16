@@ -6,7 +6,15 @@ import {
   getFcmTokenPostUrl,
   waitUntilAuthenticated,
 } from "./api";
-import { playInboundMessageTone, notificationToneSuppressesOsSound } from "./notificationTone";
+import {
+  playInboundMessageTone,
+  playConversationIncomingTone,
+  playSoftForegroundTone,
+  notificationToneSuppressesOsSound,
+} from "./notificationTone";
+import { isInActiveConversation } from "./activeChatState";
+import { markMessageSeen } from "./messageSeen";
+import { showInAppMessageBanner } from "./inAppNotifications";
 import { syncNativeAuthForPush, ChatFlowNative } from "./nativeAuthSync";
 
 export const FCM_MESSAGE_EVENT = "chatflow:fcm-message";
@@ -215,35 +223,60 @@ export async function initCapacitorPush(userId, onNotificationAction, onMarkRead
     await PushNotifications.addListener("registrationError", onRegistrationError),
     // Log only — never call removeAllDeliveredNotifications / removeDeliveredNotifications here.
     await PushNotifications.addListener("pushNotificationReceived", async (notification) => {
+      const data = notification?.data || {};
+      const convId = data.conversation_id ? String(data.conversation_id) : "";
+      const title = notification?.title || data.title || "ChatFlow";
+      const body = notification?.body || data.body || "";
+      const appVisible = document.visibilityState === "visible";
+      const inActiveChat = appVisible && isInActiveConversation(convId);
+
       logPush(
         "pushNotificationReceived:",
-        notification?.id ?? notification?.title,
+        notification?.id ?? title,
         "visible=",
         document.visibilityState,
+        "inActiveChat=",
+        inActiveChat,
       );
-      const data = notification?.data || {};
-      if (Capacitor.getPlatform() === "android" && data?.message_id) {
-        try {
-          await ChatFlowNative.showMessageNotification({
-            messageId: String(data.message_id),
-            conversationId: data.conversation_id ? String(data.conversation_id) : "",
-            title: notification?.title || data.title || "ChatFlow",
-            body: notification?.body || data.body || "",
-          });
-        } catch (err) {
-          console.warn("[push] native showMessageNotification failed:", err);
-        }
-      }
+
       try {
         window.dispatchEvent(
-          new CustomEvent(FCM_MESSAGE_EVENT, { detail: { notification, data } }),
+          new CustomEvent(FCM_MESSAGE_EVENT, {
+            detail: {
+              notification,
+              data,
+              inActiveChat,
+              foreground: appVisible,
+            },
+          }),
         );
       } catch {
         /* ignore */
       }
-      if (document.visibilityState !== "visible" && notificationToneSuppressesOsSound()) {
-        void playInboundMessageTone();
+
+      if (!appVisible) {
+        if (notificationToneSuppressesOsSound()) {
+          void playInboundMessageTone();
+        }
+        return;
       }
+
+      if (inActiveChat) {
+        if (data.message_id) markMessageSeen(data.message_id);
+        return;
+      }
+
+      void playSoftForegroundTone();
+      showInAppMessageBanner({
+        title,
+        body,
+        conversationId: convId,
+        onOpen: () => {
+          onNotificationActionRef?.({
+            data: { conversation_id: convId },
+          });
+        },
+      });
     }),
     await PushNotifications.addListener("pushNotificationActionPerformed", (event) => {
       const data = event?.notification?.data || {};

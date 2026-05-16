@@ -25,6 +25,49 @@ public class ChatFlowNativePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void setActiveChat(PluginCall call) {
+        boolean inChat = Boolean.TRUE.equals(call.getBoolean("inChat", false));
+        String conversationId = call.getString("conversationId", "");
+        android.content.Context ctx = getContext().getApplicationContext();
+        ChatFlowAppState.setActiveChat(ctx, inChat, conversationId == null ? "" : conversationId);
+        ChatFlowAuthStore.setActiveConversationId(ctx, conversationId == null ? "" : conversationId);
+        if (inChat) {
+            ChatFlowAppState.setAppForeground(ctx, true);
+        }
+        JSObject result = new JSObject();
+        result.put("inChat", inChat);
+        result.put("conversationId", conversationId == null ? "" : conversationId);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void setAppForeground(PluginCall call) {
+        boolean foreground = Boolean.TRUE.equals(call.getBoolean("foreground", false));
+        ChatFlowAppState.setAppForeground(getContext().getApplicationContext(), foreground);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void setConversationSoundsEnabled(PluginCall call) {
+        boolean enabled = call.getBoolean("enabled", true);
+        ChatFlowAuthStore.setConversationSoundsEnabled(
+                getContext().getApplicationContext(), enabled);
+        JSObject result = new JSObject();
+        result.put("enabled", enabled);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void getConversationSoundsEnabled(PluginCall call) {
+        boolean enabled =
+                ChatFlowAuthStore.isConversationSoundsEnabled(
+                        getContext().getApplicationContext());
+        JSObject result = new JSObject();
+        result.put("enabled", enabled);
+        call.resolve(result);
+    }
+
+    @PluginMethod
     public void showMessageNotification(PluginCall call) {
         String messageId = call.getString("messageId", "");
         String conversationId = call.getString("conversationId", "");

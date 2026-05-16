@@ -389,11 +389,11 @@ export function MedicalProfileReadOnly({ profile }) {
   ];
 
   return (
-    <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800" data-testid="med-readonly">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="med-readonly">
       {rows.map(([label, key]) => (
-        <div key={key} className="px-4 py-2.5 grid grid-cols-3 gap-3 items-start">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400 col-span-1">{label}</div>
-          <div className="text-sm text-gray-800 dark:text-gray-200 col-span-2 whitespace-pre-wrap break-words" data-testid={`med-ro-${key}`}>
+        <div key={key} className="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 flex flex-col gap-1.5">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500 dark:text-gray-400">{label}</div>
+          <div className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words" data-testid={`med-ro-${key}`}>
             {humanizeMedicalValue(key, profile[key])}
           </div>
         </div>

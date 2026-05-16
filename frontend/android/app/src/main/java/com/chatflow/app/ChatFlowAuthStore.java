@@ -15,6 +15,10 @@ public final class ChatFlowAuthStore {
     private static final String KEY_ACCESS_TOKEN = "access_token";
     private static final String KEY_API_BASE = "api_base_url";
     private static final String KEY_BROWSER_ID = "browser_id";
+    /** In-chat incoming/outgoing sounds (Profile → Alerts). Default true. */
+    public static final String KEY_CONVERSATION_SOUNDS_ENABLED = "conversation_sounds_enabled";
+    /** Open chat thread — synced from WebView for FCM suppress (commit for immediate read). */
+    public static final String KEY_ACTIVE_CONVERSATION_ID = "active_conversation_id";
 
     private ChatFlowAuthStore() {}
 
@@ -90,6 +94,39 @@ public final class ChatFlowAuthStore {
 
     public static boolean hasCredentials(Context context) {
         return hasAuthToken(context) && !getApiBase(context).isEmpty();
+    }
+
+    public static void setConversationSoundsEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_CONVERSATION_SOUNDS_ENABLED, enabled).apply();
+    }
+
+    public static boolean isConversationSoundsEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_CONVERSATION_SOUNDS_ENABLED, true);
+    }
+
+    public static SharedPreferences getSharedPrefs(Context context) {
+        return prefs(context);
+    }
+
+    public static void setActiveConversationId(Context context, String conversationId) {
+        SharedPreferences.Editor editor = prefs(context).edit();
+        if (conversationId == null || conversationId.trim().isEmpty()) {
+            editor.remove(KEY_ACTIVE_CONVERSATION_ID);
+        } else {
+            editor.putString(KEY_ACTIVE_CONVERSATION_ID, conversationId.trim());
+        }
+        editor.commit();
+        Log.i(
+                TAG,
+                "active_conversation_id="
+                        + (conversationId == null || conversationId.trim().isEmpty()
+                                ? "(cleared)"
+                                : conversationId.trim()));
+    }
+
+    public static String getActiveConversationId(Context context) {
+        String id = prefs(context).getString(KEY_ACTIVE_CONVERSATION_ID, null);
+        return id == null ? "" : id.trim();
     }
 
     private static SharedPreferences prefs(Context context) {

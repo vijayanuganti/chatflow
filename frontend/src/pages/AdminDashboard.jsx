@@ -1,9 +1,8 @@
-import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+﻿import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import NewChatDialog from "@/components/NewChatDialog";
-import ProfileDialog from "@/components/ProfileDialog";
 import TopBar from "@/components/TopBar";
 import useChatSocket from "@/hooks/useChatSocket";
 import useDoubleBackToExit from "@/hooks/useDoubleBackToExit";
@@ -30,9 +29,13 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import Avatar from "@/components/Avatar";
-import CreateAccountDialog from "@/components/CreateAccountDialog";
-import ResetPasswordDialog from "@/components/ResetPasswordDialog";
-import MedicalProfileDialog from "@/components/MedicalProfileDialog";
+import {
+  createAccountPath,
+  medicalPath,
+  profilePath,
+  resetPasswordPath,
+  userAccountPath,
+} from "@/lib/appRoutes";
 import {
   Dialog,
   DialogContent,
@@ -51,7 +54,7 @@ function pathForAdminTab(t) {
 }
 
 function formatStorageBytes(n) {
-  if (n == null || Number.isNaN(Number(n))) return "—";
+  if (n == null || Number.isNaN(Number(n))) return "â€”";
   const v = Number(n);
   if (v < 1024) return `${Math.round(v)} B`;
   if (v < 1024 ** 2) return `${(v / 1024).toFixed(1)} KB`;
@@ -73,7 +76,7 @@ function StorageMeter({ title, usedBytes, quotaBytes, freeBytes, percentUsed, su
             {formatStorageBytes(usedBytes)} used
             {quotaBytes != null && (
               <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
-                {" "}· {formatStorageBytes(freeBytes)} free
+                {" "}Â· {formatStorageBytes(freeBytes)} free
               </span>
             )}
           </div>
@@ -176,15 +179,9 @@ export default function AdminDashboard() {
   const [activityTarget, setActivityTarget] = useState(null);
   const [activityData, setActivityData] = useState(null);
   const [newChatOpen, setNewChatOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [createAccountOpen, setCreateAccountOpen] = useState(false);
-  const [resetPwdTarget, setResetPwdTarget] = useState(null);
   const [permissionSavingId, setPermissionSavingId] = useState(null);
   const [activeSavingId, setActiveSavingId] = useState(null);
-  const [userDetail, setUserDetail] = useState(null);
-  const [userDetailLoading, setUserDetailLoading] = useState(false);
   const [clientStatusFilter, setClientStatusFilter] = useState("all"); // all | active | inactive
-  const [medicalTarget, setMedicalTarget] = useState(null); // { user, mode }
   const [newBatchOpen, setNewBatchOpen] = useState(false);
   const [moveClientTarget, setMoveClientTarget] = useState(null); // client doc
   const [complaints, setComplaints] = useState([]);
@@ -335,7 +332,7 @@ export default function AdminDashboard() {
     })();
   }, []);
 
-  // Service worker tells us when the admin taps a chat notification — jump to
+  // Service worker tells us when the admin taps a chat notification â€” jump to
   // My Chats and focus that conversation.
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
@@ -382,7 +379,7 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    // Clear only when the *conversation id* changes — not when `selected` is
+    // Clear only when the *conversation id* changes â€” not when `selected` is
     // replaced by a new object for the same chat (sidebar) or when
     // `loadMessages` is recreated after `myConvs` updates (that was clearing the
     // thread after every send).
@@ -415,6 +412,12 @@ export default function AdminDashboard() {
     await Promise.all([loadOverview(), loadEmployees()]);
     toast.success("Account list refreshed");
   }, [loadOverview, loadEmployees]);
+
+  useEffect(() => {
+    if (!location.state?.refreshAccounts) return;
+    void handleAccountCreated();
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.state, location.pathname, handleAccountCreated, navigate]);
 
   const toggleActive = useCallback(async (target, nextActive) => {
     if (!target || target.role === "admin") return;
@@ -468,18 +471,9 @@ export default function AdminDashboard() {
     }
   }, []);
 
-  const openUserDetail = useCallback(async (u) => {
-    setUserDetailLoading(true);
-    setUserDetail({ user: u });
-    try {
-      const res = await api.get(`/admin/users/${u.id}`);
-      setUserDetail(res.data);
-    } catch (err) {
-      toast.error(formatApiError(err));
-    } finally {
-      setUserDetailLoading(false);
-    }
-  }, []);
+  const openUserDetail = useCallback((u) => {
+    navigate(userAccountPath(u.id));
+  }, [navigate]);
 
   const handleIncoming = useCallback((msg) => {
     const recipientIds = Array.isArray(msg?.recipient_ids) ? msg.recipient_ids : [];
@@ -581,15 +575,24 @@ export default function AdminDashboard() {
   }, [user.id]);
 
   const handleStatusUpdate = useCallback((data) => {
-    if (!data?.message_id || !data?.status) return;
-    const messageId = String(data.message_id);
+    if (!data?.status) return;
     const nextStatus = String(data.status).toLowerCase();
+    const ids = data.message_ids?.length
+      ? data.message_ids.map((id) => String(id))
+      : data.message_id
+        ? [String(data.message_id)]
+        : [];
+    if (!ids.length) return;
+    const idSet = new Set(ids);
     setMessages((prev) => {
       let changed = false;
       const next = prev.map((m) => {
-        if (String(m.id) !== messageId) return m;
+        if (!idSet.has(String(m.id))) return m;
         changed = true;
-        return { ...m, status: nextStatus };
+        const cur = (m.status || "sent").toLowerCase();
+        const order = { sent: 0, delivered: 1, seen: 2 };
+        const status = (order[nextStatus] ?? 0) >= (order[cur] ?? 0) ? nextStatus : cur;
+        return { ...m, status };
       });
       return changed ? next : prev;
     });
@@ -661,18 +664,18 @@ export default function AdminDashboard() {
   const currentConvs = tab === "mychats" ? myConvs : allConvs;
 
   const topbarTitle = (() => {
-    if (tab === "overview") return "Admin · Overview";
-    if (tab === "more") return "Admin · Settings";
-    if (tab === "batches") return "Admin · Batches";
-    if (tab === "chats") return "Admin · Monitor";
-    if (tab === "mychats") return "Admin · My Chats";
-    if (tab === "users") return "Admin · Users";
-    if (tab === "activity") return "Admin · Activity";
-    if (tab === "accounts") return "Admin · Accounts";
-    if (tab === "permissions") return "Admin · Permissions";
-    if (tab === "inactive") return "Admin · Inactive clients";
-    if (tab === "complaints") return "Admin · Complaint box";
-    if (tab === "storage") return "Admin · Storage";
+    if (tab === "overview") return "Admin Â· Overview";
+    if (tab === "more") return "Admin Â· Settings";
+    if (tab === "batches") return "Admin Â· Batches";
+    if (tab === "chats") return "Admin Â· Monitor";
+    if (tab === "mychats") return "Admin Â· My Chats";
+    if (tab === "users") return "Admin Â· Users";
+    if (tab === "activity") return "Admin Â· Activity";
+    if (tab === "accounts") return "Admin Â· Accounts";
+    if (tab === "permissions") return "Admin Â· Permissions";
+    if (tab === "inactive") return "Admin Â· Inactive clients";
+    if (tab === "complaints") return "Admin Â· Complaint box";
+    if (tab === "storage") return "Admin Â· Storage";
     return "Admin";
   })();
 
@@ -796,11 +799,15 @@ export default function AdminDashboard() {
     >
       <div className={`shrink-0 ${mobileInChat ? "hidden md:block" : ""}`}>
         <TopBar
-          onOpenSettings={() => setProfileOpen(true)}
+          onOpenSettings={() => navigate(profilePath("admin"))}
           title={topbarTitle}
           onBack={topbarOnBack}
           unreadTotal={unreadTotal}
-          onCreateAccount={() => setCreateAccountOpen(true)}
+          onCreateAccount={() =>
+            navigate(createAccountPath("admin"), {
+              state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/accounts" },
+            })
+          }
         />
       </div>
 
@@ -844,17 +851,17 @@ export default function AdminDashboard() {
               <p className="text-gray-500 dark:text-gray-400 mt-1">Monitor conversations and chat with anyone on the platform.</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-              <StatCard icon={Users} label="Total users" value={stats?.total_users ?? "—"} testId="stat-total-users" />
-              <StatCard icon={Briefcase} label="Employees" value={stats?.employees ?? "—"} testId="stat-employees" accent="bg-amber-50 text-amber-900" />
-              <StatCard icon={UserCircle2} label="Clients" value={stats?.clients ?? "—"} testId="stat-clients" accent="bg-sky-50 text-sky-900" />
-              <StatCard icon={UserCheck} label="Active clients" value={stats?.active_clients ?? "—"} testId="stat-active-clients" accent="bg-emerald-50 text-emerald-900" />
+              <StatCard icon={Users} label="Total users" value={stats?.total_users ?? "â€”"} testId="stat-total-users" />
+              <StatCard icon={Briefcase} label="Employees" value={stats?.employees ?? "â€”"} testId="stat-employees" accent="bg-amber-50 text-amber-900" />
+              <StatCard icon={UserCircle2} label="Clients" value={stats?.clients ?? "â€”"} testId="stat-clients" accent="bg-sky-50 text-sky-900" />
+              <StatCard icon={UserCheck} label="Active clients" value={stats?.active_clients ?? "â€”"} testId="stat-active-clients" accent="bg-emerald-50 text-emerald-900" />
               <button
                 type="button"
                 onClick={() => goToTab("inactive")}
                 className="text-left"
                 data-testid="stat-inactive-clients-btn"
               >
-                <StatCard icon={UserX} label="Inactive clients" value={stats?.inactive_clients ?? "—"} testId="stat-inactive-clients" accent="bg-rose-50 text-rose-900" />
+                <StatCard icon={UserX} label="Inactive clients" value={stats?.inactive_clients ?? "â€”"} testId="stat-inactive-clients" accent="bg-rose-50 text-rose-900" />
               </button>
               <button
                 type="button"
@@ -862,14 +869,14 @@ export default function AdminDashboard() {
                 className="text-left"
                 data-testid="stat-complaints-btn"
               >
-                <StatCard icon={Inbox} label="Open complaints" value={stats?.complaints_pending ?? "—"} testId="stat-complaints-open" accent="bg-rose-50 text-rose-900" />
+                <StatCard icon={Inbox} label="Open complaints" value={stats?.complaints_pending ?? "â€”"} testId="stat-complaints-open" accent="bg-rose-50 text-rose-900" />
               </button>
             </div>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
               <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 min-w-0">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="font-display text-lg sm:text-xl font-semibold dark:text-gray-100">Latest activity</h2>
-                  <Button variant="ghost" className="text-xs sm:text-sm px-2 sm:px-3" onClick={() => goToTab("chats")} data-testid="overview-view-all-chats">View all →</Button>
+                  <Button variant="ghost" className="text-xs sm:text-sm px-2 sm:px-3" onClick={() => goToTab("chats")} data-testid="overview-view-all-chats">View all â†’</Button>
                 </div>
                 <div className="divide-y divide-gray-100 dark:divide-gray-800">
                   {allConvs.slice(0, 6).map((c) => (
@@ -886,7 +893,7 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-sm truncate dark:text-gray-100">
-                          {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(" ↔ ")}
+                          {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(" â†” ")}
                         </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{c.last_message || "No messages"}</div>
                       </div>
@@ -901,7 +908,13 @@ export default function AdminDashboard() {
                   <h2 className="font-display text-lg sm:text-xl font-semibold dark:text-gray-100">Quick actions</h2>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button onClick={() => setCreateAccountOpen(true)} data-testid="overview-create-account-btn" className="p-4 rounded-2xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/15 text-left min-w-0">
+                  <button
+                    onClick={() =>
+                      navigate(createAccountPath("admin"), {
+                        state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin" },
+                      })
+                    }
+                    data-testid="overview-create-account-btn" className="p-4 rounded-2xl border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 hover:bg-emerald-100 dark:hover:bg-emerald-500/15 text-left min-w-0">
                     <UserPlus className="h-5 w-5 text-emerald-900 dark:text-emerald-300 mb-2" />
                     <div className="font-semibold dark:text-gray-100">Create account</div>
                     <div className="text-xs text-gray-600 dark:text-gray-300 mt-1">Add employee or client</div>
@@ -951,7 +964,7 @@ export default function AdminDashboard() {
             </div>
             <button
               type="button"
-              onClick={() => setProfileOpen(true)}
+              onClick={() => navigate(profilePath("admin"))}
               className="flex w-full min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-emerald-900 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-emerald-200"
               data-testid="more-profile-btn"
             >
@@ -1184,7 +1197,7 @@ export default function AdminDashboard() {
                     <Avatar name={activityData.user.full_name} avatarUrl={activityData.user.avatar_url} online={onlineUsers[activityData.user.id]} status={activityData.user.status} size={64} />
                     <div className="min-w-0">
                       <h1 className="font-display text-2xl font-semibold dark:text-gray-100 truncate">{activityData.user.full_name}</h1>
-                      <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">@{activityData.user.username} · {activityData.user.role}</div>
+                      <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">@{activityData.user.username} Â· {activityData.user.role}</div>
                       {activityData.user.bio && <p className="mt-2 text-sm text-gray-600 dark:text-gray-300 max-w-md">{activityData.user.bio}</p>}
                     </div>
                   </div>
@@ -1212,7 +1225,7 @@ export default function AdminDashboard() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-sm truncate dark:text-gray-100">
-                              {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(" ↔ ")}
+                              {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(" â†” ")}
                             </div>
                             <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{c.last_message || "No messages"}</div>
                           </div>
@@ -1234,13 +1247,17 @@ export default function AdminDashboard() {
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-accounts-pane">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
               <div>
-                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin · Accounts</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin Â· Accounts</div>
                 <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Create accounts</h1>
                 <p className="text-gray-500 dark:text-gray-400 mt-1">Provision employees and clients. Only authorised users may sign in.</p>
               </div>
               <Button
                 className="rounded-full bg-emerald-900 hover:bg-emerald-950 self-start sm:self-auto"
-                onClick={() => setCreateAccountOpen(true)}
+                onClick={() =>
+                  navigate(createAccountPath("admin"), {
+                    state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/accounts" },
+                  })
+                }
                 data-testid="accounts-create-btn"
               >
                 <UserPlus className="h-4 w-4 mr-1.5" />
@@ -1249,9 +1266,9 @@ export default function AdminDashboard() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
-              <StatCard icon={Users} label="Total users" value={stats?.total_users ?? "—"} testId="accounts-stat-total" />
-              <StatCard icon={Briefcase} label="Employees" value={stats?.employees ?? "—"} testId="accounts-stat-employees" accent="bg-amber-50 text-amber-900" />
-              <StatCard icon={UserCircle2} label="Clients" value={stats?.clients ?? "—"} testId="accounts-stat-clients" accent="bg-sky-50 text-sky-900" />
+              <StatCard icon={Users} label="Total users" value={stats?.total_users ?? "â€”"} testId="accounts-stat-total" />
+              <StatCard icon={Briefcase} label="Employees" value={stats?.employees ?? "â€”"} testId="accounts-stat-employees" accent="bg-amber-50 text-amber-900" />
+              <StatCard icon={UserCircle2} label="Clients" value={stats?.clients ?? "â€”"} testId="accounts-stat-clients" accent="bg-sky-50 text-sky-900" />
             </div>
 
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
@@ -1274,12 +1291,12 @@ export default function AdminDashboard() {
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-sm truncate dark:text-gray-100">{u.full_name}</div>
                           <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                            @{u.username} · {u.phone_number || "no phone"}
+                            @{u.username} Â· {u.phone_number || "no phone"}
                           </div>
                         </div>
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">
-                        Created {u.created_at ? new Date(u.created_at).toLocaleString() : "—"}
+                        Created {u.created_at ? new Date(u.created_at).toLocaleString() : "â€”"}
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400 hidden lg:block">
                         by {u.created_by ? (usersById[u.created_by]?.full_name || "Unknown") : <span className="italic">system</span>}
@@ -1300,7 +1317,7 @@ export default function AdminDashboard() {
         {tab === "permissions" && (
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-permissions-pane">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin · Permissions</div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin Â· Permissions</div>
               <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Delegated permissions</h1>
               <p className="text-gray-500 dark:text-gray-400 mt-1">
                 Grant trusted employees the ability to create client accounts. Revoke at any time.
@@ -1323,7 +1340,7 @@ export default function AdminDashboard() {
                       <Avatar name={e.full_name} avatarUrl={e.avatar_url} status={e.status} online={onlineUsers[e.id]} size={40} />
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-sm truncate dark:text-gray-100">{e.full_name}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">@{e.username} · {e.phone_number || "no phone"}</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">@{e.username} Â· {e.phone_number || "no phone"}</div>
                       </div>
                       <span className={`hidden sm:inline text-[11px] px-2 py-1 rounded-full ${granted ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-500/20 dark:text-emerald-200" : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"}`}>
                         {granted ? "Can create clients" : "No creation access"}
@@ -1345,11 +1362,11 @@ export default function AdminDashboard() {
         {tab === "inactive" && (
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-inactive-pane">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-rose-700 dark:text-rose-300">Admin · Archive</div>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-rose-700 dark:text-rose-300">Admin Â· Archive</div>
               <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Inactive clients</h1>
               <p className="text-gray-500 dark:text-gray-400 mt-1">
                 Clients whose service period has ended. Their chats and batch
-                history are preserved here — reactivate them whenever you want
+                history are preserved here â€” reactivate them whenever you want
                 to grant access again.
               </p>
             </div>
@@ -1377,7 +1394,7 @@ export default function AdminDashboard() {
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-sm truncate dark:text-gray-100">{u.full_name}</div>
                             <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                              @{u.username} · <span className="font-mono">{u.phone_number || "—"}</span>
+                              @{u.username} Â· <span className="font-mono">{u.phone_number || "â€”"}</span>
                             </div>
                             {u.inactive_at && (
                               <div className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5">
@@ -1392,7 +1409,7 @@ export default function AdminDashboard() {
                             size="sm"
                             variant="outline"
                             className="rounded-full"
-                            onClick={() => setMedicalTarget({ userId: u.id, mode: "view" })}
+                            onClick={() => navigate(medicalPath("admin", u.id))}
                             data-testid={`inactive-medical-${u.id}`}
                           >
                             <Stethoscope className="h-3.5 w-3.5 mr-1" />
@@ -1431,12 +1448,12 @@ export default function AdminDashboard() {
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-complaints-pane">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
               <div>
-                <div className="text-[10px] uppercase tracking-[0.2em] text-rose-700 dark:text-rose-300">Admin · Complaint box</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-rose-700 dark:text-rose-300">Admin Â· Complaint box</div>
                 <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Complaint box</h1>
                 <p className="text-gray-500 dark:text-gray-400 mt-1 max-w-xl">
                   Complaints raised by clients about their dietitians or the
                   service. Mark them solved once you've reached out and the
-                  client confirms — they'll still see them in their history.
+                  client confirms â€” they'll still see them in their history.
                 </p>
               </div>
               <Button
@@ -1455,9 +1472,9 @@ export default function AdminDashboard() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
-              <StatCard icon={Inbox} label="Pending" value={stats?.complaints_pending ?? "—"} testId="complaints-stat-pending" accent="bg-rose-50 text-rose-900" />
-              <StatCard icon={CheckCircle2} label="Solved" value={stats?.complaints_solved ?? "—"} testId="complaints-stat-solved" accent="bg-emerald-50 text-emerald-900" />
-              <StatCard icon={Users} label="Active clients" value={stats?.active_clients ?? "—"} testId="complaints-stat-active" accent="bg-sky-50 text-sky-900" />
+              <StatCard icon={Inbox} label="Pending" value={stats?.complaints_pending ?? "â€”"} testId="complaints-stat-pending" accent="bg-rose-50 text-rose-900" />
+              <StatCard icon={CheckCircle2} label="Solved" value={stats?.complaints_solved ?? "â€”"} testId="complaints-stat-solved" accent="bg-emerald-50 text-emerald-900" />
+              <StatCard icon={Users} label="Active clients" value={stats?.active_clients ?? "â€”"} testId="complaints-stat-active" accent="bg-sky-50 text-sky-900" />
             </div>
 
             <div className="inline-flex rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden text-xs" data-testid="complaints-filter">
@@ -1485,7 +1502,7 @@ export default function AdminDashboard() {
             <div className="space-y-3">
               {complaintsLoading && complaints.length === 0 && (
                 <div className="py-10 text-center text-sm text-gray-400 dark:text-gray-500" data-testid="complaints-loading">
-                  Loading complaints…
+                  Loading complaintsâ€¦
                 </div>
               )}
               {!complaintsLoading && complaints.length === 0 && (
@@ -1510,7 +1527,7 @@ export default function AdminDashboard() {
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-storage-pane">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
               <div>
-                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin · Storage</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin Â· Storage</div>
                 <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Storage & cleanup</h1>
                 <p className="text-gray-500 dark:text-gray-400 mt-1 max-w-2xl">
                   Database footprint (MongoDB) and chat uploads bucket (S3 <code className="text-xs">uploads/</code>).
@@ -1532,7 +1549,7 @@ export default function AdminDashboard() {
             </div>
 
             {storageLoading && !storage && (
-              <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Loading storage…</div>
+              <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Loading storageâ€¦</div>
             )}
 
             {storage && (
@@ -1546,7 +1563,7 @@ export default function AdminDashboard() {
                   subtitle={
                     storage.database?.error
                       ? storage.database.error
-                      : `${storage.database?.collections ?? "—"} collections · ${storage.database?.objects ?? "—"} objects`
+                      : `${storage.database?.collections ?? "â€”"} collections Â· ${storage.database?.objects ?? "â€”"} objects`
                   }
                   testId="storage-meter-db"
                 />
@@ -1561,7 +1578,7 @@ export default function AdminDashboard() {
                       ? storage.object_storage.error
                       : (storage.object_storage?.configured
                         ? `${storage.object_storage?.object_count ?? 0} objects under ${storage.object_storage?.prefix || "uploads/"} in ${storage.object_storage?.bucket || "bucket"}`
-                        : "S3 not configured — uploads are stored on the server disk (not counted here).")
+                        : "S3 not configured â€” uploads are stored on the server disk (not counted here).")
                   }
                   testId="storage-meter-s3"
                 />
@@ -1571,7 +1588,7 @@ export default function AdminDashboard() {
             <div className="rounded-2xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/50 dark:bg-rose-950/20 p-4 sm:p-6 space-y-4 max-w-4xl">
               <div className="flex items-center gap-2 text-rose-900 dark:text-rose-200 font-display font-semibold">
                 <Trash2 className="h-5 w-5" />
-                Free space — delete data
+                Free space â€” delete data
               </div>
               <p className="text-sm text-rose-900/90 dark:text-rose-200/90">
                 Deleting a user removes their account, complaints, diet days, and chat they participated in (direct chats are removed entirely; in groups their messages are removed).
@@ -1579,14 +1596,14 @@ export default function AdminDashboard() {
               </p>
               <div className="space-y-2">
                 <div className="text-xs font-medium text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                  Conversations (first 80 — use Monitor for full list)
+                  Conversations (first 80 â€” use Monitor for full list)
                 </div>
                 <div className="max-h-64 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
                   {(allConvs || []).slice(0, 80).map((c) => (
                     <div key={c.id} className="px-3 py-2 flex items-center justify-between gap-2 text-sm">
                       <div className="min-w-0">
                         <div className="font-medium truncate dark:text-gray-100">
-                          {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(" ↔ ")}
+                          {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(" â†” ")}
                         </div>
                         <div className="text-[11px] text-gray-500 dark:text-gray-400 font-mono truncate">{c.id}</div>
                       </div>
@@ -1618,7 +1635,11 @@ export default function AdminDashboard() {
                 <h1 className="font-display text-2xl sm:text-3xl font-semibold dark:text-gray-100">Users</h1>
                 <Button
                   className="rounded-full bg-emerald-900 hover:bg-emerald-950 sm:hidden"
-                  onClick={() => setCreateAccountOpen(true)}
+                  onClick={() =>
+                  navigate(createAccountPath("admin"), {
+                    state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/accounts" },
+                  })
+                }
                   size="sm"
                   data-testid="users-create-account-btn-mobile"
                 >
@@ -1649,7 +1670,11 @@ export default function AdminDashboard() {
                 </div>
                 <Button
                   className="rounded-full bg-emerald-900 hover:bg-emerald-950 hidden sm:inline-flex"
-                  onClick={() => setCreateAccountOpen(true)}
+                  onClick={() =>
+                  navigate(createAccountPath("admin"), {
+                    state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/accounts" },
+                  })
+                }
                   data-testid="users-create-account-btn"
                 >
                   <UserPlus className="h-4 w-4 mr-1.5" />
@@ -1672,7 +1697,7 @@ export default function AdminDashboard() {
                     <Avatar name={u.full_name} avatarUrl={u.avatar_url} online={onlineUsers[u.id]} status={u.status} size={40} />
                     <div className="min-w-0 flex-1">
                       <div className="font-medium truncate dark:text-gray-100">{u.full_name}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">@{u.username} · {u.phone_number || "—"}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 truncate">@{u.username} Â· {u.phone_number || "â€”"}</div>
                     </div>
                     <span className={`inline-flex text-[11px] px-2 py-1 rounded-full shrink-0 ${
                       u.role === "admin" ? "bg-amber-100 text-amber-900 dark:bg-amber-500/20 dark:text-amber-200"
@@ -1683,7 +1708,7 @@ export default function AdminDashboard() {
                   <div className="mt-3 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 gap-2 flex-wrap">
                     <span className="inline-flex items-center gap-2">
                       <span className={`h-2 w-2 rounded-full ${onlineUsers[u.id] ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600"}`} />
-                      {onlineUsers[u.id] ? "Online" : "Offline"} · {u.status || "available"}
+                      {onlineUsers[u.id] ? "Online" : "Offline"} Â· {u.status || "available"}
                     </span>
                     {u.role !== "admin" && (
                       <span
@@ -1728,7 +1753,7 @@ export default function AdminDashboard() {
                       )
                     )}
                     {u.role !== "admin" && (
-                      <Button size="sm" variant="outline" className="rounded-full" onClick={() => setResetPwdTarget(u)} data-testid={`users-reset-mobile-${u.id}`}>
+                      <Button size="sm" variant="outline" className="rounded-full" onClick={() => navigate(resetPasswordPath(u.id))} data-testid={`users-reset-mobile-${u.id}`}>
                         Reset
                       </Button>
                     )}
@@ -1788,7 +1813,7 @@ export default function AdminDashboard() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-gray-300 font-mono text-xs">{u.phone_number || "—"}</td>
+                      <td className="px-4 py-3 text-gray-600 dark:text-gray-300 font-mono text-xs">{u.phone_number || "â€”"}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex text-xs px-2 py-1 rounded-full ${
                           u.role === "admin" ? "bg-amber-100 text-amber-900"
@@ -1803,7 +1828,7 @@ export default function AdminDashboard() {
                       </td>
                       <td className="px-4 py-3">
                         {u.role === "admin" ? (
-                          <span className="text-xs text-gray-400">—</span>
+                          <span className="text-xs text-gray-400">â€”</span>
                         ) : (
                           <span
                             className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${
@@ -1821,7 +1846,7 @@ export default function AdminDashboard() {
                       <td className="px-4 py-3">
                         <span className="inline-flex items-center gap-2 text-xs">
                           <span className={`h-2 w-2 rounded-full ${onlineUsers[u.id] ? "bg-emerald-500" : "bg-gray-300"}`} />
-                          {onlineUsers[u.id] ? "Online" : "Offline"} · {u.status || "available"}
+                          {onlineUsers[u.id] ? "Online" : "Offline"} Â· {u.status || "available"}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">
@@ -1830,7 +1855,7 @@ export default function AdminDashboard() {
                           : <span className="italic">system</span>}
                       </td>
                       <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">
-                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}
+                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : "â€”"}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="inline-flex gap-2">
@@ -1872,7 +1897,7 @@ export default function AdminDashboard() {
                               size="sm"
                               variant="outline"
                               className="rounded-full"
-                              onClick={() => setMedicalTarget({ userId: u.id, mode: "view" })}
+                              onClick={() => navigate(medicalPath("admin", u.id))}
                               data-testid={`users-medical-${u.id}`}
                             >
                               <Stethoscope className="h-3.5 w-3.5 mr-1" />
@@ -1880,7 +1905,7 @@ export default function AdminDashboard() {
                             </Button>
                           )}
                           {u.role !== "admin" && (
-                            <Button size="sm" variant="outline" className="rounded-full" onClick={() => setResetPwdTarget(u)} data-testid={`users-reset-${u.id}`}>
+                            <Button size="sm" variant="outline" className="rounded-full" onClick={() => navigate(resetPasswordPath(u.id))} data-testid={`users-reset-${u.id}`}>
                               <KeyRound className="h-3.5 w-3.5 mr-1" />
                               Reset
                             </Button>
@@ -1920,19 +1945,6 @@ export default function AdminDashboard() {
         onSelectUser={handleStartDirect}
         onCreateGroup={handleCreateGroup}
         onlineUsers={onlineUsers}
-      />
-      <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
-      <CreateAccountDialog
-        open={createAccountOpen}
-        onOpenChange={setCreateAccountOpen}
-        allowedRoles={["employee", "client"]}
-        defaultRole="employee"
-        onCreated={handleAccountCreated}
-      />
-      <ResetPasswordDialog
-        open={!!resetPwdTarget}
-        onOpenChange={(v) => !v && setResetPwdTarget(null)}
-        targetUser={resetPwdTarget}
       />
       <Dialog open={!!deleteUserTarget} onOpenChange={(v) => !v && !deleteBusy && setDeleteUserTarget(null)}>
         <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-md bg-white dark:bg-gray-950" data-testid="delete-user-dialog">
@@ -1983,39 +1995,6 @@ export default function AdminDashboard() {
           </div>
         </DialogContent>
       </Dialog>
-      <UserDetailDialog
-        open={!!userDetail}
-        loading={userDetailLoading}
-        data={userDetail}
-        onOpenChange={(v) => !v && setUserDetail(null)}
-        onResetPassword={(u) => { setUserDetail(null); setResetPwdTarget(u); }}
-        onToggleActive={async (u, nextActive) => {
-          await toggleActive(u, nextActive);
-          setUserDetail((prev) =>
-            prev && prev.user && prev.user.id === u.id
-              ? {
-                  ...prev,
-                  user: {
-                    ...prev.user,
-                    is_active: nextActive,
-                    inactive_at: nextActive ? null : new Date().toISOString(),
-                  },
-                }
-              : prev,
-          );
-        }}
-        toggleBusy={!!activeSavingId}
-        onViewMedical={(u) => setMedicalTarget({ userId: u.id, mode: "view" })}
-        onEditMedical={(u) => setMedicalTarget({ userId: u.id, mode: "edit" })}
-      />
-
-      <MedicalProfileDialog
-        open={!!medicalTarget}
-        onOpenChange={(v) => !v && setMedicalTarget(null)}
-        userId={medicalTarget?.userId}
-        initialMode={medicalTarget?.mode || "view"}
-      />
-
       <NewBatchDialog
         open={newBatchOpen}
         onOpenChange={setNewBatchOpen}
@@ -2188,9 +2167,9 @@ function ComplaintCard({ complaint, saving, onMarkSolved, onReopen }) {
               {complaint.client?.full_name || "Client"}
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-              {complaint.client?.phone_number || "—"}
-              {" · "}
-              {complaint.created_at ? new Date(complaint.created_at).toLocaleString() : "—"}
+              {complaint.client?.phone_number || "â€”"}
+              {" Â· "}
+              {complaint.created_at ? new Date(complaint.created_at).toLocaleString() : "â€”"}
             </div>
           </div>
         </div>
@@ -2248,8 +2227,8 @@ function ComplaintCard({ complaint, saving, onMarkSolved, onReopen }) {
           </p>
           {complaint.resolver?.full_name && (
             <div className="text-[11px] text-emerald-700 dark:text-emerald-200 mt-2">
-              — {complaint.resolver.full_name}
-              {complaint.resolved_at ? ` · ${new Date(complaint.resolved_at).toLocaleString()}` : ""}
+              â€” {complaint.resolver.full_name}
+              {complaint.resolved_at ? ` Â· ${new Date(complaint.resolved_at).toLocaleString()}` : ""}
             </div>
           )}
         </div>
@@ -2322,140 +2301,6 @@ function ComplaintCard({ complaint, saving, onMarkSolved, onReopen }) {
   );
 }
 
-function UserDetailDialog({ open, loading, data, onOpenChange, onResetPassword, onToggleActive, toggleBusy, onViewMedical, onEditMedical }) {
-  const user = data?.user;
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-1rem)] sm:max-w-lg max-h-[90dvh] overflow-y-auto p-4 sm:p-6" data-testid="user-detail-dialog">
-        <DialogHeader>
-          <DialogTitle className="font-display">Account details</DialogTitle>
-          <DialogDescription>Account lineage and the most recent admin actions on this user.</DialogDescription>
-        </DialogHeader>
-
-        {!user ? (
-          <div className="py-8 text-center text-sm text-gray-400">{loading ? "Loading…" : "No user selected"}</div>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <Avatar name={user.full_name} avatarUrl={user.avatar_url} status={user.status} size={56} />
-              <div className="min-w-0 flex-1">
-                <div className="font-display font-semibold text-lg truncate">{user.full_name}</div>
-                <div className="text-xs text-gray-500 truncate">@{user.username} · <span className="capitalize">{user.role}</span></div>
-              </div>
-            </div>
-
-            <DetailRow label="Phone number" value={<span className="font-mono">{user.phone_number || "—"}</span>} />
-            <DetailRow label="Created at" value={user.created_at ? new Date(user.created_at).toLocaleString() : "—"} />
-            <DetailRow
-              label="Created by"
-              value={
-                data?.created_by_user
-                  ? <span><span className="font-medium">{data.created_by_user.full_name}</span> <span className="text-gray-500">(@{data.created_by_user.username})</span></span>
-                  : <span className="italic text-gray-500">System / seed</span>
-              }
-            />
-            {user.role === "employee" && (
-              <DetailRow
-                label="Account creation access"
-                value={
-                  user.account_creation_access
-                    ? <span className="inline-flex items-center gap-1 text-emerald-800"><ShieldCheck className="h-4 w-4" /> Granted</span>
-                    : <span className="text-gray-500">Not granted</span>
-                }
-              />
-            )}
-            {user.role === "client" && user.employee_id && (
-              <DetailRow label="Assigned employee" value={<span className="font-mono text-xs">{user.employee_id}</span>} />
-            )}
-            <DetailRow
-              label="Last password reset"
-              value={
-                data?.password_reset_by_user
-                  ? <span>by <span className="font-medium">{data.password_reset_by_user.full_name}</span>{user.password_reset_at ? ` · ${new Date(user.password_reset_at).toLocaleString()}` : ""}</span>
-                  : <span className="text-gray-500">Never</span>
-              }
-            />
-            {user.role !== "admin" && (
-              <DetailRow
-                label="Active status"
-                value={
-                  user.is_active === false
-                    ? <span className="inline-flex items-center gap-1 text-rose-700"><PowerOff className="h-4 w-4" /> Inactive {user.inactive_at ? `· ${new Date(user.inactive_at).toLocaleDateString()}` : ""}</span>
-                    : <span className="inline-flex items-center gap-1 text-emerald-800"><Power className="h-4 w-4" /> Active</span>
-                }
-              />
-            )}
-
-            {user.role === "client" && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <Button
-                  variant="outline"
-                  className="rounded-full"
-                  onClick={() => onViewMedical?.(user)}
-                  data-testid="user-detail-view-medical"
-                >
-                  <Stethoscope className="h-4 w-4 mr-1.5" /> View medical profile
-                </Button>
-                <Button
-                  variant="outline"
-                  className="rounded-full text-emerald-900 border-emerald-200 hover:bg-emerald-50"
-                  onClick={() => onEditMedical?.(user)}
-                  data-testid="user-detail-edit-medical"
-                >
-                  <Stethoscope className="h-4 w-4 mr-1.5" /> Edit medical profile
-                </Button>
-              </div>
-            )}
-
-            {user.role !== "admin" && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
-                <Button onClick={() => onResetPassword?.(user)} className="rounded-full bg-emerald-900 hover:bg-emerald-950" data-testid="user-detail-reset-password">
-                  <KeyRound className="h-4 w-4 mr-1.5" /> Reset password
-                </Button>
-                {user.role === "client" && (
-                  user.is_active === false ? (
-                    <Button
-                      onClick={() => onToggleActive?.(user, true)}
-                      disabled={toggleBusy}
-                      variant="outline"
-                      className="rounded-full text-emerald-800 border-emerald-200 hover:bg-emerald-50"
-                      data-testid="user-detail-activate"
-                    >
-                      <Power className="h-4 w-4 mr-1.5" /> Reactivate client
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={() => {
-                        if (window.confirm(`Mark ${user.full_name} as inactive? They will lose login access but their chat history is preserved.`)) {
-                          onToggleActive?.(user, false);
-                        }
-                      }}
-                      disabled={toggleBusy}
-                      variant="outline"
-                      className="rounded-full text-rose-700 border-rose-200 hover:bg-rose-50"
-                      data-testid="user-detail-deactivate"
-                    >
-                      <PowerOff className="h-4 w-4 mr-1.5" /> Deactivate client
-                    </Button>
-                  )
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function DetailRow({ label, value }) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-2 border-b border-gray-100 last:border-b-0">
-      <span className="text-xs uppercase tracking-[0.18em] text-gray-500">{label}</span>
-      <span className="text-sm text-gray-800 text-right">{value}</span>
-    </div>
-  );
-}
 
 function NewBatchDialog({ open, onOpenChange, employee, onCreated }) {
   const [name, setName] = useState("");
@@ -2532,7 +2377,7 @@ function NewBatchDialog({ open, onOpenChange, employee, onCreated }) {
             className="w-full h-11 rounded-full bg-emerald-900 hover:bg-emerald-950"
             data-testid="admin-new-batch-submit"
           >
-            {saving ? "Creating…" : "Create batch"}
+            {saving ? "Creatingâ€¦" : "Create batch"}
           </Button>
         </form>
       </DialogContent>
@@ -2612,7 +2457,7 @@ function MoveClientDialog({ open, onOpenChange, client, currentEmployeeId, curre
               className="h-11 w-full rounded-xl border border-gray-200 dark:border-gray-700 px-3 bg-white dark:bg-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
               data-testid="admin-move-employee-select"
             >
-              <option value="">Select employee…</option>
+              <option value="">Select employeeâ€¦</option>
               {(employees || []).map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.full_name}{e.id === currentEmployeeId ? " (current)" : ""}
@@ -2630,7 +2475,7 @@ function MoveClientDialog({ open, onOpenChange, client, currentEmployeeId, curre
               data-testid="admin-move-batch-select"
             >
               <option value="">
-                {!targetEmployee ? "Pick an employee first" : loadingBatches ? "Loading…" : "Select batch…"}
+                {!targetEmployee ? "Pick an employee first" : loadingBatches ? "Loadingâ€¦" : "Select batchâ€¦"}
               </option>
               {batches.map((b) => {
                 const full = (b.client_count || 0) >= (b.max_clients || 20);
@@ -2638,7 +2483,7 @@ function MoveClientDialog({ open, onOpenChange, client, currentEmployeeId, curre
                 return (
                   <option key={b.id} value={b.id} disabled={full && !isCurrent}>
                     {b.name} ({b.client_count || 0}/{b.max_clients || 20})
-                    {full ? " · full" : ""}{isCurrent ? " · current" : ""}
+                    {full ? " Â· full" : ""}{isCurrent ? " Â· current" : ""}
                   </option>
                 );
               })}
@@ -2651,7 +2496,7 @@ function MoveClientDialog({ open, onOpenChange, client, currentEmployeeId, curre
             data-testid="admin-move-client-submit"
           >
             <ArrowRightLeft className="h-4 w-4 mr-1.5" />
-            {saving ? "Moving…" : "Move client"}
+            {saving ? "Movingâ€¦" : "Move client"}
           </Button>
         </form>
       </DialogContent>

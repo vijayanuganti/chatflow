@@ -35,6 +35,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(ChatFlowNativePlugin.class);
         super.onCreate(savedInstanceState);
         createNotificationChannel();
+        ChatFlowNotificationHelper.ensureForegroundChannel(this);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
@@ -45,6 +46,18 @@ public class MainActivity extends BridgeActivity {
                         REQ_POST_NOTIFICATIONS);
             }
         }
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        ChatFlowAppState.setAppForeground(this, true);
+    }
+
+    @Override
+    public void onStop() {
+        ChatFlowAppState.setAppForeground(this, false);
+        super.onStop();
     }
 
     @Override

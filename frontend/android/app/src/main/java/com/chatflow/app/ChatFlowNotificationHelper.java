@@ -6,11 +6,13 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.os.Build;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.Person;
 import androidx.core.app.RemoteInput;
+import androidx.core.graphics.drawable.IconCompat;
 import com.google.firebase.messaging.RemoteMessage;
 import java.util.Map;
 import java.util.UUID;
@@ -24,6 +26,9 @@ public final class ChatFlowNotificationHelper {
 
     /** Dedicated channel — never shared with Capacitor's generic channel setup. */
     public static final String CHANNEL_ID = "chatflow_messages_actions";
+
+    /** Low-profile channel when the app is open but not in the active chat. */
+    public static final String CHANNEL_ID_FOREGROUND = "chatflow_messages_foreground";
 
     /** RemoteInput result key — must match {@link NotificationActionReceiver#KEY_TEXT_REPLY}. */
     public static final String KEY_TEXT_REPLY = "key_text_reply";
@@ -63,7 +68,20 @@ public final class ChatFlowNotificationHelper {
             messageId = UUID.randomUUID().toString();
         }
 
-        showMessage(context, messageId, conversationId, title, body);
+        String avatarUrl = data != null ? data.get("sender_avatar_url") : null;
+        showMessage(context, messageId, conversationId, title, body, avatarUrl, false);
+    }
+
+    /** Foreground / other-screen: minimal heads-up, no sound or vibration. */
+    public static void showMessageSoft(
+            Context context,
+            String messageId,
+            String conversationId,
+            String title,
+            String body,
+            String avatarUrl
+    ) {
+        showMessage(context, messageId, conversationId, title, body, avatarUrl, true);
     }
 
     /**
@@ -76,11 +94,33 @@ public final class ChatFlowNotificationHelper {
             String title,
             String body
     ) {
+        showMessage(context, messageId, conversationId, title, body, null, false);
+    }
+
+    private static void showMessage(
+            Context context,
+            String messageId,
+            String conversationId,
+            String title,
+            String body,
+            String avatarUrl,
+            boolean soft
+    ) {
         if (context == null || messageId == null || messageId.isEmpty()) {
             return;
         }
 
-        ensureActionsChannel(context);
+        if (ChatFlowAppState.shouldSuppressForActiveChat(context, conversationId)) {
+            Log.i(TAG, "showMessage blocked — user in active chat conv=" + conversationId);
+            return;
+        }
+
+        if (soft) {
+            ensureForegroundChannel(context);
+        } else {
+            ensureActionsChannel(context);
+        }
+        String channelId = soft ? CHANNEL_ID_FOREGROUND : CHANNEL_ID;
 
         int notificationId = notificationIdFor(messageId);
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -139,22 +179,29 @@ public final class ChatFlowNotificationHelper {
                 markReadPendingFlags()
         );
 
-        // MessagingStyle helps OEM skins (Samsung / OPPO / Xiaomi) show inline reply UI.
-        Person sender = new Person.Builder()
-                .setName(title != null ? title : "ChatFlow")
-                .build();
+        String senderName = title != null && !title.isEmpty() ? title : "ChatFlow";
+        String messageBody = body != null ? body : "";
+
+        Bitmap avatarBitmap = ChatFlowAvatarLoader.loadForNotification(context, avatarUrl);
+        Person.Builder senderBuilder = new Person.Builder().setName(senderName);
+        if (avatarBitmap != null) {
+            senderBuilder.setIcon(IconCompat.createWithBitmap(avatarBitmap));
+        }
+        Person sender = senderBuilder.build();
+
         NotificationCompat.MessagingStyle messagingStyle = new NotificationCompat.MessagingStyle(
                 new Person.Builder().setName("You").build()
         )
-                .setConversationTitle(title)
-                .addMessage(body != null ? body : "", System.currentTimeMillis(), sender);
+                .setConversationTitle(senderName)
+                .addMessage(messageBody, System.currentTimeMillis(), sender);
 
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, channelId)
                 .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle(title)
-                .setContentText(body)
+                .setContentTitle(senderName)
+                .setContentText(messageBody)
                 .setStyle(messagingStyle)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setPriority(
+                        soft ? NotificationCompat.PRIORITY_LOW : NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
@@ -163,8 +210,24 @@ public final class ChatFlowNotificationHelper {
                 .addAction(replyAction)
                 .addAction(android.R.drawable.ic_menu_view, "Mark as Read", markReadPendingIntent);
 
+        if (avatarBitmap != null) {
+            builder.setLargeIcon(avatarBitmap);
+        }
+
+        if (soft) {
+            builder.setSilent(true).setDefaults(0).setVibrate(null);
+        }
+
         nm.notify(notificationId, builder.build());
-        Log.i(TAG, "Posted notification id=" + notificationId + " channel=" + CHANNEL_ID + " with Reply+MarkAsRead");
+        Log.i(
+                TAG,
+                "Posted notification id="
+                        + notificationId
+                        + " channel="
+                        + channelId
+                        + " soft="
+                        + soft
+                        + " with Reply+MarkAsRead");
     }
 
     public static void cancel(Context context, String messageId) {
@@ -228,5 +291,30 @@ public final class ChatFlowNotificationHelper {
         channel.setShowBadge(true);
         nm.createNotificationChannel(channel);
         Log.i(TAG, "Created channel " + CHANNEL_ID);
+    }
+
+    public static void ensureForegroundChannel(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+        NotificationManager nm = context.getSystemService(NotificationManager.class);
+        if (nm == null) {
+            return;
+        }
+        NotificationChannel existing = nm.getNotificationChannel(CHANNEL_ID_FOREGROUND);
+        if (existing != null) {
+            return;
+        }
+        NotificationChannel channel = new NotificationChannel(
+                CHANNEL_ID_FOREGROUND,
+                "In-app message hints",
+                NotificationManager.IMPORTANCE_LOW
+        );
+        channel.setDescription("Quiet alerts while ChatFlow is open");
+        channel.enableVibration(false);
+        channel.setSound(null, null);
+        channel.setShowBadge(true);
+        nm.createNotificationChannel(channel);
+        Log.i(TAG, "Created channel " + CHANNEL_ID_FOREGROUND);
     }
 }

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Plus,
   Camera,
@@ -33,10 +34,13 @@ import { formatWhatsAppLastSeen } from "@/lib/datetime";
 import { useAuth } from "@/context/AuthContext";
 import Avatar from "./Avatar";
 import MessageBubble from "./MessageBubble";
-import MedicalProfileDialog from "./MedicalProfileDialog";
 import DietPlanDialog from "./DietPlanDialog";
+import { medicalPath } from "@/lib/appRoutes";
 import VoiceRecorder from "./VoiceRecorder";
 import { toast } from "sonner";
+import { Capacitor } from "@capacitor/core";
+import { setActiveChatState, clearActiveChatState } from "@/lib/activeChatState";
+import { ChatFlowNative } from "@/lib/nativeAuthSync";
 
 export default function ChatWindow({
   conversation,
@@ -53,6 +57,7 @@ export default function ChatWindow({
   statusBarInset = false,
 }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [text, setText] = useState("");
   const [composerFocused, setComposerFocused] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -66,10 +71,25 @@ export default function ChatWindow({
   const audioInputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const lastTypingPingRef = useRef(0);
-  const [medicalOpen, setMedicalOpen] = useState(false);
   const [dietOpen, setDietOpen] = useState(false);
   const [lightbox, setLightbox] = useState(null);
   const cameraInputRef = useRef(null);
+
+  // Sync active thread to chatflow_native_prefs immediately (before FCM can fire).
+  useLayoutEffect(() => {
+    const convId = conversation?.id;
+    if (!convId) {
+      void clearActiveChatState();
+      return undefined;
+    }
+    void setActiveChatState(String(convId));
+    if (Capacitor.isNativePlatform()) {
+      void ChatFlowNative.setAppForeground({ foreground: true }).catch(() => {});
+    }
+    return () => {
+      void clearActiveChatState();
+    };
+  }, [conversation?.id]);
 
   /* Only show messages that actually belong to the currently-open
      conversation. Without this, switching from chat A → chat B briefly
@@ -477,7 +497,7 @@ export default function ChatWindow({
               size="sm"
               variant="outline"
               className="rounded-full hidden sm:inline-flex"
-              onClick={() => setMedicalOpen(true)}
+              onClick={() => navigate(medicalPath(user?.role, otherUser.id))}
               data-testid="chat-header-medical-btn"
               title="View medical profile"
             >
@@ -488,7 +508,7 @@ export default function ChatWindow({
               size="icon"
               variant="outline"
               className="rounded-full sm:hidden"
-              onClick={() => setMedicalOpen(true)}
+              onClick={() => navigate(medicalPath(user?.role, otherUser.id))}
               data-testid="chat-header-medical-btn-mobile"
               title="View medical profile"
             >
@@ -530,15 +550,6 @@ export default function ChatWindow({
         )}
         </div>
       </div>
-
-      {!isGroup && otherUser?.role === "client" && (user?.role === "admin" || user?.role === "employee") && (
-        <MedicalProfileDialog
-          open={medicalOpen}
-          onOpenChange={setMedicalOpen}
-          userId={otherUser.id}
-          initialMode="view"
-        />
-      )}
 
       {!isGroup && (
         (otherUser?.role === "client" && (user?.role === "admin" || user?.role === "employee"))

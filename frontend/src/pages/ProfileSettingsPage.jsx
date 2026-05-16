@@ -1,14 +1,15 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+﻿import React, { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Camera, Loader2, Phone, Stethoscope, ShieldAlert, Sun, Moon, Monitor, Bell, Volume2 } from "lucide-react";
-import Avatar from "./Avatar";
-import PasswordInput from "./PasswordInput";
-import { MedicalProfileReadOnly } from "./MedicalProfileFields";
+import { Camera, Loader2, Phone, Stethoscope, ChevronRight, Sun, Moon, Monitor, Bell, Volume2 } from "lucide-react";
+import Avatar from "@/components/Avatar";
+import PasswordInput from "@/components/PasswordInput";
+import MobilePageShell from "@/components/layout/MobilePageShell";
+import { medicalPath, panelBase } from "@/lib/appRoutes";
 import { api, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
@@ -48,9 +49,11 @@ const CHAT_THEME_SWATCH = {
   dots: "from-gray-200 to-slate-300",
 };
 
-export default function ProfileDialog({ open, onOpenChange }) {
+export default function ProfileSettingsPage() {
+  const navigate = useNavigate();
   const { user, setUser } = useAuth();
   const { theme, setTheme, chatTheme, setChatTheme } = useTheme();
+  const backTo = panelBase(user?.role);
   const [tab, setTab] = useState("profile");
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -62,8 +65,6 @@ export default function ProfileDialog({ open, onOpenChange }) {
   const [passForm, setPassForm] = useState({ current_password: "", new_password: "" });
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const fileRef = useRef(null);
-  const [medical, setMedical] = useState(null);
-  const [medicalLoading, setMedicalLoading] = useState(false);
   const [notificationTone, setNotificationToneState] = useState(() => getNotificationTone());
   const [conversationSounds, setConversationSounds] = useState(() => getConversationSoundsEnabled());
   const customToneInputRef = useRef(null);
@@ -75,10 +76,9 @@ export default function ProfileDialog({ open, onOpenChange }) {
     "shrink-0 min-w-[3.5rem] sm:min-w-[4.5rem] flex-1 h-10 rounded-xl px-1 sm:px-0 text-xs sm:text-sm leading-none whitespace-nowrap border border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 data-[state=active]:bg-emerald-50 data-[state=active]:text-emerald-900 data-[state=active]:border-emerald-700 dark:data-[state=active]:bg-emerald-500/15 dark:data-[state=active]:text-emerald-200 dark:data-[state=active]:border-emerald-500/40 data-[state=active]:shadow-none";
 
   useEffect(() => {
-    if (!open) return;
     setNotificationToneState(getNotificationTone());
     void syncConversationSoundsFromNative().then(setConversationSounds);
-  }, [open]);
+  }, []);
 
   useEffect(() => {
     const onTone = () => setNotificationToneState(getNotificationTone());
@@ -87,19 +87,6 @@ export default function ProfileDialog({ open, onOpenChange }) {
   }, []);
 
   useEffect(() => {
-    if (!open || !isClient || tab !== "medical" || medical) return;
-    setMedicalLoading(true);
-    api.get(`/users/${user.id}/medical-profile`)
-      .then((res) => setMedical(res.data))
-      .catch((err) => toast.error(formatApiError(err)))
-      .finally(() => setMedicalLoading(false));
-  }, [open, isClient, tab, medical, user?.id]);
-
-  useEffect(() => {
-    if (!open) setMedical(null);
-  }, [open]);
-
-  React.useEffect(() => {
     if (user) {
       setForm({
         full_name: user.full_name || "",
@@ -108,7 +95,7 @@ export default function ProfileDialog({ open, onOpenChange }) {
         avatar_url: user.avatar_url || null,
       });
     }
-  }, [user, open]);
+  }, [user]);
 
   const update = (k, v) => setForm((prev) => ({ ...prev, [k]: v }));
 
@@ -118,7 +105,7 @@ export default function ProfileDialog({ open, onOpenChange }) {
       const res = await api.put("/users/me", form);
       setUser(res.data);
       toast.success("Profile updated");
-      onOpenChange(false);
+      navigate(backTo);
     } catch (err) {
       toast.error(formatApiError(err));
     } finally {
@@ -182,17 +169,13 @@ export default function ProfileDialog({ open, onOpenChange }) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="w-[calc(100vw-1rem)] max-w-lg sm:w-full max-h-[88dvh] overflow-y-auto p-4 sm:p-6"
-        data-testid="profile-dialog"
-      >
-        <DialogHeader>
-          <DialogTitle className="font-display">Profile & Settings</DialogTitle>
-          <DialogDescription>Manage your identity on ChatFlow.</DialogDescription>
-        </DialogHeader>
-
-        <Tabs value={tab} onValueChange={setTab} className="min-w-0">
+    <MobilePageShell
+      title="Profile & Settings"
+      description="Manage your identity on ChatFlow."
+      backTo={backTo}
+      testId="profile-settings-page"
+    >
+        <Tabs value={tab} onValueChange={setTab} className="min-w-0 w-full">
           <TabsList className="flex w-full max-w-full gap-1.5 overflow-x-auto bg-transparent p-0 h-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <TabsTrigger
               value="profile"
@@ -232,15 +215,6 @@ export default function ProfileDialog({ open, onOpenChange }) {
             >
               Security
             </TabsTrigger>
-            {isClient && (
-              <TabsTrigger
-                value="medical"
-                data-testid="profile-tab-medical"
-                className={tabTrig}
-              >
-                Medical
-              </TabsTrigger>
-            )}
           </TabsList>
 
           <TabsContent value="profile" className="mt-4 space-y-4">
@@ -259,12 +233,12 @@ export default function ProfileDialog({ open, onOpenChange }) {
               </div>
               <div>
                 <div className="font-display font-semibold text-lg dark:text-gray-100">{form.full_name || "Your name"}</div>
-                <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">@{user?.username} · {user?.role}</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">@{user?.username} Â· {user?.role}</div>
               </div>
             </div>
             <div className="space-y-2">
               <Label>Full name</Label>
-              <Input data-testid="profile-fullname-input" value={form.full_name} onChange={(e) => update("full_name", e.target.value)} className="h-11 rounded-xl" />
+              <Input data-testid="profile-fullname-input" value={form.full_name} onChange={(e) => update("full_name", e.target.value)} className="w-full h-11 rounded-xl" />
             </div>
             <div className="space-y-2">
               <Label>Phone number</Label>
@@ -278,12 +252,27 @@ export default function ProfileDialog({ open, onOpenChange }) {
             </div>
             <div className="space-y-2">
               <Label>Bio</Label>
-              <Textarea data-testid="profile-bio-input" value={form.bio} onChange={(e) => update("bio", e.target.value)} rows={3} maxLength={200} className="rounded-xl" placeholder="A little about yourself" />
+              <Textarea data-testid="profile-bio-input" value={form.bio} onChange={(e) => update("bio", e.target.value)} rows={3} maxLength={200} className="w-full rounded-xl" placeholder="A little about yourself" />
               <div className="text-xs text-gray-400 dark:text-gray-500 text-right">{(form.bio || "").length}/200</div>
             </div>
             <Button onClick={saveProfile} disabled={saving} data-testid="save-profile-btn" className="w-full rounded-full bg-emerald-900 hover:bg-emerald-950 h-11">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save changes"}
             </Button>
+            {isClient && (
+              <button
+                type="button"
+                onClick={() => navigate(medicalPath(user?.role))}
+                className="w-full flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 text-left dark:border-emerald-500/30 dark:bg-emerald-500/10"
+                data-testid="profile-open-medical-page"
+              >
+                <Stethoscope className="h-5 w-5 text-emerald-800 dark:text-emerald-300 shrink-0" />
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">Medical profile</span>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">View your health details</span>
+                </span>
+                <ChevronRight className="h-5 w-5 text-gray-400 shrink-0" />
+              </button>
+            )}
           </TabsContent>
 
           <TabsContent value="status" className="mt-4 space-y-3">
@@ -545,38 +534,7 @@ export default function ProfileDialog({ open, onOpenChange }) {
             </Button>
           </TabsContent>
 
-          {isClient && (
-            <TabsContent value="medical" className="mt-4 space-y-4" data-testid="profile-medical-pane">
-              <div className="flex items-start gap-2 rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-[12px] text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
-                <Stethoscope className="h-4 w-4 mt-0.5 shrink-0" />
-                <div>
-                  Your medical profile is maintained by your administrator for your care team.
-                  Need a correction? Message them and they'll update it for you.
-                </div>
-              </div>
-              {medicalLoading ? (
-                <div className="py-10 flex items-center justify-center text-gray-400 dark:text-gray-500">
-                  <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading…
-                </div>
-              ) : (
-                <>
-                  {medical?.updated_at && (
-                    <p className="text-xs text-gray-500 dark:text-gray-400" data-testid="profile-medical-meta">
-                      Last updated {new Date(medical.updated_at).toLocaleString()}
-                      {medical.updated_by ? ` by ${medical.updated_by.full_name}` : ""}
-                    </p>
-                  )}
-                  <MedicalProfileReadOnly profile={medical?.medical_profile} />
-                  <div className="rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 text-[11px] text-amber-900 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-200 inline-flex items-center gap-2">
-                    <ShieldAlert className="h-3.5 w-3.5" />
-                    Read-only for clients. Only your administrator can edit these details.
-                  </div>
-                </>
-              )}
-            </TabsContent>
-          )}
         </Tabs>
-      </DialogContent>
-    </Dialog>
+    </MobilePageShell>
   );
 }

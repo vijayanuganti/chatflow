@@ -16,7 +16,7 @@
   },
   "plugins": {
     "PushNotifications": {
-      "presentationOptions": ["badge", "sound"]
+      "presentationOptions": ["badge"]
     },
     "SplashScreen": {
       "launchShowDuration": 3000,

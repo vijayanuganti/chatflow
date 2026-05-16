@@ -1,10 +1,9 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
-import { useLocation } from "react-router-dom";
+import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import NewChatDialog from "@/components/NewChatDialog";
-import ProfileDialog from "@/components/ProfileDialog";
-import CreateAccountDialog from "@/components/CreateAccountDialog";
+import { createAccountPath, profilePath } from "@/lib/appRoutes";
 import ComplaintDialog from "@/components/ComplaintDialog";
 import TopBar from "@/components/TopBar";
 import useChatSocket from "@/hooks/useChatSocket";
@@ -19,9 +18,26 @@ import {
 } from "@/lib/notify";
 import {
   playInboundMessageTone,
+  playConversationIncomingTone,
+  playSoftForegroundTone,
   notificationToneSuppressesOsSound,
 } from "@/lib/notificationTone";
+import { clearActiveChatState } from "@/lib/activeChatState";
+import { showInAppMessageBanner } from "@/lib/inAppNotifications";
 import { FCM_MESSAGE_EVENT, NOTIFICATION_MARK_READ_EVENT } from "@/lib/push";
+import {
+  getCachedMessages,
+  setCachedMessages,
+  mergeMessageLists,
+  loadCacheFromStorage,
+  patchCachedMessageStatus,
+  patchCachedMessageStatuses,
+} from "@/lib/messageCache";
+import {
+  markOpponentMessagesSeen,
+  markMessageSeen,
+  mergeMessageStatus,
+} from "@/lib/messageSeen";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 
@@ -29,6 +45,7 @@ export default function ChatApp() {
   useMobileChatViewport();
   const { user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [conversations, setConversations] = useState([]);
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -36,12 +53,15 @@ export default function ChatApp() {
   const [lastSeenByUser, setLastSeenByUser] = useState({});
   const [typingUsers, setTypingUsers] = useState({}); // convId -> {userId: name}
   const selectedIdRef = useRef(null);
+  const seenInflightRef = useRef(new Set());
   useEffect(() => {
     selectedIdRef.current = selected?.id ?? null;
   }, [selected?.id]);
+
+  useEffect(() => {
+    if (user?.id) loadCacheFromStorage(user.id);
+  }, [user?.id]);
   const [newChatOpen, setNewChatOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [createAccountOpen, setCreateAccountOpen] = useState(false);
   const [complaintOpen, setComplaintOpen] = useState(false);
   const [selectedBatchId, setSelectedBatchId] = useState(null);
   const [batches, setBatches] = useState([]);
@@ -95,25 +115,59 @@ export default function ChatApp() {
     }
   }, [user?.role]);
 
+  const syncMessagesToView = useCallback((convId, nextMessages) => {
+    if (selectedIdRef.current !== convId) return;
+    setMessages(nextMessages);
+    if (user?.id) setCachedMessages(user.id, convId, nextMessages);
+  }, [user?.id]);
+
   const loadMessages = useCallback(async (convId) => {
+    if (!convId) return;
     try {
       const res = await api.get(`/conversations/${convId}/messages`);
-      setMessages(res.data);
+      const cached = getCachedMessages(convId);
+      const merged = mergeMessageLists(cached, res.data);
+      console.log("ChatFlowCache -> Merged network + cache:", convId, merged.length, "messages");
+      syncMessagesToView(convId, merged);
+      if (user?.id) {
+        markOpponentMessagesSeen({
+          userId: user.id,
+          conversationId: convId,
+          messages: merged,
+          inflight: seenInflightRef.current,
+        });
+      }
       api.post(`/conversations/${convId}/read`).catch(() => {});
     } catch (err) {
-      toast.error(formatApiError(err));
+      if (!getCachedMessages(convId)) {
+        toast.error(formatApiError(err));
+      }
     }
-  }, []);
+  }, [user?.id, syncMessagesToView]);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
+  useEffect(() => () => {
+    void clearActiveChatState();
+  }, []);
+
   useEffect(() => {
-    const onFcmMessage = () => {
-      loadConversations();
+    const onFcmMessage = (event) => {
+      const data = event?.detail?.data || {};
+      const convId = data.conversation_id;
+      const activeId = selectedIdRef.current;
+      if (convId && activeId && String(convId) === String(activeId)) {
+        if (data.message_id) {
+          markMessageSeen(data.message_id, seenInflightRef.current);
+        }
+        loadMessages(activeId);
+      } else {
+        loadConversations();
+      }
     };
     window.addEventListener(FCM_MESSAGE_EVENT, onFcmMessage);
     return () => window.removeEventListener(FCM_MESSAGE_EVENT, onFcmMessage);
-  }, [loadConversations]);
+  }, [loadConversations, loadMessages]);
 
   useEffect(() => {
     const onMarkRead = (event) => {
@@ -128,14 +182,29 @@ export default function ChatApp() {
   }, []);
   useEffect(() => { loadBatches(); }, [loadBatches]);
 
-  useEffect(() => {
-    // Depend on conversation id only — `selected` is often a fresh object from
-    // the sidebar for the same chat, which must not wipe messages mid-thread.
+  // Instant paint from in-memory cache (0ms) before network fetch.
+  useLayoutEffect(() => {
     if (!selected?.id) {
       setMessages([]);
       return;
     }
-    setMessages([]);
+    const convId = selected.id;
+    const cached = getCachedMessages(convId, { log: true });
+    if (cached?.length) {
+      setMessages(cached);
+      if (user?.id) {
+        markOpponentMessagesSeen({
+          userId: user.id,
+          conversationId: convId,
+          messages: cached,
+          inflight: seenInflightRef.current,
+        });
+      }
+    }
+  }, [selected?.id, user?.id]);
+
+  useEffect(() => {
+    if (!selected?.id) return;
     loadMessages(selected.id);
   }, [selected?.id, loadMessages]);
 
@@ -148,11 +217,8 @@ export default function ChatApp() {
 
   const maybeNotify = useCallback((msg) => {
     if (!msg) return;
-    // Only notify if I'm a recipient (string-compare ids in case of type skew).
     const ids = Array.isArray(msg.recipient_ids) ? msg.recipient_ids : [];
     if (!ids.some((id) => String(id) === String(user.id))) return;
-    // If the user is already looking at this conversation, no popup needed.
-    if (document.visibilityState === "visible" && selectedIdRef.current === msg.conversation_id) return;
 
     const sender = msg.sender_name || "Someone";
     const preview = msg.message_type === "text"
@@ -161,6 +227,28 @@ export default function ChatApp() {
     const title = msg.conversation_type === "group"
       ? `${sender} (group)`
       : sender;
+    const appVisible = document.visibilityState === "visible";
+    const inActiveChat = appVisible && selectedIdRef.current === msg.conversation_id;
+
+    if (inActiveChat) {
+      void playConversationIncomingTone(msg.conversation_id);
+      return;
+    }
+
+    if (appVisible) {
+      void playSoftForegroundTone();
+      showInAppMessageBanner({
+        title,
+        body: preview,
+        conversationId: msg.conversation_id,
+        onOpen: () => {
+          const target = conversations.find((c) => c.id === msg.conversation_id);
+          if (target) setSelected(target);
+        },
+      });
+      return;
+    }
+
     playInboundMessageTone();
     showAppNotification({
       title,
@@ -170,7 +258,7 @@ export default function ChatApp() {
       data: { conversation_id: msg.conversation_id },
       silent: notificationToneSuppressesOsSound(),
     });
-  }, [user.id]);
+  }, [user.id, conversations]);
 
   const ackMessageDelivered = useCallback((msg) => {
     if (!msg?.id) return;
@@ -180,10 +268,29 @@ export default function ChatApp() {
     api.post("/notifications/update-status", { message_id: msg.id, status: "delivered" }).catch(() => {});
   }, [user.id]);
 
-  const handleIncomingMessage = useCallback((msg) => {
-    maybeNotify(msg);
-    ackMessageDelivered(msg);
+  const ackMessageSeen = useCallback((msg) => {
+    if (!msg?.id) return;
+    const ids = Array.isArray(msg.recipient_ids) ? msg.recipient_ids : [];
+    if (!ids.some((id) => String(id) === String(user.id))) return;
+    if (String(msg.sender_id) === String(user.id)) return;
     const activeId = selectedIdRef.current;
+    if (!activeId || msg.conversation_id !== activeId) return;
+    markMessageSeen(msg.id, seenInflightRef.current);
+  }, [user.id]);
+
+  const handleIncomingMessage = useCallback((msg) => {
+    const activeId = selectedIdRef.current;
+    const inOpenThread =
+      document.visibilityState === "visible"
+      && activeId
+      && msg.conversation_id === activeId;
+
+    if (inOpenThread) {
+      ackMessageSeen(msg);
+    } else {
+      maybeNotify(msg);
+    }
+    ackMessageDelivered(msg);
     setMessages((prev) => {
       if (activeId && msg.conversation_id === activeId) {
         if (prev.some((m) => m.id === msg.id)) return prev;
@@ -203,13 +310,16 @@ export default function ChatApp() {
             const next = prev.slice();
             const old = next[idx];
             next[idx] = old?.__tempId ? { ...msg, __tempId: old.__tempId } : msg;
+            if (user?.id) setCachedMessages(user.id, activeId, next);
             return next;
           }
         }
         if ((msg.recipient_ids || []).includes(user.id)) {
           api.post(`/conversations/${activeId}/read`).catch(() => {});
         }
-        return [...prev, msg];
+        const next = [...prev, msg];
+        if (user?.id) setCachedMessages(user.id, activeId, next);
+        return next;
       }
       return prev;
     });
@@ -235,7 +345,7 @@ export default function ChatApp() {
       updated.sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || ""));
       return updated;
     });
-  }, [user.id, loadConversations, maybeNotify, ackMessageDelivered]);
+  }, [user.id, loadConversations, maybeNotify, ackMessageDelivered, ackMessageSeen]);
 
   const handleTyping = useCallback((data) => {
     setTypingUsers((prev) => {
@@ -269,33 +379,57 @@ export default function ChatApp() {
   const handleReadReceipt = useCallback((data) => {
     const activeId = selectedIdRef.current;
     if (activeId && data.conversation_id === activeId) {
-      setMessages((prev) => prev.map((m) => {
-        if (m.sender_id === user.id && !(m.read_by || []).includes(data.reader_id)) {
-          return {
-            ...m,
-            read_by: [...(m.read_by || []), data.reader_id],
-            status: "seen",
-          };
-        }
-        return m;
-      }));
+      setMessages((prev) => {
+        const next = prev.map((m) => {
+          if (m.sender_id === user.id && !(m.read_by || []).includes(data.reader_id)) {
+            return {
+              ...m,
+              read_by: [...(m.read_by || []), data.reader_id],
+              status: "seen",
+            };
+          }
+          return m;
+        });
+        if (user?.id) setCachedMessages(user.id, activeId, next);
+        return next;
+      });
     }
-  }, [user.id]);
+  }, [user?.id]);
 
   const handleStatusUpdate = useCallback((data) => {
-    if (!data?.message_id || !data?.status) return;
-    const messageId = String(data.message_id);
+    if (!data?.status) return;
     const nextStatus = String(data.status).toLowerCase();
+    const ids = data.message_ids?.length
+      ? data.message_ids.map((id) => String(id))
+      : data.message_id
+        ? [String(data.message_id)]
+        : [];
+    if (!ids.length) return;
+
+    const convId = data.conversation_id || selectedIdRef.current;
+    const idSet = new Set(ids);
+
     setMessages((prev) => {
       let changed = false;
       const next = prev.map((m) => {
-        if (String(m.id) !== messageId) return m;
+        if (!idSet.has(String(m.id))) return m;
         changed = true;
-        return { ...m, status: nextStatus };
+        return { ...m, status: mergeMessageStatus(m.status, nextStatus) };
       });
+      if (changed && convId && user?.id) {
+        setCachedMessages(user.id, convId, next);
+      }
       return changed ? next : prev;
     });
-  }, []);
+
+    if (convId && user?.id) {
+      if (ids.length === 1) {
+        patchCachedMessageStatus(user.id, convId, ids[0], nextStatus);
+      } else {
+        patchCachedMessageStatuses(user.id, convId, ids, nextStatus);
+      }
+    }
+  }, [user?.id]);
 
   const handleConversationRemoved = useCallback((data) => {
     const id = data?.conversation_id;
@@ -386,7 +520,11 @@ export default function ChatApp() {
     };
 
     if (selectedIdRef.current === body.conversation_id) {
-      setMessages((prev) => [...prev, optimistic]);
+      setMessages((prev) => {
+        const next = [...prev, optimistic];
+        if (user?.id) setCachedMessages(user.id, body.conversation_id, next);
+        return next;
+      });
     }
 
     setConversations((prev) => {
@@ -406,12 +544,17 @@ export default function ChatApp() {
         const res = await api.post("/messages", body);
         setMessages((prev) => {
           const idx = prev.findIndex((m) => m.__tempId === tempId);
+          let next;
           if (idx === -1) {
-            return prev.some((m) => m.id === res.data.id) ? prev : [...prev, res.data];
+            next = prev.some((m) => m.id === res.data.id) ? prev : [...prev, res.data];
+          } else {
+            next = prev.slice();
+            const old = next[idx];
+            next[idx] = { ...res.data, __tempId: old.__tempId };
           }
-          const next = prev.slice();
-          const old = next[idx];
-          next[idx] = { ...res.data, __tempId: old.__tempId };
+          if (user?.id && selectedIdRef.current === body.conversation_id) {
+            setCachedMessages(user.id, body.conversation_id, next);
+          }
           return next;
         });
         setConversations((prev) => {
@@ -535,9 +678,20 @@ export default function ChatApp() {
     >
       <div className="shrink-0">
         <TopBar
-          onOpenSettings={() => setProfileOpen(true)}
+          onOpenSettings={() => navigate(profilePath(user?.role))}
           unreadTotal={unreadTotal}
-          onCreateAccount={canCreateAccounts ? () => setCreateAccountOpen(true) : undefined}
+          onCreateAccount={
+            canCreateAccounts
+              ? () =>
+                  navigate(createAccountPath(user?.role), {
+                    state: {
+                      allowedRoles: user?.role === "admin" ? ["employee", "client"] : ["client"],
+                      defaultRole: "client",
+                      backTo: "/chat",
+                    },
+                  })
+              : undefined
+          }
           onRaiseComplaint={user?.role === "client" ? () => setComplaintOpen(true) : undefined}
         />
       </div>
@@ -589,19 +743,6 @@ export default function ChatApp() {
         onCreateGroup={handleCreateGroup}
         onlineUsers={onlineUsers}
       />
-      <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
-      {canCreateAccounts && (
-        <CreateAccountDialog
-          open={createAccountOpen}
-          onOpenChange={setCreateAccountOpen}
-          allowedRoles={user?.role === "admin" ? ["employee", "client"] : ["client"]}
-          defaultRole="client"
-          onCreated={() => {
-            loadConversations();
-            loadBatches();
-          }}
-        />
-      )}
       {user?.role === "client" && (
         <ComplaintDialog open={complaintOpen} onOpenChange={setComplaintOpen} />
       )}

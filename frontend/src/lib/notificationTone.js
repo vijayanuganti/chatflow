@@ -184,3 +184,56 @@ export async function playNotificationTone(toneId) {
 export function playInboundMessageTone() {
   return playNotificationTone(getNotificationTone());
 }
+
+let _lastConversationToneAt = 0;
+let _lastConversationToneKey = "";
+
+/**
+ * Short inline "bloop" when a message arrives in the open conversation (WhatsApp-style).
+ * @param {string} [dedupeKey] conversation or message id — suppresses double beep when FCM + WebSocket both fire
+ */
+import { getConversationSoundsEnabled } from "./conversationSounds";
+
+export async function playConversationIncomingTone(dedupeKey = "") {
+  if (!getConversationSoundsEnabled()) return;
+  const id = getNotificationTone();
+  if (id === "off") return;
+
+  const key = dedupeKey ? String(dedupeKey) : "";
+  const now = Date.now();
+  if (key && key === _lastConversationToneKey && now - _lastConversationToneAt < 450) {
+    return;
+  }
+  if (key) {
+    _lastConversationToneKey = key;
+    _lastConversationToneAt = now;
+  }
+
+  if (id === "custom") {
+    await playCustomTone();
+    return;
+  }
+  const ctx = await resumeContext(getAudioContext());
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  try {
+    scheduleBeep(ctx, 698.46, t0, 0.045, 0.038);
+    scheduleBeep(ctx, 932.33, t0 + 0.055, 0.04, 0.028);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Quiet tone when the app is open on another screen. */
+export async function playSoftForegroundTone() {
+  const id = getNotificationTone();
+  if (id === "off") return;
+  const ctx = await resumeContext(getAudioContext());
+  if (!ctx) return;
+  const t0 = ctx.currentTime;
+  try {
+    scheduleBeep(ctx, 587.33, t0, 0.1, 0.032);
+  } catch {
+    /* ignore */
+  }
+}
