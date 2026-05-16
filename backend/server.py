@@ -772,6 +772,11 @@ class UpdateMessageStatusBody(BaseModel):
     status: str = Field(..., pattern="^(sent|delivered|seen)$")
 
 
+class UpdateMessageStatusBatchBody(BaseModel):
+    message_ids: List[str]
+    status: str = Field(..., pattern="^(sent|delivered|seen)$")
+
+
 MESSAGE_STATUS_ORDER = {"sent": 0, "delivered": 1, "seen": 2}
 
 
@@ -2570,6 +2575,36 @@ async def _notify_sender_message_status(msg: dict, status: str, actor_id: Option
     await manager.send_event(sender_id, event)
 
 
+async def _notify_sender_status_batch(
+    sender_id: str,
+    message_ids: List[str],
+    status: str,
+    conversation_id: Optional[str] = None,
+    actor_id: Optional[str] = None,
+) -> None:
+    """Batch status_update for one sender (blue ticks without N WS frames)."""
+    if not sender_id or not message_ids:
+        return
+    event: Dict[str, Any] = {
+        "type": "status_update",
+        "status": status,
+        "message_ids": message_ids,
+    }
+    if conversation_id:
+        event["conversation_id"] = conversation_id
+    if actor_id:
+        event["updated_by"] = actor_id
+    if len(message_ids) == 1:
+        event["message_id"] = message_ids[0]
+    logger.info(
+        "status_update batch ws -> sender_id=%s count=%s status=%s",
+        sender_id,
+        len(message_ids),
+        status,
+    )
+    await manager.send_event(sender_id, event)
+
+
 async def _apply_message_status_update(message_id: str, new_status: str, actor_id: str) -> Optional[dict]:
     """Upgrade message status (sent → delivered → seen) and notify the sender."""
     if new_status not in MESSAGE_STATUS_ORDER:
@@ -2622,6 +2657,91 @@ async def notification_update_status(
 ):
     """Update delivery/read ticks (delivered / seen) from mobile or web clients."""
     return await _apply_message_status_update(body.message_id, body.status.strip().lower(), user["id"])
+
+
+async def _apply_message_status_batch(
+    message_ids: List[str],
+    new_status: str,
+    actor_id: str,
+) -> Dict[str, Any]:
+    """Upgrade many messages in one request; notify each sender with batched WS events."""
+    if new_status not in MESSAGE_STATUS_ORDER:
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    unique_ids = list(dict.fromkeys(m.strip() for m in message_ids if m and str(m).strip()))
+    if not unique_ids:
+        return {"status": new_status, "updated_ids": [], "message_ids": []}
+
+    cursor = db.messages.find({"id": {"$in": unique_ids}}, {"_id": 0})
+    docs = await cursor.to_list(len(unique_ids))
+    by_id = {d["id"]: d for d in docs}
+
+    updated_ids: List[str] = []
+    notify_by_sender: Dict[str, List[str]] = {}
+    conv_by_sender: Dict[str, str] = {}
+
+    for message_id in unique_ids:
+        msg = by_id.get(message_id)
+        if not msg:
+            continue
+        if actor_id not in (msg.get("recipient_ids") or []):
+            continue
+
+        sender_id = (msg.get("sender_id") or "").strip()
+        if not sender_id:
+            continue
+
+        current = (msg.get("status") or "sent").strip().lower()
+        notify_status = new_status
+
+        if MESSAGE_STATUS_ORDER.get(new_status, -1) <= MESSAGE_STATUS_ORDER.get(current, 0):
+            notify_status = (
+                new_status
+                if MESSAGE_STATUS_ORDER.get(new_status, 0) >= MESSAGE_STATUS_ORDER.get(current, 0)
+                else current
+            )
+        else:
+            update_fields: Dict[str, Any] = {"status": new_status}
+            if new_status == "seen":
+                await db.messages.update_one(
+                    {"id": message_id},
+                    {"$set": update_fields, "$addToSet": {"read_by": actor_id}},
+                )
+            else:
+                await db.messages.update_one({"id": message_id}, {"$set": update_fields})
+            updated_ids.append(message_id)
+
+        notify_by_sender.setdefault(sender_id, []).append(message_id)
+        if msg.get("conversation_id"):
+            conv_by_sender.setdefault(sender_id, msg["conversation_id"])
+
+    for sender_id, mids in notify_by_sender.items():
+        await _notify_sender_status_batch(
+            sender_id,
+            mids,
+            new_status,
+            conv_by_sender.get(sender_id),
+            actor_id,
+        )
+
+    return {
+        "status": new_status,
+        "updated_ids": updated_ids,
+        "message_ids": unique_ids,
+    }
+
+
+@api_router.post("/notifications/update-status-batch")
+async def notification_update_status_batch(
+    body: UpdateMessageStatusBatchBody,
+    user: dict = Depends(get_current_user),
+):
+    """Batch delivery/read tick updates (single round-trip from mobile)."""
+    return await _apply_message_status_batch(
+        body.message_ids,
+        body.status.strip().lower(),
+        user["id"],
+    )
 
 
 @api_router.post("/notifications/direct-reply")
