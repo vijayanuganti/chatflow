@@ -35,7 +35,10 @@ import {
   profilePath,
   resetPasswordPath,
   userAccountPath,
+  userProfilePath,
 } from "@/lib/appRoutes";
+import ProfileQuickView from "@/components/ProfileQuickView";
+import { saveChatListScroll } from "@/lib/chatListScroll";
 import {
   patchConversationPrefs,
   updateConversationPreferences,
@@ -186,6 +189,9 @@ export default function AdminDashboard() {
   const [permissionSavingId, setPermissionSavingId] = useState(null);
   const [activeSavingId, setActiveSavingId] = useState(null);
   const [usersRoleFilter, setUsersRoleFilter] = useState("all"); // all | employees | clients | inactive_clients
+  const [listSelection, setListSelection] = useState(null);
+  const [quickView, setQuickView] = useState(null);
+  const listScrollRef = useRef(null);
   const [newBatchOpen, setNewBatchOpen] = useState(false);
   const [moveClientTarget, setMoveClientTarget] = useState(null); // client doc
   const [complaints, setComplaints] = useState([]);
@@ -668,10 +674,26 @@ export default function AdminDashboard() {
         setSelected(null);
         setMobileChatStep("list");
       }
+      if (patch.is_archived && listSelection?.id === convId) {
+        setListSelection(null);
+      }
+      setListSelection((prev) => (prev?.id === convId ? { ...prev, ...data } : prev));
     } catch (err) {
       toast.error(formatApiError(err));
     }
-  }, []);
+  }, [listSelection?.id]);
+
+  const openUserProfile = useCallback((profileUser, conv) => {
+    if (!profileUser?.id) return;
+    navigate(userProfilePath("admin", profileUser.id), {
+      state: {
+        backTo: tab === "mychats" ? "/admin/mychats" : "/admin/chats",
+        conversationId: conv?.id,
+        profile: profileUser,
+        isMuted: !!conv?.is_muted,
+      },
+    });
+  }, [navigate, tab]);
 
   const handleRefresh = useCallback(async () => {
     const convId = selectedIdRef.current;
@@ -790,6 +812,10 @@ export default function AdminDashboard() {
   useDoubleBackToExit({
     enabled: true,
     onBeforeExitBack: () => {
+      if (listSelection && (tab === "mychats" || tab === "chats") && mobileChatStep === "list") {
+        setListSelection(null);
+        return { repushSentinel: false };
+      }
       if (mobileInChat) {
         if (tab === "batches") backToBatchesChat();
         else backToChatList();
@@ -815,7 +841,7 @@ export default function AdminDashboard() {
       style={{ height: "var(--visual-vh, 100dvh)" }}
       data-testid="admin-dashboard"
     >
-      <div className={`shrink-0 ${mobileInChat ? "hidden md:block" : ""}`}>
+      <div className={`shrink-0 ${mobileInChat || listSelection ? "hidden md:block" : ""}`}>
         <TopBar
           onOpenSettings={() => navigate(profilePath("admin"))}
           title={topbarTitle}
@@ -1146,6 +1172,7 @@ export default function AdminDashboard() {
                 onlineUsers={onlineUsers}
                 selectedId={selected?.id}
                 onSelect={(c) => {
+                  setListSelection(null);
                   setSelected(c);
                   setMobileChatStep("chat");
                 }}
@@ -1157,6 +1184,10 @@ export default function AdminDashboard() {
                 onBatchesChanged={undefined}
                 onPreferenceChange={tab === "mychats" ? handlePreferenceChange : undefined}
                 readOnlyPrefs={tab === "chats"}
+                selectedConversation={listSelection}
+                onSelectedConversationChange={setListSelection}
+                onAvatarPress={tab === "mychats" ? (conv, u) => setQuickView({ conv, user: u }) : undefined}
+                listScrollRef={listScrollRef}
               />
             </div>
             <main className={`flex min-h-0 flex-1 flex-col overflow-hidden ${mobileChatStep !== "chat" ? "hidden md:flex" : ""}`}>
@@ -2036,9 +2067,32 @@ export default function AdminDashboard() {
         </button>
       )}
 
+      <ProfileQuickView
+        open={!!quickView}
+        name={quickView?.user?.full_name}
+        avatarUrl={quickView?.user?.avatar_url}
+        status={quickView?.user?.status}
+        online={!!onlineUsers[quickView?.user?.id]}
+        onClose={() => setQuickView(null)}
+        onChat={() => {
+          const c = quickView?.conv;
+          setQuickView(null);
+          if (c) {
+            setListSelection(null);
+            setSelected(c);
+            setMobileChatStep("chat");
+          }
+        }}
+        onInfo={() => {
+          const { conv, user: u } = quickView || {};
+          setQuickView(null);
+          openUserProfile(u, conv);
+        }}
+      />
+
       {/* Mobile bottom nav (Flutter-style BottomNavigationBar) */}
       <div
-        className={`md:hidden fixed bottom-0 left-0 right-0 z-20 flex items-stretch justify-around border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_18px_rgba(0,0,0,0.06)] backdrop-blur dark:border-gray-800 dark:bg-gray-950/95 dark:shadow-[0_-4px_18px_rgba(0,0,0,0.5)] ${mobileInChat ? "hidden" : ""}`}
+        className={`md:hidden fixed bottom-0 left-0 right-0 z-20 flex items-stretch justify-around border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_18px_rgba(0,0,0,0.06)] backdrop-blur dark:border-gray-800 dark:bg-gray-950/95 dark:shadow-[0_-4px_18px_rgba(0,0,0,0.5)] ${mobileInChat || listSelection ? "hidden" : ""}`}
         data-testid="admin-bottom-nav"
       >
         <BottomNavButton

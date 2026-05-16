@@ -1160,6 +1160,33 @@ async def list_users(user: dict = Depends(get_current_user)):
     return users
 
 
+@api_router.get("/users/{user_id}/public")
+async def get_user_public_profile(user_id: str, viewer: dict = Depends(get_current_user)):
+    if user_id == viewer["id"]:
+        return clean_user(viewer)
+    target = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0, "fcm_tokens": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if viewer["role"] != "admin":
+        shared = await db.conversations.find_one(
+            {"participants": {"$all": [viewer["id"], user_id]}},
+            {"_id": 1},
+        )
+        if not shared:
+            raise HTTPException(status_code=403, detail="Access denied")
+    return {
+        "id": target["id"],
+        "full_name": target.get("full_name"),
+        "username": target.get("username"),
+        "avatar_url": target.get("avatar_url"),
+        "bio": target.get("bio"),
+        "role": target.get("role"),
+        "status": target.get("status"),
+        "online": target.get("online"),
+        "last_seen": target.get("last_seen"),
+    }
+
+
 @api_router.put("/users/me")
 async def update_profile(body: ProfileBody, user: dict = Depends(get_current_user)):
     update: Dict[str, object] = {}

@@ -40,7 +40,9 @@ import {
 import { toast } from "sonner";
 import { Plus, MessageSquare, UtensilsCrossed, Settings, Layers } from "lucide-react";
 import PanelBottomNav from "@/components/layout/PanelBottomNav";
-import { dietPlanPath, profilePath } from "@/lib/appRoutes";
+import ProfileQuickView from "@/components/ProfileQuickView";
+import { dietPlanPath, profilePath, userProfilePath } from "@/lib/appRoutes";
+import { saveChatListScroll } from "@/lib/chatListScroll";
 import {
   patchConversationPrefs,
   updateConversationPreferences,
@@ -70,6 +72,9 @@ export default function ChatApp() {
   const [selectedBatchId, setSelectedBatchId] = useState(null);
   const [batches, setBatches] = useState([]);
   const [mobileSection, setMobileSection] = useState("chats"); // chats | diet | batches | settings
+  const [listSelection, setListSelection] = useState(null);
+  const [quickView, setQuickView] = useState(null);
+  const listScrollRef = useRef(null);
   const canCreateAccounts =
     user?.role === "admin" ||
     (user?.role === "employee" && !!user?.account_creation_access);
@@ -102,6 +107,10 @@ export default function ChatApp() {
       if (patch.is_archived && selectedIdRef.current === convId) {
         setSelected(null);
       }
+      if (patch.is_archived && listSelection?.id === convId) {
+        setListSelection(null);
+      }
+      setListSelection((prev) => (prev?.id === convId ? { ...prev, ...data } : prev));
     } catch (err) {
       toast.error(formatApiError(err));
     }
@@ -668,6 +677,10 @@ export default function ChatApp() {
   // just like a native app.
   const pushSentinel = useDoubleBackToExit({
     onBeforeExitBack: () => {
+      if (listSelection) {
+        setListSelection(null);
+        return true;
+      }
       if (selectedIdRef.current) {
         setSelected(null);
         return true;
@@ -675,6 +688,23 @@ export default function ChatApp() {
       return false;
     },
   });
+
+  const openUserProfile = useCallback((profileUser, conv) => {
+    if (!profileUser?.id) return;
+    navigate(userProfilePath(user?.role, profileUser.id), {
+      state: {
+        backTo: "/chat",
+        conversationId: conv?.id,
+        profile: profileUser,
+        isMuted: !!conv?.is_muted,
+      },
+    });
+  }, [navigate, user?.role]);
+
+  const handleAvatarQuickView = useCallback((conv, profileUser) => {
+    if (!profileUser) return;
+    setQuickView({ conv, user: profileUser });
+  }, []);
 
   // Whenever a new conversation is selected we re-anchor the sentinel so a
   // subsequent system Back press is guaranteed to land in our handler (and
@@ -694,9 +724,12 @@ export default function ChatApp() {
       style={{ height: "var(--visual-vh, 100dvh)" }}
       data-testid="chat-app"
     >
-      <div className="shrink-0">
+      <div className={`shrink-0 ${listSelection ? "hidden md:block" : ""}`}>
         <TopBar
-          onOpenSettings={() => navigate(profilePath(user?.role))}
+          onOpenSettings={() => {
+            if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
+            navigate(profilePath(user?.role));
+          }}
           onRefresh={handleRefresh}
           onCreateAccount={
             canCreateAccounts
@@ -720,13 +753,17 @@ export default function ChatApp() {
             conversations={filteredConversations}
             onlineUsers={onlineUsers}
             selectedId={selected?.id}
-            onSelect={(c) => { setSelected(c); setMobileSection("chats"); }}
+            onSelect={(c) => { setListSelection(null); setSelected(c); setMobileSection("chats"); }}
             onNewChat={openNewConversation}
             batches={batches}
             selectedBatchId={selectedBatchId}
             onSelectBatch={setSelectedBatchId}
             onBatchesChanged={loadBatches}
             onPreferenceChange={handlePreferenceChange}
+            selectedConversation={listSelection}
+            onSelectedConversationChange={setListSelection}
+            onAvatarPress={handleAvatarQuickView}
+            listScrollRef={listScrollRef}
           />
         </div>
         <main className={`${selected ? "flex" : "hidden md:flex"} min-h-0 flex-1 flex-col overflow-hidden`}>
@@ -771,7 +808,7 @@ export default function ChatApp() {
               active: mobileSection === "chats",
               badge: unreadTotal,
               testId: "client-nav-chats",
-              onClick: () => setMobileSection("chats"),
+              onClick: () => { setListSelection(null); setMobileSection("chats"); },
             },
             {
               id: "diet",
@@ -779,7 +816,10 @@ export default function ChatApp() {
               icon: UtensilsCrossed,
               active: mobileSection === "diet",
               testId: "client-nav-diet",
-              onClick: () => navigate(dietPlanPath("client"), { state: { backTo: "/chat", startFromDayOne: true } }),
+              onClick: () => {
+                if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
+                navigate(dietPlanPath("client"), { state: { backTo: "/chat", startFromDayOne: true } });
+              },
             },
             {
               id: "settings",
@@ -787,7 +827,10 @@ export default function ChatApp() {
               icon: Settings,
               active: mobileSection === "settings",
               testId: "client-nav-settings",
-              onClick: () => navigate(profilePath("client")),
+              onClick: () => {
+                if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
+                navigate(profilePath("client"));
+              },
             },
           ]}
         />
@@ -805,7 +848,7 @@ export default function ChatApp() {
               active: mobileSection === "chats",
               badge: unreadTotal,
               testId: "employee-nav-chats",
-              onClick: () => setMobileSection("chats"),
+              onClick: () => { setListSelection(null); setMobileSection("chats"); },
             },
             {
               id: "batches",
@@ -824,11 +867,33 @@ export default function ChatApp() {
               icon: Settings,
               active: mobileSection === "settings",
               testId: "employee-nav-settings",
-              onClick: () => navigate(profilePath("employee")),
+              onClick: () => {
+                if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
+                navigate(profilePath("employee"));
+              },
             },
           ]}
         />
       )}
+
+      <ProfileQuickView
+        open={!!quickView}
+        name={quickView?.user?.full_name}
+        avatarUrl={quickView?.user?.avatar_url}
+        status={quickView?.user?.status}
+        online={!!onlineUsers[quickView?.user?.id]}
+        onClose={() => setQuickView(null)}
+        onChat={() => {
+          const c = quickView?.conv;
+          setQuickView(null);
+          if (c) { setListSelection(null); setSelected(c); }
+        }}
+        onInfo={() => {
+          const { conv, user: u } = quickView || {};
+          setQuickView(null);
+          openUserProfile(u, conv);
+        }}
+      />
 
       {user?.role === "client" && (
         <ComplaintDialog open={complaintOpen} onOpenChange={setComplaintOpen} />

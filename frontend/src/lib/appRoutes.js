@@ -36,6 +36,14 @@ export function newConversationPath() {
 }
 
 /** Diet plan for self (client) or a specific client in chat. */
+/** Contact info page for a user in a direct chat. */
+export function userProfilePath(role, userId) {
+  if (role === "admin") {
+    return `/admin/contact/${userId}`;
+  }
+  return `/chat/contact/${userId}`;
+}
+
 export function dietPlanPath(role, clientId) {
   if (role === "admin" && clientId) {
     return `/admin/users/${clientId}/diet-plan`;

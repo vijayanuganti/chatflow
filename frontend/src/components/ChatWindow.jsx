@@ -15,10 +15,19 @@ import {
   FileText,
   Music,
   ChevronDown,
+  Search,
+  Star,
+  X,
 } from "lucide-react";
 import { groupMessagesByDate } from "@/lib/chatDateGroups";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  getStarredIds,
+  toggleStarredMessage,
+  isMessageStarred,
+} from "@/lib/starredMessages";
 import {
   Popover,
   PopoverContent,
@@ -36,7 +45,7 @@ import { formatWhatsAppLastSeen } from "@/lib/datetime";
 import { useAuth } from "@/context/AuthContext";
 import Avatar from "./Avatar";
 import MessageBubble from "./MessageBubble";
-import { dietPlanPath, medicalPath } from "@/lib/appRoutes";
+import { dietPlanPath, medicalPath, userProfilePath } from "@/lib/appRoutes";
 import VoiceRecorder from "./VoiceRecorder";
 import { toast } from "sonner";
 import { Capacitor } from "@capacitor/core";
@@ -59,6 +68,10 @@ export default function ChatWindow({
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [threadSearchOpen, setThreadSearchOpen] = useState(false);
+  const [threadSearchQuery, setThreadSearchQuery] = useState("");
+  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [starredIds, setStarredIds] = useState(() => getStarredIds(user?.id));
   const [text, setText] = useState("");
   const [composerFocused, setComposerFocused] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -193,7 +206,18 @@ export default function ChatWindow({
   useEffect(() => {
     lastTypingPingRef.current = 0;
     setComposerFocused(false);
+    setThreadSearchOpen(false);
+    setThreadSearchQuery("");
+    setSelectedMessage(null);
   }, [conversation?.id]);
+
+  useEffect(() => {
+    if (user?.id) setStarredIds(getStarredIds(user.id));
+  }, [user?.id]);
+
+  const refreshStarred = useCallback(() => {
+    if (user?.id) setStarredIds(getStarredIds(user.id));
+  }, [user?.id]);
 
   /* Keep typing=true refreshed while the composer is focused (mobile WS / idle gaps). */
   useEffect(() => {
@@ -394,6 +418,17 @@ export default function ChatWindow({
 
   const messageGroups = useMemo(() => groupMessagesByDate(visibleMessages), [visibleMessages]);
 
+  const filteredMessageGroups = useMemo(() => {
+    const q = threadSearchQuery.trim().toLowerCase();
+    if (!q) return messageGroups;
+    return messageGroups.filter((item) => {
+      if (item.type === "divider") return true;
+      const content = (item.message?.content || "").toLowerCase();
+      const fname = (item.message?.file_name || "").toLowerCase();
+      return content.includes(q) || fname.includes(q);
+    });
+  }, [messageGroups, threadSearchQuery]);
+
   const scrollToLatest = useCallback(() => {
     stickToBottomRef.current = true;
     setShowScrollDown(false);
@@ -444,6 +479,26 @@ export default function ChatWindow({
   const totalRecipients = isGroup ? (conversation.participants?.length || 1) - 1 : 1;
   const showSenderNames = isGroup || readOnly;
 
+  const openContactProfile = () => {
+    if (!conversation || isGroup || !otherUser?.id) return;
+    navigate(userProfilePath(user?.role, otherUser.id), {
+      state: {
+        backTo: user?.role === "admin" ? "/admin/mychats" : "/chat",
+        conversationId: conversation.id,
+        profile: otherUser,
+        isMuted: !!conversation.is_muted,
+      },
+    });
+  };
+
+  const toggleStarSelected = () => {
+    if (!selectedMessage?.id || !user?.id) return;
+    const nowStarred = toggleStarredMessage(user.id, selectedMessage.id);
+    refreshStarred();
+    setSelectedMessage(null);
+    toast.success(nowStarred ? "Message starred" : "Star removed");
+  };
+
   const openDietPlan = () => {
     const dietClient =
       user?.role === "client"
@@ -468,13 +523,32 @@ export default function ChatWindow({
           />
         ) : null}
         <div className="flex items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5 md:py-2.5">
+        {selectedMessage && !readOnly ? (
+          <>
+            <Button size="icon" variant="ghost" className="rounded-full" onClick={() => setSelectedMessage(null)} data-testid="message-selection-clear">
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <span className="flex-1 text-sm font-medium dark:text-gray-100">1 selected</span>
+            <Button size="icon" variant="ghost" className="rounded-full text-amber-600" onClick={toggleStarSelected} data-testid="message-selection-star">
+              <Star className={`h-5 w-5 ${starredIds.has(String(selectedMessage.id)) ? "fill-amber-500" : ""}`} />
+            </Button>
+          </>
+        ) : (
+          <>
         {onBack && (
           <Button size="icon" variant="ghost" className="md:hidden rounded-full" onClick={onBack} data-testid="chat-back-btn">
             <ArrowLeft className="h-5 w-5" />
           </Button>
         )}
+        <button
+          type="button"
+          onClick={!isGroup && otherUser ? openContactProfile : undefined}
+          className="flex flex-1 min-w-0 items-center gap-2 text-left touch-manipulation"
+          disabled={isGroup || !otherUser}
+          data-testid="chat-header-profile-link"
+        >
         {isGroup ? (
-          <div className="h-10 w-10 rounded-full bg-emerald-100 text-emerald-900 flex items-center justify-center">
+          <div className="h-10 w-10 rounded-full bg-emerald-100 text-emerald-900 flex items-center justify-center shrink-0">
             <Users className="h-5 w-5" strokeWidth={1.5} />
           </div>
         ) : (
@@ -509,6 +583,10 @@ export default function ChatWindow({
             )}
           </div>
         </div>
+        </button>
+        <Button size="icon" variant="ghost" className="rounded-full shrink-0" onClick={() => setThreadSearchOpen((v) => !v)} data-testid="chat-thread-search-toggle" title="Search in chat">
+          <Search className="h-5 w-5" />
+        </Button>
 
         {/* Medical profile shortcut — visible to admins and the assigned employee
             when chatting with a client. Backend enforces the actual ACL. */}
@@ -569,7 +647,27 @@ export default function ChatWindow({
             </Button>
           </>
         )}
+          </>
+        )}
         </div>
+        {threadSearchOpen && !selectedMessage && (
+          <div className="px-3 pb-2 flex items-center gap-2 border-t border-gray-100 dark:border-gray-800" data-testid="chat-thread-search-bar">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+              <Input
+                value={threadSearchQuery}
+                onChange={(e) => setThreadSearchQuery(e.target.value)}
+                placeholder="Search in conversation"
+                className="pl-9 h-9 rounded-xl"
+                data-testid="chat-thread-search-input"
+                autoFocus
+              />
+            </div>
+            <Button size="icon" variant="ghost" className="shrink-0 rounded-full" onClick={() => { setThreadSearchOpen(false); setThreadSearchQuery(""); }}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Messages */}
@@ -580,7 +678,7 @@ export default function ChatWindow({
             No messages yet. {readOnly ? "Conversation is quiet." : "Say hi!"}
           </div>
         )}
-        {messageGroups.map((item) => {
+        {filteredMessageGroups.map((item) => {
           if (item.type === "divider") {
             return (
               <div key={item.key} className="flex justify-center py-2" data-testid="message-date-divider">
@@ -609,6 +707,11 @@ export default function ChatWindow({
               totalRecipients={totalRecipients}
               showReceipts={!readOnly}
               onImageClick={(src, alt) => setLightbox({ src, alt })}
+              selected={selectedMessage?.id === m.id}
+              starred={m.id ? starredIds.has(String(m.id)) : false}
+              searchQuery={threadSearchQuery}
+              onLongPress={readOnly ? undefined : setSelectedMessage}
+              dimmed={!!selectedMessage && selectedMessage?.id !== m.id}
             />
           );
         })}

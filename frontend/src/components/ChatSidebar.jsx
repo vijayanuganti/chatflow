@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   Plus,
@@ -8,20 +8,15 @@ import {
   Archive,
   VolumeX,
   Volume2,
-  MoreHorizontal,
   ChevronLeft,
+  ArrowLeft,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import Avatar from "./Avatar";
 import { useAuth } from "@/context/AuthContext";
 import { partitionConversations } from "@/lib/conversationPreferences";
+import { loadChatListScroll, saveChatListScroll } from "@/lib/chatListScroll";
 
 function formatLastTime(iso) {
   if (!iso) return "";
@@ -38,12 +33,15 @@ function ConversationRow({
   c,
   adminView,
   onlineUsers,
-  selectedId,
-  onSelect,
-  onPreferenceChange,
-  readOnlyPrefs = false,
+  activeChatId,
+  selectionModeId,
+  onOpenChat,
+  onLongPressSelect,
+  onAvatarPress,
+  readOnlyPrefs,
 }) {
   const longPressRef = useRef(null);
+  const didLongPressRef = useRef(false);
   const isGroup = c.type === "group";
   const other = adminView ? null : c.other_user;
   const unreadCount = Number(c.unread_count || 0);
@@ -53,58 +51,81 @@ function ConversationRow({
       ? (c.participants_info || []).map((p) => p?.full_name || "?").join(" ↔ ")
       : (other?.full_name || "Unknown");
   const isOnline = adminView || isGroup ? false : !!onlineUsers[other?.id];
+  const isSelectionHighlight = selectionModeId === c.id;
+  const isActiveChat = activeChatId === c.id;
 
-  const runPref = (patch) => {
-    if (readOnlyPrefs || !onPreferenceChange) return;
-    onPreferenceChange(c.id, patch);
-  };
-
-  const handlePointerDown = () => {
+  const handlePointerDown = (e) => {
     if (readOnlyPrefs) return;
+    didLongPressRef.current = false;
     clearTimeout(longPressRef.current);
     longPressRef.current = setTimeout(() => {
-      const el = document.querySelector(`[data-conv-menu="${c.id}"]`);
-      el?.click();
-    }, 520);
+      didLongPressRef.current = true;
+      onLongPressSelect?.(c);
+    }, 480);
   };
 
-  const handlePointerUp = () => clearTimeout(longPressRef.current);
+  const clearPress = () => clearTimeout(longPressRef.current);
+
+  const handleRowClick = () => {
+    if (didLongPressRef.current) {
+      didLongPressRef.current = false;
+      return;
+    }
+    onOpenChat(c);
+  };
+
+  const handleAvatarClick = (e) => {
+    e.stopPropagation();
+    clearPress();
+    if (isGroup || adminView) return;
+    onAvatarPress?.(c, other);
+  };
 
   return (
     <div
-      className={`w-full text-left px-4 py-3 flex gap-3 items-center transition-colors border-b border-gray-50 dark:border-gray-800/60 group ${
-        selectedId === c.id
-          ? "bg-emerald-50 dark:bg-emerald-900/30"
-          : "hover:bg-gray-50 dark:hover:bg-gray-900/50"
+      className={`w-full text-left px-4 py-3 flex gap-3 items-center transition-colors border-b border-gray-50 dark:border-gray-800/60 ${
+        isSelectionHighlight
+          ? "bg-emerald-100/80 dark:bg-emerald-900/50"
+          : isActiveChat
+            ? "bg-emerald-50 dark:bg-emerald-900/30"
+            : "hover:bg-gray-50 dark:hover:bg-gray-900/50"
       }`}
       data-testid={`conversation-item-${c.id}`}
     >
       <button
         type="button"
-        onClick={() => onSelect(c)}
+        onClick={handleRowClick}
         onPointerDown={handlePointerDown}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        className="flex flex-1 gap-3 items-center min-w-0 text-left"
+        onPointerUp={clearPress}
+        onPointerLeave={clearPress}
+        onPointerCancel={clearPress}
+        className="flex flex-1 gap-3 items-center min-w-0 text-left touch-manipulation"
       >
         {isGroup ? (
           <div className="h-11 w-11 rounded-full bg-emerald-100 text-emerald-900 flex items-center justify-center shrink-0">
             <UsersIcon className="h-5 w-5" strokeWidth={1.5} />
           </div>
         ) : (
-          <Avatar
-            name={title}
-            avatarUrl={other?.avatar_url}
-            online={adminView ? undefined : isOnline}
-            status={adminView ? undefined : other?.status}
-            size={44}
-          />
+          <button
+            type="button"
+            onClick={handleAvatarClick}
+            className="shrink-0 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+            data-testid={`conv-avatar-${c.id}`}
+            aria-label={`View ${title} profile`}
+          >
+            <Avatar
+              name={title}
+              avatarUrl={other?.avatar_url}
+              online={adminView ? undefined : isOnline}
+              status={adminView ? undefined : other?.status}
+              size={44}
+            />
+          </button>
         )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <span className={`font-medium truncate flex items-center gap-1.5 ${unreadCount > 0 ? "text-gray-950 dark:text-white" : "text-gray-900 dark:text-gray-100"}`}>
-              {c.is_pinned && <Pin className="h-3 w-3 text-emerald-700 dark:text-emerald-400 shrink-0" aria-label="Pinned" />}
+              {c.is_pinned && <Pin className="h-3 w-3 text-emerald-700 dark:text-emerald-400 shrink-0" aria-hidden />}
               {title}
               {c.is_muted && (
                 <VolumeX className="h-3.5 w-3.5 text-gray-400 shrink-0" data-testid={`conv-muted-${c.id}`} aria-label="Muted" />
@@ -126,36 +147,68 @@ function ConversationRow({
           </div>
         </div>
       </button>
+    </div>
+  );
+}
 
-      {!readOnlyPrefs && onPreferenceChange && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8 shrink-0 rounded-full opacity-70 sm:opacity-0 sm:group-hover:opacity-100"
-              data-conv-menu={c.id}
-              data-testid={`conv-actions-${c.id}`}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuItem onClick={() => runPref({ is_pinned: !c.is_pinned })} data-testid={`conv-pin-${c.id}`}>
-              <Pin className="h-4 w-4" /> {c.is_pinned ? "Unpin chat" : "Pin chat"}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => runPref({ is_archived: !c.is_archived })} data-testid={`conv-archive-${c.id}`}>
-              <Archive className="h-4 w-4" /> {c.is_archived ? "Unarchive chat" : "Archive chat"}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => runPref({ is_muted: !c.is_muted })} data-testid={`conv-mute-${c.id}`}>
-              {c.is_muted ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-              {c.is_muted ? "Unmute notifications" : "Mute notifications"}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+function SelectionActionBar({ conversation, onClear, onPreferenceChange }) {
+  if (!conversation) return null;
+  const run = (patch) => onPreferenceChange?.(conversation.id, patch);
+
+  return (
+    <div
+      className="flex items-center gap-1 px-2 py-2 border-b border-emerald-800/20 bg-emerald-900 text-white min-h-[52px]"
+      data-testid="chat-list-selection-bar"
+    >
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="h-10 w-10 shrink-0 rounded-full text-white hover:bg-white/15"
+        onClick={onClear}
+        data-testid="chat-list-selection-clear"
+        aria-label="Clear selection"
+      >
+        <ArrowLeft className="h-5 w-5" />
+      </Button>
+      <span className="flex-1 text-sm font-medium truncate px-1">
+        {conversation.type === "group"
+          ? conversation.name
+          : conversation.other_user?.full_name || "Chat"}
+      </span>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className={`h-10 w-10 rounded-full hover:bg-white/15 ${conversation.is_pinned ? "text-amber-300" : "text-white"}`}
+        onClick={() => run({ is_pinned: !conversation.is_pinned })}
+        data-testid="selection-action-pin"
+        title={conversation.is_pinned ? "Unpin" : "Pin"}
+      >
+        <Pin className="h-5 w-5" />
+      </Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className={`h-10 w-10 rounded-full hover:bg-white/15 ${conversation.is_muted ? "text-rose-300" : "text-white"}`}
+        onClick={() => run({ is_muted: !conversation.is_muted })}
+        data-testid="selection-action-mute"
+        title={conversation.is_muted ? "Unmute" : "Mute"}
+      >
+        {conversation.is_muted ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
+      </Button>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="h-10 w-10 rounded-full text-white hover:bg-white/15"
+        onClick={() => run({ is_archived: !conversation.is_archived })}
+        data-testid="selection-action-archive"
+        title={conversation.is_archived ? "Unarchive" : "Archive"}
+      >
+        <Archive className="h-5 w-5" />
+      </Button>
     </div>
   );
 }
@@ -172,10 +225,16 @@ export default function ChatSidebar({
   onSelectBatch,
   onPreferenceChange,
   readOnlyPrefs = false,
+  selectedConversation = null,
+  onSelectedConversationChange,
+  onAvatarPress,
+  listScrollRef: externalListScrollRef,
 }) {
   const { user } = useAuth();
   const [q, setQ] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const internalListRef = useRef(null);
+  const listRef = externalListScrollRef || internalListRef;
 
   const activeList = useMemo(
     () => partitionConversations(conversations, { archived: false }),
@@ -187,6 +246,7 @@ export default function ChatSidebar({
   );
 
   const sourceList = showArchived ? archivedList : activeList;
+  const inSelectionMode = !!selectedConversation && !readOnlyPrefs;
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -201,7 +261,31 @@ export default function ChatSidebar({
     });
   }, [sourceList, q, adminView]);
 
-  const showBatches = !adminView && user?.role === "employee" && !showArchived;
+  const showBatches = !adminView && user?.role === "employee" && !showArchived && !inSelectionMode;
+
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const saved = loadChatListScroll();
+    if (saved > 0) el.scrollTop = saved;
+  }, [listRef]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return undefined;
+    let t;
+    const onScroll = () => {
+      clearTimeout(t);
+      t = setTimeout(() => saveChatListScroll(el.scrollTop), 120);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      clearTimeout(t);
+    };
+  }, [listRef]);
+
+  const clearSelection = () => onSelectedConversationChange?.(null);
 
   return (
     <aside
@@ -218,6 +302,14 @@ export default function ChatSidebar({
         </div>
       </div>
 
+      {inSelectionMode ? (
+        <SelectionActionBar
+          conversation={selectedConversation}
+          onClear={clearSelection}
+          onPreferenceChange={onPreferenceChange}
+        />
+      ) : null}
+
       {showBatches && (
         <div className="p-3 border-b border-gray-100 dark:border-gray-800" data-testid="batch-boards">
           <div className="flex items-center justify-between mb-2">
@@ -229,7 +321,6 @@ export default function ChatSidebar({
               Managed by admin
             </div>
           </div>
-
           <div className="flex gap-2 overflow-x-auto pb-1">
             <button
               type="button"
@@ -252,19 +343,15 @@ export default function ChatSidebar({
                     : "bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
                 }`}
                 data-testid={`batch-chip-${b.id}`}
-                title={`${b.name} (${b.client_count || 0}/${b.max_clients || 20})`}
               >
                 {b.name} <span className="text-[10px] opacity-80">({b.client_count || 0})</span>
               </button>
             ))}
-            {(batches || []).length === 0 && (
-              <div className="text-xs text-gray-400 py-1">No batches yet.</div>
-            )}
           </div>
         </div>
       )}
 
-      {!adminView && archivedList.length > 0 && (
+      {!adminView && archivedList.length > 0 && !inSelectionMode && (
         <div className="px-3 pt-2 border-b border-gray-100 dark:border-gray-800">
           <button
             type="button"
@@ -278,31 +365,33 @@ export default function ChatSidebar({
         </div>
       )}
 
-      <div className="p-3 border-b border-gray-100 dark:border-gray-800">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500 pointer-events-none" />
-          <Input
-            data-testid="chat-search-input"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder={showArchived ? "Search archived" : "Search conversations"}
-            className="pl-9 h-10 rounded-xl bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
-            type="search"
-          />
+      {!inSelectionMode && (
+        <div className="p-3 border-b border-gray-100 dark:border-gray-800">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500 pointer-events-none" />
+            <Input
+              data-testid="chat-search-input"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={showArchived ? "Search archived" : "Search conversations"}
+              className="pl-9 h-10 rounded-xl bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
+              type="search"
+            />
+          </div>
         </div>
-      </div>
+      )}
 
-      {showArchived && (
+      {showArchived && !inSelectionMode && (
         <div className="px-4 py-2 text-[10px] uppercase tracking-[0.2em] text-gray-400 border-b border-gray-50 dark:border-gray-800">
           Archived chats
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto" data-testid="chat-list-scroll">
         {filtered.length === 0 ? (
           <div className="p-8 text-center text-gray-400 text-sm" data-testid="no-conversations">
             {showArchived ? "No archived conversations." : "No conversations yet."}
-            {!adminView && !showArchived && (
+            {!adminView && !showArchived && !inSelectionMode && (
               <div className="mt-3">
                 <Button onClick={onNewChat} variant="outline" className="rounded-full" data-testid="empty-state-new-chat-btn">
                   <Plus className="h-4 w-4 mr-1" /> Start a chat
@@ -317,10 +406,12 @@ export default function ChatSidebar({
               c={c}
               adminView={adminView}
               onlineUsers={onlineUsers}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              onPreferenceChange={onPreferenceChange}
-              readOnlyPrefs={readOnlyPrefs || adminView}
+              activeChatId={selectedId}
+              selectionModeId={selectedConversation?.id}
+              onOpenChat={onSelect}
+              onLongPressSelect={readOnlyPrefs ? undefined : onSelectedConversationChange}
+              onAvatarPress={onAvatarPress}
+              readOnlyPrefs={readOnlyPrefs}
             />
           ))
         )}

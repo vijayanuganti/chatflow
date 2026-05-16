@@ -1,5 +1,5 @@
-import React from "react";
-import { Check, CheckCheck, Clock, AlertCircle, FileText, Download } from "lucide-react";
+import React, { useRef } from "react";
+import { Check, CheckCheck, Clock, AlertCircle, FileText, Download, Star } from "lucide-react";
 import { fileUrl } from "@/lib/api";
 import VoiceNotePlayer, { parseVoiceNoteDurationLabel } from "@/components/VoiceNotePlayer";
 
@@ -23,6 +23,21 @@ function resolveMessageStatus(message, readByOthers, readByAll) {
   return "sent";
 }
 
+function highlightText(text, query) {
+  if (!text || !query?.trim()) return text;
+  const q = query.trim();
+  const lower = text.toLowerCase();
+  const idx = lower.indexOf(q.toLowerCase());
+  if (idx < 0) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-amber-200/90 dark:bg-amber-500/40 text-inherit rounded px-0.5">{text.slice(idx, idx + q.length)}</mark>
+      {text.slice(idx + q.length)}
+    </>
+  );
+}
+
 /**
  * Props:
  *  - message: message doc
@@ -37,7 +52,13 @@ export default function MessageBubble({
   totalRecipients,
   showReceipts = true,
   onImageClick,
+  selected = false,
+  starred = false,
+  searchQuery = "",
+  onLongPress,
+  dimmed = false,
 }) {
+  const longPressRef = useRef(null);
   const time = formatTime(message.created_at);
   const bubbleClass = mine ? "bubble-sent" : "bubble-received";
   const align = mine ? "items-end" : "items-start";
@@ -46,15 +67,31 @@ export default function MessageBubble({
   const readByAll = totalRecipients > 0 && readByOthers.length >= totalRecipients;
   const tickStatus = resolveMessageStatus(message, readByOthers, readByAll);
 
-  const wrapperClass = message.__error ? "opacity-90" : "";
+  const wrapperClass = [
+    message.__error ? "opacity-90" : "",
+    dimmed && !selected ? "opacity-40" : "",
+    selected ? "ring-2 ring-emerald-500/80 rounded-2xl" : "",
+  ].filter(Boolean).join(" ");
+
+  const handlePointerDown = () => {
+    if (!onLongPress || !message.id) return;
+    clearTimeout(longPressRef.current);
+    longPressRef.current = setTimeout(() => onLongPress(message), 450);
+  };
 
   return (
     <div
       className={`flex flex-col ${align} animate-in-up ${wrapperClass}`}
       data-testid={`message-${message.id}`}
       data-status={message.__pending ? "pending" : message.__error ? "error" : tickStatus}
+      onPointerDown={handlePointerDown}
+      onPointerUp={() => clearTimeout(longPressRef.current)}
+      onPointerLeave={() => clearTimeout(longPressRef.current)}
     >
-      <div className={`${bubbleClass} max-w-[82%] md:max-w-[65%] px-3 py-2 shadow-sm`}>
+      <div className={`${bubbleClass} max-w-[82%] md:max-w-[65%] px-3 py-2 shadow-sm relative`}>
+        {starred && (
+          <Star className="absolute -top-1 -right-1 h-3.5 w-3.5 text-amber-500 fill-amber-400" aria-hidden />
+        )}
         {showSenderName && !mine && (
           <div className="text-[11px] font-semibold text-emerald-800 mb-0.5" data-testid={`sender-name-${message.id}`}>
             {message.sender_name || "User"}
@@ -99,7 +136,9 @@ export default function MessageBubble({
           </a>
         )}
         {message.content && message.message_type !== "audio" ? (
-          <p className="whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100 leading-relaxed">{message.content}</p>
+          <p className="whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100 leading-relaxed">
+            {highlightText(message.content, searchQuery)}
+          </p>
         ) : null}
         <div className="flex items-center justify-end gap-1 mt-1">
           <span className="text-[10px] text-gray-500">{time}</span>

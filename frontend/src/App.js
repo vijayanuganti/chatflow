@@ -14,6 +14,7 @@ import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import UserAccountDetailPage from "@/pages/UserAccountDetailPage";
 import NewConversationPage from "@/pages/NewConversationPage";
 import DietPlanPage from "@/pages/DietPlanPage";
+import UserProfilePage from "@/pages/UserProfilePage";
 import { Toaster } from "@/components/ui/sonner";
 import PushNotificationBootstrap from "@/components/PushNotificationBootstrap";
 import InAppMessageBanner from "@/components/InAppMessageBanner";
@@ -143,6 +144,14 @@ function App() {
               }
             />
             <Route
+              path="/chat/contact/:userId"
+              element={
+                <Protected roles={["employee", "client", "admin"]}>
+                  <UserProfilePage />
+                </Protected>
+              }
+            />
+            <Route
               path="/admin/profile"
               element={
                 <Protected roles={["admin"]}>
@@ -187,6 +196,14 @@ function App() {
               element={
                 <Protected roles={["admin"]}>
                   <UserAccountDetailPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/admin/contact/:userId"
+              element={
+                <Protected roles={["admin"]}>
+                  <UserProfilePage />
                 </Protected>
               }
             />

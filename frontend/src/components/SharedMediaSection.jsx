@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, FileText, Image as ImageIcon, Loader2, Video } from "lucide-react";
-import { api, formatApiError } from "@/lib/api";
+import { ExternalLink, FileText, Loader2 } from "lucide-react";
+import { api, fileUrl, formatApiError } from "@/lib/api";
 import { categorizeSharedMessages } from "@/lib/sharedMedia";
 import { toast } from "sonner";
+import ImageLightbox from "./ImageLightbox";
 
 const TABS = [
   { id: "media", label: "Media" },
@@ -10,17 +11,27 @@ const TABS = [
   { id: "links", label: "Links" },
 ];
 
-export default function SharedMediaSection({ profileUserId, title = "Shared Media" }) {
+export default function SharedMediaSection({
+  profileUserId,
+  conversationId: conversationIdProp,
+  title = "Shared Media",
+  variant = "compact",
+}) {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("media");
   const [categorized, setCategorized] = useState({ media: [], documents: [], links: [] });
+  const [lightbox, setLightbox] = useState(null);
+  const isProfile = variant === "profile";
 
   const load = useCallback(async () => {
-    if (!profileUserId) return;
+    if (!profileUserId && !conversationIdProp) return;
     setLoading(true);
     try {
-      const start = await api.post("/conversations/start", { other_user_id: profileUserId });
-      const convId = start.data?.conversation?.id;
+      let convId = conversationIdProp;
+      if (!convId && profileUserId) {
+        const start = await api.post("/conversations/start", { other_user_id: profileUserId });
+        convId = start.data?.conversation?.id;
+      }
       if (!convId) {
         setCategorized({ media: [], documents: [], links: [] });
         return;
@@ -33,7 +44,7 @@ export default function SharedMediaSection({ profileUserId, title = "Shared Medi
     } finally {
       setLoading(false);
     }
-  }, [profileUserId]);
+  }, [profileUserId, conversationIdProp]);
 
   useEffect(() => {
     void load();
@@ -53,8 +64,8 @@ export default function SharedMediaSection({ profileUserId, title = "Shared Medi
     : categorized.links;
 
   return (
-    <section className="mt-6 space-y-3" data-testid="shared-media-section">
-      <h2 className="font-display text-base font-semibold dark:text-gray-100">{title}</h2>
+    <section className="space-y-3" data-testid="shared-media-section">
+      {title ? <h2 className="font-display text-base font-semibold dark:text-gray-100">{title}</h2> : null}
       <div className="flex gap-1 overflow-x-auto rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-1">
         {TABS.map((t) => (
           <button
@@ -82,28 +93,46 @@ export default function SharedMediaSection({ profileUserId, title = "Shared Medi
         <p className="text-sm text-gray-500 dark:text-gray-400 py-6 text-center">
           No {tab} shared in this conversation yet.
         </p>
+      ) : tab === "media" && isProfile ? (
+        <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+          {items.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              className="aspect-square rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+              onClick={() => {
+                if (m.message_type === "image") {
+                  setLightbox({ src: fileUrl(m.file_url), alt: m.file_name || "image" });
+                } else {
+                  window.open(fileUrl(m.file_url), "_blank", "noopener,noreferrer");
+                }
+              }}
+            >
+              {m.message_type === "video" ? (
+                <video src={fileUrl(m.file_url)} className="h-full w-full object-cover" muted />
+              ) : (
+                <img src={fileUrl(m.file_url)} alt="" className="h-full w-full object-cover" loading="lazy" />
+              )}
+            </button>
+          ))}
+        </div>
       ) : (
-        <div className="space-y-2 max-h-72 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
+        <div className={`space-y-2 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 ${isProfile ? "max-h-none" : "max-h-72"}`}>
           {tab === "media" && items.map((m) => (
             <a
               key={m.id}
-              href={m.file_url}
+              href={fileUrl(m.file_url)}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-900/50"
             >
-              {m.message_type === "video" ? (
-                <Video className="h-5 w-5 text-rose-600 shrink-0" />
-              ) : (
-                <ImageIcon className="h-5 w-5 text-violet-600 shrink-0" />
-              )}
               <span className="text-sm truncate dark:text-gray-200">{m.file_name || m.message_type}</span>
             </a>
           ))}
           {tab === "documents" && items.map((m) => (
             <a
               key={m.id}
-              href={m.file_url}
+              href={fileUrl(m.file_url)}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-900/50"
@@ -130,6 +159,13 @@ export default function SharedMediaSection({ profileUserId, title = "Shared Medi
           ))}
         </div>
       )}
+
+      <ImageLightbox
+        open={!!lightbox?.src}
+        src={lightbox?.src}
+        alt={lightbox?.alt}
+        onClose={() => setLightbox(null)}
+      />
     </section>
   );
 }
