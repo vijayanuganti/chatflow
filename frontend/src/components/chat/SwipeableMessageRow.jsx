@@ -121,7 +121,7 @@ export default function SwipeableMessageRow({
       onTouchEnd={onTouchEnd}
       onTouchCancel={onTouchEnd}
     >
-      <div className="relative inline-block max-w-full">
+      <div className="relative inline-block max-w-[75%]">
         <div
           ref={replyIconRef}
           style={{

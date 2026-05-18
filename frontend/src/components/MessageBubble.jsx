@@ -99,7 +99,7 @@ function MessageBubble({
 
   return (
     <div
-      className={`flex w-full flex-col ${align} animate-in-up ${wrapperClass} ${dimmed && !selected ? "opacity-45" : ""}`}
+      className={`flex flex-col ${align} animate-in-up ${wrapperClass} ${dimmed && !selected ? "opacity-45" : ""}`}
       style={NO_SELECT_STYLE}
       data-testid={`message-${message.id || message.__tempId}`}
       data-status={message.__pending ? "pending" : message.__error ? "error" : tickStatus}
@@ -111,7 +111,7 @@ function MessageBubble({
     >
       <div
         ref={bubbleRef}
-        className={`${bubbleClass} message-bubble relative px-3 py-2 shadow-sm`}
+        className={`${bubbleClass} message-bubble relative px-3 py-2 shadow-sm w-fit`}
         style={NO_SELECT_STYLE}
       >
         {selected && (
