@@ -250,7 +250,7 @@ export default function ChatWindow({
     setComposerFocused(false);
     setThreadSearchOpen(false);
     setThreadSearchQuery("");
-    setSelectedMessage(null);
+    setSelectedMessages([]);
   }, [conversation?.id]);
 
   useEffect(() => {
