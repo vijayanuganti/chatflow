@@ -863,6 +863,7 @@ class MessageBody(BaseModel):
     reply_to_id: Optional[str] = None
     reply_to_snippet: Optional[str] = None
     reply_to_sender: Optional[str] = None
+    is_forwarded: bool = False
 
 
 class ConversationPreferencesBody(BaseModel):
@@ -2758,6 +2759,8 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
         msg["reply_to_id"] = body.reply_to_id.strip()
         msg["reply_to_snippet"] = (body.reply_to_snippet or "")[:500]
         msg["reply_to_sender"] = (body.reply_to_sender or "")[:120]
+    if body.is_forwarded:
+        msg["is_forwarded"] = True
 
     await db.messages.insert_one(dict(msg))
     preview = body.content if body.message_type == "text" else f"[{body.message_type}]"

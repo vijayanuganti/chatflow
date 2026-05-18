@@ -9,13 +9,12 @@ import {
   UtensilsCrossed,
   ChevronDown,
   Search,
-  Star,
   X,
   Reply,
   Forward,
 } from "lucide-react";
 import SwipeableMessageRow from "@/components/chat/SwipeableMessageRow";
-import ForwardMessageSheet from "@/components/chat/ForwardMessageSheet";
+import ForwardModal from "@/components/chat/ForwardModal";
 import { messageReplySnippet } from "@/lib/messageReply";
 import { groupMessagesByDate } from "@/lib/chatDateGroups";
 import { sortMessagesChronologically } from "@/lib/optimisticMessages";
@@ -23,8 +22,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   getStarredIds,
-  toggleStarredMessage,
-  isMessageStarred,
 } from "@/lib/starredMessages";
 import { formatApiError } from "@/lib/api";
 import { inferMessageTypeFromFile, createVideoPosterFromFile } from "@/lib/chatMedia";
@@ -93,14 +90,15 @@ export default function ChatWindow({
   };
   const [threadSearchOpen, setThreadSearchOpen] = useState(false);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
-  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [selectedMessages, setSelectedMessages] = useState([]);
+  const isSelectionMode = selectedMessages.length > 0;
   const isSelectionModeActive = useRef(false);
   useEffect(() => {
-    isSelectionModeActive.current = !!selectedMessage;
-  }, [selectedMessage]);
+    isSelectionModeActive.current = isSelectionMode;
+  }, [isSelectionMode]);
   const [replyingTo, setReplyingTo] = useState(null);
-  const [forwardOpen, setForwardOpen] = useState(false);
-  const [forwardMessage, setForwardMessage] = useState(null);
+  const [showForwardModal, setShowForwardModal] = useState(false);
+  const [forwardMessages, setForwardMessages] = useState([]);
   const [starredIds, setStarredIds] = useState(() => getStarredIds(user?.id));
   const [text, setText] = useState("");
   const [composerFocused, setComposerFocused] = useState(false);
@@ -259,10 +257,6 @@ export default function ChatWindow({
     if (user?.id) setStarredIds(getStarredIds(user.id));
   }, [user?.id]);
 
-  const refreshStarred = useCallback(() => {
-    if (user?.id) setStarredIds(getStarredIds(user.id));
-  }, [user?.id]);
-
   /* Keep typing=true refreshed while the composer is focused (mobile WS / idle gaps). */
   useEffect(() => {
     if (readOnly || !conversation?.id || !sendTyping || !text.trim() || !composerFocused) {
@@ -311,7 +305,7 @@ export default function ChatWindow({
       snippet: messageReplySnippet(message),
       mine,
     });
-    setSelectedMessage(null);
+    setSelectedMessages([]);
     requestAnimationFrame(() => {
       try {
         composerRef.current?.focus({ preventScroll: true });
@@ -320,6 +314,26 @@ export default function ChatWindow({
       }
     });
   }, [readOnly, user?.id]);
+
+  const messageKey = useCallback((m) => String(m?.id || m?.__tempId || ""), []);
+
+  const toggleSelect = useCallback((id) => {
+    const key = String(id);
+    if (!key) return;
+    setSelectedMessages((prev) => {
+      const next = prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key];
+      return next;
+    });
+  }, []);
+
+  const handleLongPressSelect = useCallback(
+    (message) => {
+      const key = messageKey(message);
+      if (!key || readOnly) return;
+      setSelectedMessages((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    },
+    [messageKey, readOnly],
+  );
 
   const startReplyRef = useRef(startReply);
   startReplyRef.current = startReply;
@@ -351,11 +365,25 @@ export default function ChatWindow({
     onSendMessage(body, { tempId: failed.__tempId || failed.id });
   }, [conversation, onSendMessage]);
 
-  const openForward = useCallback((message) => {
-    setForwardMessage(message);
-    setForwardOpen(true);
-    setSelectedMessage(null);
-  }, []);
+  const handleReply = useCallback(() => {
+    if (selectedMessages.length !== 1) return;
+    const key = selectedMessages[0];
+    const msg = (messages || []).find((m) => messageKey(m) === key);
+    if (msg) startReply(msg);
+    setSelectedMessages([]);
+  }, [selectedMessages, messages, messageKey, startReply]);
+
+  const handleForward = useCallback(() => {
+    const keys = new Set(selectedMessages);
+    const msgsToForward = (messages || []).filter((m) => {
+      const id = m.id;
+      return id && keys.has(String(id));
+    });
+    if (msgsToForward.length === 0) return;
+    setForwardMessages(msgsToForward);
+    setShowForwardModal(true);
+    setSelectedMessages([]);
+  }, [selectedMessages, messages]);
 
   const handleSendText = () => {
     const value = text.trim();
@@ -589,13 +617,6 @@ export default function ChatWindow({
     });
   };
 
-  const toggleStarSelected = () => {
-    if (!selectedMessage?.id || !user?.id) return;
-    const nowStarred = toggleStarredMessage(user.id, selectedMessage.id);
-    refreshStarred();
-    setSelectedMessage(null);
-    toast.success(nowStarred ? "Message starred" : "Star removed");
-  };
 
   const openDietPlan = () => {
     const dietClient =
@@ -621,22 +642,43 @@ export default function ChatWindow({
           />
         ) : null}
         <div className="flex items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5 md:py-2.5">
-        {selectedMessage && !readOnly ? (
-          <>
-            <Button size="icon" variant="ghost" className="rounded-full" onClick={() => setSelectedMessage(null)} data-testid="message-selection-clear">
+        {isSelectionMode && !readOnly ? (
+          <div className="selection-bar flex w-full items-center gap-2" data-testid="message-selection-bar">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="rounded-full shrink-0"
+              onClick={() => setSelectedMessages([])}
+              data-testid="message-selection-clear"
+              title="Clear"
+            >
               <ArrowLeft className="h-5 w-5" />
             </Button>
-            <span className="flex-1 text-sm font-medium dark:text-gray-100">1 selected</span>
-            <Button size="icon" variant="ghost" className="rounded-full text-emerald-700" onClick={() => startReply(selectedMessage)} data-testid="message-selection-reply" title="Reply">
+            <span className="flex-1 text-sm font-medium tabular-nums dark:text-gray-100" data-testid="message-selection-count">
+              {selectedMessages.length} selected
+            </span>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="rounded-full text-emerald-700 disabled:opacity-40"
+              onClick={handleReply}
+              disabled={selectedMessages.length !== 1}
+              data-testid="message-selection-reply"
+              title="Reply"
+            >
               <Reply className="h-5 w-5" />
             </Button>
-            <Button size="icon" variant="ghost" className="rounded-full text-emerald-700" onClick={() => openForward(selectedMessage)} data-testid="message-selection-forward" title="Forward">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="rounded-full text-emerald-700"
+              onClick={handleForward}
+              data-testid="message-selection-forward"
+              title="Forward"
+            >
               <Forward className="h-5 w-5" />
             </Button>
-            <Button size="icon" variant="ghost" className="rounded-full text-amber-600" onClick={toggleStarSelected} data-testid="message-selection-star">
-              <Star className={`h-5 w-5 ${starredIds.has(String(selectedMessage.id)) ? "fill-amber-500" : ""}`} />
-            </Button>
-          </>
+          </div>
         ) : (
           <>
         {onBack && (
@@ -758,7 +800,7 @@ export default function ChatWindow({
           </>
         )}
         </div>
-        {threadSearchOpen && !selectedMessage && (
+        {threadSearchOpen && !isSelectionMode && (
           <div className="px-3 pb-2 flex items-center gap-2 border-t border-gray-100 dark:border-gray-800" data-testid="chat-thread-search-bar">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
@@ -810,6 +852,7 @@ export default function ChatWindow({
           } else {
             mine = m.sender_id === user.id;
           }
+          const mKey = messageKey(m);
           const bubble = (
             <MessageBubble
               message={m}
@@ -818,11 +861,13 @@ export default function ChatWindow({
               totalRecipients={totalRecipients}
               showReceipts={!readOnly}
               onImageClick={handleImageClick}
-              selected={selectedMessage?.id === m.id}
+              selected={selectedMessages.includes(mKey)}
               starred={m.id ? starredIds.has(String(m.id)) : false}
               searchQuery={threadSearchQuery}
-              onLongPress={readOnly ? undefined : setSelectedMessage}
-              dimmed={!!selectedMessage && selectedMessage?.id !== m.id}
+              selectionMode={isSelectionMode}
+              onLongPress={readOnly ? undefined : handleLongPressSelect}
+              onToggleSelect={readOnly ? undefined : toggleSelect}
+              dimmed={isSelectionMode && !selectedMessages.includes(mKey)}
               onRetry={readOnly ? undefined : handleRetryMessage}
             />
           );
@@ -830,7 +875,7 @@ export default function ChatWindow({
             <SwipeableMessageRow
               key={m.__tempId || m.id}
               isSent={mine}
-              disabled={readOnly || !!selectedMessage}
+              disabled={readOnly || isSelectionMode}
               selectionModeRef={isSelectionModeActive}
               onSwipeReply={() => startReplyRef.current(m)}
             >
@@ -891,10 +936,10 @@ export default function ChatWindow({
         </div>
       )}
 
-      <ForwardMessageSheet
-        open={forwardOpen}
-        onOpenChange={setForwardOpen}
-        message={forwardMessage}
+      <ForwardModal
+        open={showForwardModal}
+        onOpenChange={setShowForwardModal}
+        messages={forwardMessages}
         conversations={conversations}
         currentConversationId={conversation?.id}
       />
