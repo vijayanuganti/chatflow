@@ -368,14 +368,14 @@ export default function ChatWindow({
   const handleReply = useCallback(() => {
     if (selectedMessages.length !== 1) return;
     const key = selectedMessages[0];
-    const msg = (messages || []).find((m) => messageKey(m) === key);
+    const msg = visibleMessages.find((m) => messageKey(m) === key);
     if (msg) startReply(msg);
     setSelectedMessages([]);
-  }, [selectedMessages, messages, messageKey, startReply]);
+  }, [selectedMessages, visibleMessages, messageKey, startReply]);
 
   const handleForward = useCallback(() => {
     const keys = new Set(selectedMessages);
-    const msgsToForward = (messages || []).filter((m) => {
+    const msgsToForward = visibleMessages.filter((m) => {
       const id = m.id;
       return id && keys.has(String(id));
     });
@@ -383,7 +383,7 @@ export default function ChatWindow({
     setForwardMessages(msgsToForward);
     setShowForwardModal(true);
     setSelectedMessages([]);
-  }, [selectedMessages, messages]);
+  }, [selectedMessages, visibleMessages]);
 
   const handleSendText = () => {
     const value = text.trim();
@@ -586,14 +586,17 @@ export default function ChatWindow({
 
   // Header
   const headerName = isGroup ? conversation.name : otherUser?.full_name;
-  const typingArr = Object.entries(typingUsers || {}).filter(([uid]) => uid !== user.id);
+  const typingArr = Object.entries(typingUsers || {}).filter(([uid]) => uid !== user?.id);
   const othersTypingCount = typingArr.length;
 
   const headerStatusLine = (() => {
     if (readOnly && !othersTypingCount) return { kind: "text", value: "Admin read-only view" };
     if (othersTypingCount > 0) return { kind: "typing" };
     if (readOnly) return { kind: "text", value: "Admin read-only view" };
-    if (isGroup) return { kind: "text", value: `${conversation.participants.length} members` };
+    if (isGroup) {
+      const count = conversation.participants?.length ?? 0;
+      return { kind: "text", value: `${count} members` };
+    }
     if (isOnline) return { kind: "text", value: "online" };
     const lsIso = (otherUser?.id && lastSeenByUser[otherUser.id]) || otherUser?.last_seen;
     const lsText = formatWhatsAppLastSeen(lsIso);
@@ -850,7 +853,7 @@ export default function ChatWindow({
           } else if (readOnly && isGroup) {
             mine = m.sender_id === conversation.created_by;
           } else {
-            mine = m.sender_id === user.id;
+            mine = m.sender_id === user?.id;
           }
           const mKey = messageKey(m);
           const bubble = (

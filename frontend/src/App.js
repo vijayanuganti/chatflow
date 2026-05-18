@@ -103,7 +103,9 @@ function App() {
               path="/chat"
               element={
                 <Protected roles={["employee", "client", "admin"]}>
-                  <ChatApp />
+                  <PanelErrorBoundary fallbackPath="/login">
+                    <ChatApp />
+                  </PanelErrorBoundary>
                 </Protected>
               }
             />
