@@ -14,11 +14,19 @@ import usePanelMobileBack from "@/hooks/usePanelMobileBack";
 import useMobileChatViewport from "@/hooks/useMobileChatViewport";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useChat } from "@/context/ChatContext";
+import { getStoredActiveConversationId } from "@/lib/activeConversationStorage";
 import {
   ensureNotificationPermission,
   registerServiceWorker,
   showAppNotification,
 } from "@/lib/notify";
+import {
+  fcmGroupKeyForSender,
+  shouldShowInAppAlert,
+  shouldShowSystemTrayNotification,
+  shouldSuppressAllNotifications,
+} from "@/lib/notificationDisplay";
 import {
   playInboundMessageTone,
   playConversationIncomingTone,
@@ -48,7 +56,8 @@ import {
   mergeMessageStatus,
 } from "@/lib/messageSeen";
 import { toast } from "sonner";
-import { Plus, MessageSquare, UtensilsCrossed, Settings, Layers } from "lucide-react";
+import { MessageSquare, UtensilsCrossed, Settings, Layers } from "lucide-react";
+import ComposeIcon from "@/components/icons/ComposeIcon";
 import PanelBottomNav from "@/components/layout/PanelBottomNav";
 import ProfileQuickView from "@/components/ProfileQuickView";
 import { dietPlanPath, profilePath, userProfilePath } from "@/lib/appRoutes";
@@ -67,6 +76,7 @@ import { useOptimisticMessageSend } from "@/hooks/useOptimisticMessageSend";
 export default function ChatApp() {
   useMobileChatViewport();
   const { user } = useAuth();
+  const { setActiveConversationId, clearActiveConversation } = useChat();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -79,6 +89,7 @@ export default function ChatApp() {
   const [typingUsers, setTypingUsers] = useState({}); // convId -> {userId: name}
   const selectedIdRef = useRef(null);
   const seenInflightRef = useRef(new Set());
+  const restoreNavRef = useRef(false);
   useEffect(() => {
     selectedIdRef.current = selected?.id ?? null;
   }, [selected?.id]);
@@ -96,39 +107,67 @@ export default function ChatApp() {
     user?.role === "admin" ||
     (user?.role === "employee" && !!user?.account_creation_access);
 
-  // Open conversation from push notification or ?c= in URL.
+  // Restore thread from URL, push, or sessionStorage (returning from diet/medical).
   useEffect(() => {
-    const convId = chatConvIdFromUrl || location.state?.conversationId;
+    const convId =
+      chatConvIdFromUrl ||
+      location.state?.conversationId ||
+      location.state?.pendingChat?.selectedConv?.id ||
+      getStoredActiveConversationId();
     if (!convId || conversations.length === 0) return;
     const target = conversations.find((c) => c.id === convId);
-    if (target) setSelected(target);
-  }, [chatConvIdFromUrl, location.state?.conversationId, conversations]);
+    if (target) {
+      setSelected(target);
+      setActiveConversationId(target.id);
+      if (!chatConvIdFromUrl && target.id && !restoreNavRef.current) {
+        restoreNavRef.current = true;
+        navigate(chatOpenTarget(target.id), { replace: true });
+      }
+    }
+  }, [
+    chatConvIdFromUrl,
+    location.state?.conversationId,
+    location.state?.pendingChat,
+    conversations,
+    navigate,
+    setActiveConversationId,
+  ]);
 
-  /** Sync list view when ?c= is cleared (browser / system back). */
   useEffect(() => {
-    if (chatConvIdFromUrl) return;
-    setSelected((prev) => (prev ? null : prev));
-  }, [chatConvIdFromUrl]);
+    if (selected?.id) setActiveConversationId(selected.id);
+  }, [selected?.id, setActiveConversationId]);
+
+  useEffect(() => {
+    const pending = location.state?.pendingChat;
+    if (!pending?.selectedConv?.id || conversations.length === 0) return;
+    const resolved =
+      conversations.find((c) => c.id === pending.selectedConv.id) || pending.selectedConv;
+    setSelected(resolved);
+    setActiveConversationId(resolved.id);
+    navigate(chatOpenTarget(resolved.id), { replace: true, state: {} });
+  }, [location.state?.pendingChat, conversations, navigate, setActiveConversationId]);
 
   const openChat = useCallback(
     (conv) => {
       if (!conv?.id) return;
       setListSelection(null);
       setSelected(conv);
+      setActiveConversationId(conv.id);
       setMobileSection("chats");
       navigate(chatOpenTarget(conv.id), { push: true });
     },
-    [navigate],
+    [navigate, setActiveConversationId],
   );
 
   const closeChat = useCallback(() => {
+    clearActiveConversation();
     if (chatConvIdFromUrl) {
       navigate(-1);
       return;
     }
     setSelected(null);
     navigate(chatListTarget(), { replace: true });
-  }, [chatConvIdFromUrl, navigate]);
+  }, [chatConvIdFromUrl, navigate, clearActiveConversation]);
 
   // Return from full-screen new-conversation page with a started thread.
   useEffect(() => {
@@ -324,36 +363,42 @@ export default function ChatApp() {
     const title = msg.conversation_type === "group"
       ? `${sender} (group)`
       : sender;
-    const appVisible = document.visibilityState === "visible";
-    const inActiveChat = appVisible && selectedIdRef.current === msg.conversation_id;
+    const convId = msg.conversation_id;
+    const tag = fcmGroupKeyForSender(msg.sender_id, convId);
 
-    if (inActiveChat) {
-      void playConversationIncomingTone(msg.conversation_id);
+    if (shouldSuppressAllNotifications(convId)) {
+      void playConversationIncomingTone(convId);
       return;
     }
 
-    if (appVisible) {
+    if (shouldShowInAppAlert(convId)) {
       void playSoftForegroundTone();
       showInAppMessageBanner({
         title,
         body: preview,
-        conversationId: msg.conversation_id,
+        conversationId: convId,
         onOpen: () => {
-          const target = conversations.find((c) => c.id === msg.conversation_id);
+          const target = conversations.find((c) => c.id === convId);
           if (target) setSelected(target);
         },
       });
       return;
     }
 
+    if (!shouldShowSystemTrayNotification()) return;
+
     playInboundMessageTone();
     showAppNotification({
       title,
       body: preview,
-      tag: msg.id ? `msg-${msg.id}` : `msg-${Date.now()}`,
+      tag,
       url: "/chat",
-      data: { conversation_id: msg.conversation_id },
+      data: {
+        conversation_id: convId,
+        sender_id: msg.sender_id != null ? String(msg.sender_id) : "",
+      },
       silent: notificationToneSuppressesOsSound(),
+      renotify: false,
     });
   }, [user.id, conversations, setSelected]);
 
@@ -703,6 +748,7 @@ export default function ChatApp() {
           <ChatWindow
             conversation={selected}
             messages={messages}
+            conversations={conversations}
             onSendMessage={handleSendMessage}
             onPatchMessage={patchMessage}
             typingUsers={(selected && typingUsers[selected.id]) || {}}
@@ -720,6 +766,8 @@ export default function ChatApp() {
           type="button"
           onClick={openNewConversation}
           data-testid="new-chat-fab"
+          title="New chat"
+          aria-label="New chat"
           className={`fixed z-30 h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white shadow-lg flex items-center justify-center right-[max(1rem,calc(1rem+env(safe-area-inset-right,0px)))] sm:right-[max(1.5rem,calc(1.5rem+env(safe-area-inset-right,0px)))] ${
             showMobileFooter && (isClient || isEmployee)
               ? "bottom-[calc(3.5rem+env(safe-area-inset-bottom)+1rem)] md:bottom-[max(1rem,calc(1rem+env(safe-area-inset-bottom,0px)))]"
@@ -727,7 +775,7 @@ export default function ChatApp() {
           }`}
           title="New chat"
         >
-          <Plus className="h-5 w-5 sm:h-6 sm:w-6" />
+          <ComposeIcon width={22} height={22} className="sm:w-6 sm:h-6" />
         </button>
       )}
 

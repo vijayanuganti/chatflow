@@ -2,6 +2,7 @@
 import { useNavigate, useParams, useLocation, useSearchParams } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
+import ComposeIcon from "@/components/icons/ComposeIcon";
 import TopBar from "@/components/TopBar";
 import useChatSocket from "@/hooks/useChatSocket";
 import usePanelMobileBack from "@/hooks/usePanelMobileBack";
@@ -16,6 +17,11 @@ import {
   playInboundMessageTone,
   notificationToneSuppressesOsSound,
 } from "@/lib/notificationTone";
+import {
+  fcmGroupKeyForSender,
+  shouldShowSystemTrayNotification,
+  shouldSuppressAllNotifications,
+} from "@/lib/notificationDisplay";
 import { toast } from "sonner";
 import {
   Users, MessageSquare, Briefcase, UserCircle2, LayoutDashboard,
@@ -25,6 +31,7 @@ import {
   HardDrive, Trash2, Settings,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useChat } from "@/context/ChatContext";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import Avatar from "@/components/Avatar";
@@ -153,6 +160,7 @@ function StatCard({ icon: Icon, label, value, testId, accent }) {
 export default function AdminDashboard() {
   useMobileChatViewport();
   const { user } = useAuth();
+  const { setActiveConversationId, clearActiveConversation } = useChat();
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -248,14 +256,16 @@ export default function AdminDashboard() {
       if (!conv?.id) return;
       setListSelection(null);
       setSelected(conv);
+      setActiveConversationId(conv.id);
       setMobileChatStep("chat");
       const path = adminTabPath(tabKey === "chats" ? "chats" : "mychats");
       navigate(adminChatOpenTarget(path, conv.id), { push: true });
     },
-    [navigate, tab],
+    [navigate, tab, setActiveConversationId],
   );
 
   const closeAdminChat = useCallback(() => {
+    clearActiveConversation();
     if (chatConvIdFromUrl) {
       navigate(-1);
       return;
@@ -263,7 +273,7 @@ export default function AdminDashboard() {
     setSelected(null);
     setMobileChatStep("list");
     navigate(adminChatListTarget(location.pathname), { replace: true });
-  }, [chatConvIdFromUrl, navigate, location.pathname]);
+  }, [chatConvIdFromUrl, navigate, location.pathname, clearActiveConversation]);
 
   const goToTab = useCallback((t, opts = {}) => {
     const {
@@ -850,7 +860,8 @@ export default function AdminDashboard() {
       !own
       && shouldNotifyForMessage(msg, user.id)
       && (inRecipientList || adminMonitoring)
-      && !(document.visibilityState === "visible" && isViewingConversation(msg.conversation_id, activeId))
+      && !shouldSuppressAllNotifications(msg.conversation_id)
+      && shouldShowSystemTrayNotification()
     ) {
       const sender = msg.sender_name || "Someone";
       const preview = msg.message_type === "text"
@@ -863,10 +874,14 @@ export default function AdminDashboard() {
       showAppNotification({
         title,
         body: preview,
-        tag: msg.id ? `msg-${msg.id}` : `msg-${Date.now()}`,
+        tag: fcmGroupKeyForSender(msg.sender_id, msg.conversation_id),
         url: "/admin/mychats",
-        data: { conversation_id: msg.conversation_id },
+        data: {
+          conversation_id: msg.conversation_id,
+          sender_id: msg.sender_id != null ? String(msg.sender_id) : "",
+        },
         silent: notificationToneSuppressesOsSound(),
+        renotify: false,
       });
     }
     setMessages((prev) => {
@@ -1480,6 +1495,7 @@ export default function AdminDashboard() {
               <ChatWindow
                 conversation={selected}
                 messages={messages}
+                conversations={myConvs}
                 onSendMessage={handleSendMessage}
                 onPatchMessage={patchMessage}
                 typingUsers={(selected && typingUsers[selected.id]) || {}}
@@ -1530,6 +1546,7 @@ export default function AdminDashboard() {
               <ChatWindow
                 conversation={selected}
                 messages={messages}
+                conversations={tab === "chats" ? allConvs : myConvs}
                 onSendMessage={handleSendMessage}
                 onPatchMessage={patchMessage}
                 typingUsers={(selected && typingUsers[selected.id]) || {}}
@@ -1673,6 +1690,7 @@ export default function AdminDashboard() {
                 <ChatWindow
                   conversation={selected}
                   messages={messages}
+                  conversations={activityData?.conversations || []}
                   onSendMessage={handleSendMessage}
                   onPatchMessage={patchMessage}
                   typingUsers={(selected && typingUsers[selected.id]) || {}}
@@ -2462,7 +2480,7 @@ export default function AdminDashboard() {
           className="md:hidden fixed right-4 bottom-[calc(56px+env(safe-area-inset-bottom)+1rem)] h-12 w-12 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white shadow-lg flex items-center justify-center z-30"
           title="New chat"
         >
-          <Plus className="h-5 w-5" />
+          <ComposeIcon width={20} height={20} />
         </button>
       )}
 

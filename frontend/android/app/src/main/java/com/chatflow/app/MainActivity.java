@@ -34,6 +34,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(ChatFlowNativePlugin.class);
         super.onCreate(savedInstanceState);
+        dismissTrayForIntent(getIntent());
         createNotificationChannel();
         ChatFlowNotificationHelper.ensureForegroundChannel(this);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
@@ -64,6 +65,17 @@ public class MainActivity extends BridgeActivity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        dismissTrayForIntent(intent);
+    }
+
+    private void dismissTrayForIntent(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        String groupKey = intent.getStringExtra(ChatFlowNotificationHelper.EXTRA_GROUP_KEY);
+        if (groupKey != null && !groupKey.isEmpty()) {
+            ChatFlowNotificationHelper.cancelThread(this, groupKey);
+        }
     }
 
     public String getLaunchConversationId() {

@@ -10,34 +10,95 @@ import android.graphics.Bitmap;
 import android.os.Build;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.core.app.Person;
 import androidx.core.app.RemoteInput;
 import androidx.core.graphics.drawable.IconCompat;
 import com.google.firebase.messaging.RemoteMessage;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Builds message notifications with Direct Reply and Mark as Read action buttons.
+ * One tray slot per {@code group_key} (e.g. sender_uuid).
  */
 public final class ChatFlowNotificationHelper {
 
     private static final String TAG = "ChatFlowNotify";
 
-    /** Dedicated channel — never shared with Capacitor's generic channel setup. */
     public static final String CHANNEL_ID = "chatflow_messages_actions";
-
-    /** Low-profile channel when the app is open but not in the active chat. */
     public static final String CHANNEL_ID_FOREGROUND = "chatflow_messages_foreground";
-
-    /** RemoteInput result key — must match {@link NotificationActionReceiver#KEY_TEXT_REPLY}. */
     public static final String KEY_TEXT_REPLY = "key_text_reply";
 
     public static final String EXTRA_MESSAGE_ID = "message_id";
     public static final String EXTRA_CONVERSATION_ID = "conversation_id";
     public static final String EXTRA_NOTIFICATION_ID = "notification_id";
+    public static final String EXTRA_GROUP_KEY = "group_key";
+
+    /** Shade stack for all chat threads (each sender still has its own tag + id). */
+    public static final String NOTIFICATION_GROUP = "chatflow_conversations";
+
+    private static final ConcurrentHashMap<String, Object> GROUP_LOCKS = new ConcurrentHashMap<>();
 
     private ChatFlowNotificationHelper() {}
+
+    public static String normalizeGroupKey(String key) {
+        return key == null ? "" : key.trim();
+    }
+
+    private static Object lockFor(String groupKey) {
+        return GROUP_LOCKS.computeIfAbsent(groupKey, k -> new Object());
+    }
+
+    /**
+     * One tray slot per sender or conversation. Ignores per-message {@code msg_*} group keys
+     * from the server when routing ids were missing.
+     */
+    public static String resolveThreadKey(
+            Map<String, String> data,
+            String messageId,
+            String conversationId,
+            String senderDisplayTitle
+    ) {
+        if (data != null) {
+            String groupKey = ChatFlowFcmData.get(data, "group_key", "groupKey");
+            if (!groupKey.isEmpty() && !ChatFlowFcmData.isPerMessageGroupKey(groupKey)) {
+                return groupKey;
+            }
+            String tag = ChatFlowFcmData.get(data, "notification_tag", "notificationTag");
+            if (!tag.isEmpty() && !ChatFlowFcmData.isPerMessageGroupKey(tag)) {
+                return tag;
+            }
+            String senderId = ChatFlowFcmData.get(data, "sender_id", "senderId");
+            if (!senderId.isEmpty()) {
+                return "sender_" + senderId;
+            }
+        }
+
+        String conv =
+                ChatFlowFcmData.get(data, "conversation_id", "conversationId");
+        if (conv.isEmpty()) {
+            conv = normalizeGroupKey(conversationId);
+        }
+        if (!conv.isEmpty()) {
+            return "conv_" + conv;
+        }
+
+        String title = normalizeGroupKey(senderDisplayTitle);
+        if (!title.isEmpty() && !"ChatFlow".equalsIgnoreCase(title)) {
+            return "sender_title_" + stableHash(title.toLowerCase());
+        }
+
+        if (messageId != null && !messageId.isEmpty()) {
+            return "msg_" + messageId;
+        }
+        return "msg_" + UUID.randomUUID().toString();
+    }
+
+    public static String resolveThreadKey(Map<String, String> data, String messageId, String conversationId) {
+        return resolveThreadKey(data, messageId, conversationId, null);
+    }
 
     public static void showFromFcm(Context context, RemoteMessage remoteMessage) {
         if (context == null || remoteMessage == null) {
@@ -45,10 +106,12 @@ public final class ChatFlowNotificationHelper {
         }
 
         Map<String, String> data = remoteMessage.getData();
-        String messageId = data != null ? data.get("message_id") : null;
-        String conversationId = data != null ? data.get("conversation_id") : null;
-        String title = data != null ? data.get("title") : null;
-        String body = data != null ? data.get("body") : null;
+        ChatFlowFcmData.logPayload(data);
+
+        String messageId = ChatFlowFcmData.get(data, "message_id", "messageId", "id");
+        String conversationId = ChatFlowFcmData.get(data, "conversation_id", "conversationId");
+        String title = ChatFlowFcmData.get(data, "title");
+        String body = ChatFlowFcmData.get(data, "body");
 
         RemoteMessage.Notification notification = remoteMessage.getNotification();
         if (title == null || title.isEmpty()) {
@@ -68,11 +131,18 @@ public final class ChatFlowNotificationHelper {
             messageId = UUID.randomUUID().toString();
         }
 
-        String avatarUrl = data != null ? data.get("sender_avatar_url") : null;
-        showMessage(context, messageId, conversationId, title, body, avatarUrl, false);
+        String avatarUrl = ChatFlowFcmData.get(data, "sender_avatar_url", "senderAvatarUrl");
+        String threadKey = resolveThreadKey(data, messageId, conversationId, title);
+        if (ChatFlowFcmData.get(data, "sender_id", "senderId").isEmpty()
+                && ChatFlowFcmData.get(data, "conversation_id", "conversationId").isEmpty()) {
+            Log.w(
+                    TAG,
+                    "FCM missing sender_id and conversation_id — grouping by sender title threadKey="
+                            + threadKey);
+        }
+        showMessage(context, messageId, conversationId, title, body, avatarUrl, false, threadKey);
     }
 
-    /** Foreground / other-screen: minimal heads-up, no sound or vibration. */
     public static void showMessageSoft(
             Context context,
             String messageId,
@@ -81,12 +151,10 @@ public final class ChatFlowNotificationHelper {
             String body,
             String avatarUrl
     ) {
-        showMessage(context, messageId, conversationId, title, body, avatarUrl, true);
+        String threadKey = resolveThreadKey(null, messageId, conversationId);
+        showMessage(context, messageId, conversationId, title, body, avatarUrl, true, threadKey);
     }
 
-    /**
-     * Post a message notification with Reply + Mark as Read (used by FCM service and native plugin).
-     */
     public static void showMessage(
             Context context,
             String messageId,
@@ -94,7 +162,8 @@ public final class ChatFlowNotificationHelper {
             String title,
             String body
     ) {
-        showMessage(context, messageId, conversationId, title, body, null, false);
+        String threadKey = resolveThreadKey(null, messageId, conversationId);
+        showMessage(context, messageId, conversationId, title, body, null, false, threadKey);
     }
 
     private static void showMessage(
@@ -104,7 +173,8 @@ public final class ChatFlowNotificationHelper {
             String title,
             String body,
             String avatarUrl,
-            boolean soft
+            boolean soft,
+            String threadKey
     ) {
         if (context == null || messageId == null || messageId.isEmpty()) {
             return;
@@ -115,33 +185,91 @@ public final class ChatFlowNotificationHelper {
             return;
         }
 
+        Context appCtx = context.getApplicationContext();
         if (soft) {
-            ensureForegroundChannel(context);
+            ensureForegroundChannel(appCtx);
         } else {
-            ensureActionsChannel(context);
+            ensureActionsChannel(appCtx);
         }
         String channelId = soft ? CHANNEL_ID_FOREGROUND : CHANNEL_ID;
 
-        int notificationId = notificationIdFor(messageId);
-        NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm == null) {
-            Log.e(TAG, "NotificationManager unavailable");
+        String groupKey = normalizeGroupKey(
+                threadKey != null && !threadKey.isEmpty()
+                        ? threadKey
+                        : resolveThreadKey(null, messageId, conversationId));
+        if (groupKey.isEmpty()) {
+            groupKey = "msg_" + messageId;
+        }
+
+        synchronized (lockFor(groupKey)) {
+            ChatFlowNotificationThreadStore.appendLine(appCtx, groupKey, body);
+        }
+
+        cancelLegacyMessageNotification(appCtx, messageId);
+
+        final String fkGroupKey = groupKey;
+        final String fkMessageId = messageId;
+        final String fkConversationId = conversationId;
+        final String fkTitle = title;
+        final String fkBody = body;
+        final String fkAvatarUrl = avatarUrl;
+        final boolean fkSoft = soft;
+        final String fkChannelId = channelId;
+
+        ChatFlowNotificationCoalescer.schedule(
+                groupKey,
+                () ->
+                        postTrayNotification(
+                                appCtx,
+                                fkGroupKey,
+                                fkMessageId,
+                                fkConversationId,
+                                fkTitle,
+                                fkBody,
+                                fkAvatarUrl,
+                                fkSoft,
+                                fkChannelId));
+
+        return;
+    }
+
+    private static void cancelLegacyMessageNotification(Context appCtx, String messageId) {
+        if (messageId == null || messageId.isEmpty()) {
             return;
         }
+        int legacyId = notificationIdFor(messageId);
+        NotificationManagerCompat nm = NotificationManagerCompat.from(appCtx);
+        nm.cancel(legacyId);
+        nm.cancel(null, legacyId);
+    }
+
+    private static void postTrayNotification(
+            Context appCtx,
+            String groupKey,
+            String messageId,
+            String conversationId,
+            String title,
+            String body,
+            String avatarUrl,
+            boolean soft,
+            String channelId
+    ) {
+        final int notificationId = notificationIdForThread(groupKey);
 
         RemoteInput remoteInput = new RemoteInput.Builder(KEY_TEXT_REPLY)
                 .setLabel("Reply")
                 .build();
 
-        Intent replyIntent = new Intent(context, NotificationActionReceiver.class);
+        Intent replyIntent = new Intent(appCtx, NotificationActionReceiver.class);
         replyIntent.setAction(NotificationActionReceiver.ACTION_REPLY);
         replyIntent.putExtra(EXTRA_MESSAGE_ID, messageId);
         replyIntent.putExtra(EXTRA_CONVERSATION_ID, conversationId);
         replyIntent.putExtra(EXTRA_NOTIFICATION_ID, notificationId);
+        replyIntent.putExtra(EXTRA_GROUP_KEY, groupKey);
 
         PendingIntent replyPendingIntent = PendingIntent.getBroadcast(
-                context,
-                notificationId * 10 + 1,
+                appCtx,
+                requestCode(groupKey, 1),
                 replyIntent,
                 replyPendingFlags()
         );
@@ -155,60 +283,67 @@ public final class ChatFlowNotificationHelper {
                 .setAllowGeneratedReplies(true)
                 .build();
 
-        Intent markReadIntent = new Intent(context, NotificationActionReceiver.class);
+        Intent markReadIntent = new Intent(appCtx, NotificationActionReceiver.class);
         markReadIntent.setAction(NotificationActionReceiver.ACTION_MARK_READ);
         markReadIntent.putExtra(EXTRA_MESSAGE_ID, messageId);
         markReadIntent.putExtra(EXTRA_CONVERSATION_ID, conversationId);
         markReadIntent.putExtra(EXTRA_NOTIFICATION_ID, notificationId);
+        markReadIntent.putExtra(EXTRA_GROUP_KEY, groupKey);
 
         PendingIntent markReadPendingIntent = PendingIntent.getBroadcast(
-                context,
-                notificationId * 10 + 2,
+                appCtx,
+                requestCode(groupKey, 2),
                 markReadIntent,
                 markReadPendingFlags()
         );
 
-        Intent openIntent = new Intent(context, MainActivity.class);
+        Intent openIntent = new Intent(appCtx, MainActivity.class);
         openIntent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         openIntent.putExtra(EXTRA_CONVERSATION_ID, conversationId);
+        openIntent.putExtra(EXTRA_GROUP_KEY, groupKey);
 
         PendingIntent contentPendingIntent = PendingIntent.getActivity(
-                context,
-                notificationId * 10 + 3,
+                appCtx,
+                requestCode(groupKey, 3),
                 openIntent,
                 markReadPendingFlags()
         );
 
         String senderName = title != null && !title.isEmpty() ? title : "ChatFlow";
-        String messageBody = body != null ? body : "";
 
-        Bitmap avatarBitmap = ChatFlowAvatarLoader.loadForNotification(context, avatarUrl);
+        Bitmap avatarBitmap = ChatFlowAvatarLoader.loadForNotification(appCtx, avatarUrl);
         Person.Builder senderBuilder = new Person.Builder().setName(senderName);
         if (avatarBitmap != null) {
             senderBuilder.setIcon(IconCompat.createWithBitmap(avatarBitmap));
         }
         Person sender = senderBuilder.build();
 
-        NotificationCompat.MessagingStyle messagingStyle = new NotificationCompat.MessagingStyle(
-                new Person.Builder().setName("You").build()
-        )
-                .setConversationTitle(senderName)
-                .addMessage(messageBody, System.currentTimeMillis(), sender);
+        NotificationCompat.MessagingStyle messagingStyle = buildThreadMessagingStyle(
+                appCtx, groupKey, senderName, sender);
 
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, channelId)
+        String latestBody = body != null ? body : "";
+        int lineCount = ChatFlowNotificationThreadStore.getLines(appCtx, groupKey).length;
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(appCtx, channelId)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentTitle(senderName)
-                .setContentText(messageBody)
+                .setContentText(latestBody)
                 .setStyle(messagingStyle)
-                .setPriority(
-                        soft ? NotificationCompat.PRIORITY_LOW : NotificationCompat.PRIORITY_HIGH)
+                .setPriority(soft ? NotificationCompat.PRIORITY_LOW : NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setAutoCancel(true)
                 .setOnlyAlertOnce(true)
+                .setGroup(NOTIFICATION_GROUP)
+                .setSortKey(groupKey)
+                .setNumber(Math.max(1, lineCount))
                 .setContentIntent(contentPendingIntent)
                 .addAction(replyAction)
                 .addAction(android.R.drawable.ic_menu_view, "Mark as Read", markReadPendingIntent);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            builder.setShortcutId(groupKey);
+        }
 
         if (avatarBitmap != null) {
             builder.setLargeIcon(avatarBitmap);
@@ -218,30 +353,81 @@ public final class ChatFlowNotificationHelper {
             builder.setSilent(true).setDefaults(0).setVibrate(null);
         }
 
-        nm.notify(notificationId, builder.build());
+        Notification built = builder.build();
+        NotificationManagerCompat nmCompat = NotificationManagerCompat.from(appCtx);
+        nmCompat.notify(groupKey, notificationId, built);
+
         Log.i(
                 TAG,
-                "Posted notification id="
+                "Posted notify tag="
+                        + groupKey
+                        + " id="
                         + notificationId
-                        + " channel="
-                        + channelId
-                        + " soft="
-                        + soft
-                        + " with Reply+MarkAsRead");
+                        + " lines="
+                        + lineCount
+                        + " latest="
+                        + latestBody);
+    }
+
+    private static NotificationCompat.MessagingStyle buildThreadMessagingStyle(
+            Context context,
+            String groupKey,
+            String senderName,
+            Person sender
+    ) {
+        Person self = new Person.Builder().setName("You").build();
+        NotificationCompat.MessagingStyle style =
+                new NotificationCompat.MessagingStyle(self).setConversationTitle(senderName);
+        ChatFlowNotificationThreadStore.Line[] lines;
+        synchronized (lockFor(groupKey)) {
+            lines = ChatFlowNotificationThreadStore.getLines(context, groupKey);
+        }
+        for (ChatFlowNotificationThreadStore.Line line : lines) {
+            if (line.text != null && !line.text.isEmpty()) {
+                style.addMessage(line.text, line.timeMs, sender);
+            }
+        }
+        return style;
     }
 
     public static void cancel(Context context, String messageId) {
         if (context == null || messageId == null || messageId.isEmpty()) {
             return;
         }
-        NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm != null) {
-            nm.cancel(notificationIdFor(messageId));
+        NotificationManagerCompat.from(context.getApplicationContext())
+                .cancel(null, notificationIdFor(messageId));
+    }
+
+    public static void cancelThread(Context context, String groupKey) {
+        if (context == null || groupKey == null || groupKey.isEmpty()) {
+            return;
         }
+        String key = normalizeGroupKey(groupKey);
+        ChatFlowNotificationCoalescer.cancel(key);
+        int id = notificationIdForThread(key);
+        NotificationManagerCompat nm = NotificationManagerCompat.from(context.getApplicationContext());
+        nm.cancel(key, id);
+        ChatFlowNotificationThreadStore.clear(context.getApplicationContext(), key);
     }
 
     public static int notificationIdFor(String messageId) {
-        return Math.abs(("msg-" + messageId).hashCode());
+        return stableHash("msg-" + messageId);
+    }
+
+    public static int notificationIdForThread(String threadKey) {
+        return stableHash("thread-" + threadKey);
+    }
+
+    private static int stableHash(String key) {
+        int hash = key.hashCode();
+        if (hash == Integer.MIN_VALUE) {
+            hash = 0;
+        }
+        return (Math.abs(hash) % 500_000) + 1;
+    }
+
+    private static int requestCode(String groupKey, int slot) {
+        return (stableHash("req-" + groupKey) + slot) & 0xffff;
     }
 
     private static int replyPendingFlags() {
@@ -260,7 +446,6 @@ public final class ChatFlowNotificationHelper {
         return flags;
     }
 
-    /** Call from {@link MainActivity} at startup so the channel exists before the first push. */
     public static void ensureActionsChannel(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return;

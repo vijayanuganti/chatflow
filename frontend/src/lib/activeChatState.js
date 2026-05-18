@@ -1,5 +1,6 @@
 import { Capacitor } from "@capacitor/core";
 import { App } from "@capacitor/app";
+import { broadcastActiveConversationForPush } from "./notificationDisplay";
 import { ChatFlowNative } from "./nativeAuthSync";
 
 let activeConversationId = null;
@@ -19,10 +20,11 @@ export function isInActiveConversation(conversationId) {
  * Sync which conversation the user is viewing (null = chat list or left chat).
  * @param {string | null | undefined} conversationId
  */
-export async function setActiveChatState(conversationId) {
+export async function setActiveChatState(conversationId, groupKey) {
   const id = conversationId ? String(conversationId) : null;
   activeConversationId = id;
   inChatView = !!id;
+  broadcastActiveConversationForPush(id);
 
   if (!Capacitor.isNativePlatform()) return;
 
@@ -30,6 +32,7 @@ export async function setActiveChatState(conversationId) {
     await ChatFlowNative.setActiveChat({
       inChat: inChatView,
       conversationId: id || "",
+      groupKey: groupKey ? String(groupKey) : "",
     });
     if (inChatView) {
       await ChatFlowNative.setAppForeground({ foreground: true }).catch(() => {});

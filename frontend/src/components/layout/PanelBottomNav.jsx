@@ -7,7 +7,7 @@ export default function PanelBottomNav({ items, hidden = false, testId = "panel-
   if (hidden) return null;
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-20 flex items-stretch justify-around border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_18px_rgba(0,0,0,0.06)] backdrop-blur dark:border-gray-800 dark:bg-gray-950/95 dark:shadow-[0_-4px_18px_rgba(0,0,0,0.5)]"
+      className="panel-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-20 flex items-stretch justify-around border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_18px_rgba(0,0,0,0.06)] backdrop-blur dark:border-gray-800 dark:bg-gray-950/95 dark:shadow-[0_-4px_18px_rgba(0,0,0,0.5)]"
       data-testid={testId}
     >
       {items.map((item) => {

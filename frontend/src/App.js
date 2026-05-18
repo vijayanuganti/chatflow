@@ -3,6 +3,7 @@ import "@/App.css";
 import { registerServiceWorker } from "@/lib/notify";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { ChatProvider } from "@/context/ChatContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import LoginPage from "@/pages/Login";
 import ChatApp from "@/pages/ChatApp";
@@ -23,6 +24,7 @@ import SplashScreenBootstrap from "@/components/SplashScreenBootstrap";
 import PanelErrorBoundary from "@/components/PanelErrorBoundary";
 import { initNativeAuthSync } from "@/lib/nativeAuthSync";
 import { initAppForegroundSync } from "@/lib/activeChatState";
+import { initSafeAreaInsets } from "@/lib/safeAreaInsets";
 import { syncConversationSoundsFromNative } from "@/lib/conversationSounds";
 
 function Protected({ children, roles }) {
@@ -71,7 +73,9 @@ function NativeAuthBootstrap() {
   useEffect(() => {
     initNativeAuthSync();
     initAppForegroundSync();
+    const clearSafeAreaInsets = initSafeAreaInsets();
     void syncConversationSoundsFromNative();
+    return clearSafeAreaInsets;
   }, []);
   return null;
 }
@@ -82,6 +86,7 @@ function App() {
       <ServiceWorkerBootstrap />
       <ThemeProvider>
       <AuthProvider>
+        <ChatProvider>
         <NativeAuthBootstrap />
         <SplashScreenBootstrap />
         <BrowserRouter>
@@ -244,6 +249,7 @@ function App() {
           </Routes>
         </BrowserRouter>
         <Toaster position="top-right" />
+        </ChatProvider>
       </AuthProvider>
       </ThemeProvider>
     </div>

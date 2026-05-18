@@ -93,8 +93,8 @@ export async function ensureNotificationPermission() {
  * @param {string} [opts.url]       URL to open / focus on click. Defaults to "/".
  * @param {Object} [opts.data]      Extra payload available in the SW click handler.
  * @param {boolean} [opts.silent]   Suppress the notification sound.
- * @param {boolean} [opts.renotify] Re-alert (vibrate / sound) even if the tag
- *                                  matches an existing notification.
+ * @param {boolean} [opts.renotify] Re-alert when the tag matches an existing
+ *                                  notification (default false for threaded chat).
  */
 export async function showAppNotification({
   title,
@@ -103,7 +103,7 @@ export async function showAppNotification({
   url = "/",
   data,
   silent = false,
-  renotify = true,
+  renotify = false,
 } = {}) {
   if (!isNotificationSupported()) return false;
   if (Notification.permission !== "granted") return false;

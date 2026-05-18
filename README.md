@@ -16,10 +16,15 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 - **Audit logs** — sign-ins, account creation, password resets and permission
   changes are persisted with actor, target and timestamp.
 - **Show/hide password** toggles on every password field.
-- Real-time messaging (WebSocket), uploads (S3), admin monitoring, batches.
+- Real-time messaging (WebSocket), uploads (S3), admin monitoring, batches, and diet plans.
 - **Per-user chat preferences** — pin, archive, and mute conversations (WhatsApp-style long-press selection on mobile).
 - **Contact profiles & shared media** — avatar quick view, full profile pages, and Media / Documents / Links tabs.
+- **Client medical profiles** — conditions, medications, and notes; visible to assigned employees and admins.
+- **Complaints** — clients raise issues against their employee; admins triage from the panel (open / solved).
+- **Push notifications** — Firebase Cloud Messaging (FCM) on web (service worker) and Android (native tray + actions); muted chats skip FCM.
+- **Foreground message banner** — in-app dropdown when a new message arrives while the app is open (positioned below the status bar on native).
 - **Role-aware mobile shells** — fixed ChatFlow header, panel footers (Chats · Diet · Settings for clients; Chats · Batches · Settings for employees), and native back-button handling.
+- **Production on OCI VPS** — Nginx + PM2 + MongoDB Atlas + S3 (documented below); optional Render/Vercel path also supported.
 
 ---
 
@@ -59,6 +64,10 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 - **Refresh** in the three-dots menu re-fetches conversations, messages, and cache (no logout).
 - **Admin → Users** filter: All | Employees | Clients | Inactive Clients.
 - **Unread badge** on the admin mobile footer **Chats** tab (not on the logo).
+- **Mobile “More” hub** — Monitor chats, Batches, Accounts, Permissions, Activity (audit), Complaints, Storage, Inactive clients, Settings.
+- **Complaints inbox** — filter all / open / solved; mark solved or reopen.
+- **Storage** — admin view of upload usage; delete conversations or user accounts from the panel.
+- **Medical profile** — edit client medical data from user detail (`/admin/users/...` flows).
 
 ### Mobile footers (`PanelBottomNav`)
 
@@ -73,10 +82,25 @@ Footers hide only when a **conversation thread** is open, not during list select
 ### Client diet
 
 - **My Diet** opens `DietPlanPage` from **Day 1** (`startFromDayOne` on `DietPlanContent`).
+- Employees/admins manage multi-day plans, meal slots, photo uploads, and notes per client (`DietPlanContent.jsx`).
 
-### Push notifications
+### Client complaints & medical
 
-- FCM push is **skipped** for conversations the user has **muted** (`conversation_id` passed into the notification path).
+- **Raise a complaint** — clients use **Profile → Raise a complaint** (`RaiseComplaintPage.jsx`); stored with status `open` / `solved`.
+- **Medical profile** — `MedicalProfilePage.jsx` for clients; employees/admins view via user account detail and admin user tools.
+
+### Notifications
+
+| Surface | Behavior |
+| -------- | -------- |
+| **Web (PWA)** | Service worker (`frontend/public/sw.js`) shows tray notifications from FCM data payloads when the tab is backgrounded. |
+| **Android (native)** | FCM → `ChatFlowMessagingService` — grouped per sender, reply/mark-read actions, coalesced threads; not duplicated by the web SW. |
+| **Foreground** | `InAppMessageBanner.jsx` — tap to open the conversation; swipe to dismiss; auto-hides after ~4.5s. |
+| **Muted chats** | FCM is **skipped** when `conversation_preferences.is_muted` is true for that user. |
+| **Active chat** | Tray + banner suppressed while viewing the same conversation (native prefs + `optimisticMessages.js`). |
+| **Toasts** | Sonner toasts for errors/success; top offset uses `--app-safe-area-top` so banners sit below the OS status bar on Android (`safeAreaInsets.js`). |
+
+Token registration: `POST /api/users/me/fcm-token` after login on native (`PushNotificationBootstrap.jsx`).
 
 ---
 
@@ -85,14 +109,23 @@ Footers hide only when a **conversation thread** is open, not during list select
 Native shells live under `frontend/android` and `frontend/ios` (Capacitor 8).
 
 - **Install:** JavaScript dependencies (including `@capacitor/*`) install only under **`frontend/`**. From that directory run `npm install` before `npm start` or `npm run build`; otherwise Webpack reports “Can't resolve '@capacitor/…'”.
-- **Build and sync:** from `frontend/`, run `npm run build:mobile` (CRA build + `npx cap sync`).
+- **Build and sync:** from `frontend/`, run `npm run build:mobile` (CRA build + `npx cap copy` + `npx cap sync`). Debug APK: `npm run android:assemble`.
 - **Open in IDEs:** `npm run cap:android` or `npm run cap:ios` (iOS requires macOS with Xcode).
 - **App name and bundle id:** edit `frontend/capacitor.config.json` (`appName`, `appId`). Defaults: **ChatFlow** and **`com.chatflow.app`**. Change `appId` if you need something like `com.user.myapp`; after changing it, run `npx cap sync` and fix signing in Android Studio / Xcode.
-- **API URL on a physical device:** set `REACT_APP_BACKEND_URL` to an address the phone can reach (for example `http://192.168.x.x:8001`), rebuild, then `npm run build:mobile`. Add that origin to backend `CORS_ORIGINS` in production.
-- **CORS for the native shell:** when `CORS_ORIGINS` is unset in development, FastAPI allows `capacitor://localhost` and `ionic://localhost` in addition to `http://localhost:3000` and `http://127.0.0.1:3000`.
-- **Camera and photos:** profile avatar and chat “Photo” attachments use `@capacitor/camera` in the native app (`frontend/src/lib/nativeMedia.js`). iOS privacy strings are in `frontend/ios/App/App/Info.plist`. Video and other file types still use the web file picker unless you extend them.
+- **Branded splash:** `SplashScreenBootstrap.jsx` shows ChatFlow icon + wordmark for at least 3s on native while auth loads; Capacitor splash is hidden as soon as React paints.
+- **API URL resolution** (`frontend/src/lib/backendUrl.js`):
+  - **Native:** `REACT_APP_BACKEND_URL_MOBILE` or `REACT_APP_BASE_URL` (must be a LAN IP or public HTTPS URL — never `localhost`).
+  - **Browser on OCI (sslip.io):** same origin as the page; REST calls go to `/api` via Nginx (no `:8000` in the URL).
+  - **Browser dev:** same host as CRA, port `8001`.
+- **Auth on native:** JWT in `Authorization` header + `X-ChatFlow-Browser-Id` (not HttpOnly cookies — avoids WebView CORS issues). `nativeAuthSync.js` mirrors the token into Android shared prefs for FCM handlers.
+- **CORS for the native shell:** include `http://localhost`, `capacitor://localhost`, and `ionic://localhost` in backend `CORS_ORIGINS` for production APKs talking to a public API.
+- **Push:** `@capacitor/push-notifications` registers FCM tokens; custom `ChatFlowNative` plugin tracks active chat and notification sounds on Android (`frontend/android/.../ChatFlowNativePlugin.java`).
+- **Firebase:** place `firebase-adminsdk.json` in `backend/` for local dev, or set `FIREBASE_SERVICE_ACCOUNT_FILE` on the server (see `backend/.env.example`). Add `google-services.json` in the Android app per Firebase console instructions.
+- **Camera and photos:** profile avatar and chat “Photo” attachments use `@capacitor/camera` (`nativeMedia.js`). iOS privacy strings are in `frontend/ios/App/App/Info.plist`.
+- **Files:** `@capacitor-community/file-opener` + `@capacitor/filesystem` for opening documents in chat (`openDocument.js`).
 - **Haptics:** `@capacitor/haptics` for chat-list long-press selection (`selectionHaptics.js`). After adding or upgrading native plugins, run `npm run cap:sync` from `frontend/`.
-- **System back:** `frontend/src/hooks/useDoubleBackToExit.js` traps back at the app root and delegates drill-up (clear selection → close chat → admin sub-panels) before normal history.
+- **Safe area:** status-bar spacer in `TopBar` / `ChatWindow`; notification banners and toasts use `notification-viewport-top` + `initSafeAreaInsets()` so they clear the Android status bar when `env(safe-area-inset-top)` is `0`.
+- **System back:** `useDoubleBackToExit.js` traps back at the app root and delegates drill-up (clear selection → close chat → admin sub-panels) before normal history.
 - **Capacitor CLI** 8.x may warn that **Node 22+** is expected; upgrade Node if `npx cap` misbehaves.
 
 ---
@@ -106,8 +139,10 @@ Native shells live under `frontend/android` and `frontend/ios` (Capacitor 8).
 └──────────────┘  ◄── HttpOnly JWT cookie (7d) ──────└────────────────┘
 ```
 
-- All other routes (chat, admin) re-validate the cookie via `/api/auth/verify`.
-- WebSocket upgrade uses the same cookie (or `?token=` for mobile).
+- All other routes (chat, admin) re-validate the session via `/api/auth/verify`.
+- **Web:** HttpOnly JWT cookie; axios sends `withCredentials`.
+- **Native (Capacitor):** JWT in `Authorization: Bearer` + `X-ChatFlow-Browser-Id` header (no cookies).
+- WebSocket upgrade uses the cookie or `?token=` query param.
 - There are **no** `/auth/register`, `/auth/forgot-password` or email-OTP endpoints.
 
 ---
@@ -229,6 +264,25 @@ On startup `_migrate_user_documents` runs:
 
 ### Public profiles
 - `GET /api/users/{user_id}/public` — contact-safe profile fields for profile pages.
+- `GET /api/users/{user_id}/medical-profile` — client medical profile (role-gated).
+- `PUT /api/admin/users/{user_id}/medical-profile` — admin updates client medical data.
+
+### Diet plans
+- `GET  /api/clients/{client_id}/diet-plans` — list plans for a client.
+- `POST /api/clients/{client_id}/diet-plans` — create a new day/plan.
+- `PUT  /api/diet-plans/{plan_id}/suggestions` — meal text suggestions.
+- `PUT  /api/diet-plans/{plan_id}/meal/{slot}/photo` — upload meal photo.
+- `DELETE /api/diet-plans/{plan_id}/meal/{slot}/photo` — remove meal photo.
+
+### Complaints
+- `POST /api/complaints` — client raises a complaint.
+- `GET  /api/complaints/me` — client’s own complaints.
+- `GET  /api/admin/complaints` — admin inbox (`?status=open|solved`).
+- `PATCH /api/admin/complaints/{complaint_id}` — update status / notes.
+
+### Push & notification actions
+- `POST /api/users/me/fcm-token` — register device FCM token.
+- `POST /api/notifications/mark-read`, `/notifications/direct-reply`, `/notifications/update-status` — Android notification action callbacks.
 
 ---
 
@@ -237,44 +291,40 @@ On startup `_migrate_user_documents` runs:
 ```
 chatflow/
 ├─ backend/
-│  ├─ server.py                 ← all routes, models, RBAC, audit, migrations
+│  ├─ server.py                 ← routes, RBAC, audit, FCM, migrations
+│  ├─ ecosystem.config.cjs      ← PM2 config for OCI/VPS
 │  ├─ requirements.txt
 │  ├─ .env(.example)
-│  └─ uploads/                  ← local dev fallback for files
+│  ├─ uploads/                  ← local dev fallback for files
+│  └─ firebase-adminsdk.json    ← local dev only (gitignored in prod)
 └─ frontend/
+   ├─ capacitor.config.json
+   ├─ android/                   ← Capacitor Android + ChatFlow FCM services
+   ├─ ios/
+   ├─ public/sw.js                ← web push service worker
    └─ src/
-      ├─ App.js                      ← /login, /chat, /admin/:section, contact routes
-      ├─ context/
-      │  └─ AuthContext.jsx          ← session + role propagation
+      ├─ App.js                      ← routes, Toaster, InAppMessageBanner, bootstraps
+      ├─ context/AuthContext.jsx
       ├─ hooks/
-      │  └─ useDoubleBackToExit.js   ← Android / browser back + sentinel
+      │  ├─ useDoubleBackToExit.js
+      │  ├─ useChatSocket.js
+      │  └─ useOptimisticMessageSend.js
       ├─ lib/
-      │  ├─ api.js                   ← axios instance + helpers
-      │  ├─ appRoutes.js             ← role-aware paths (profile, contact, diet, …)
-      │  ├─ conversationPreferences.js
-      │  ├─ chatListScroll.js
-      │  ├─ chatDateGroups.js
-      │  ├─ sharedMedia.js
-      │  ├─ starredMessages.js
-      │  ├─ selectionHaptics.js
-      │  └─ nativeMedia.js
+      │  ├─ api.js, backendUrl.js    ← JWT native auth; OCI /api gateway
+      │  ├─ push.js, notify.js, inAppNotifications.js
+      │  ├─ notificationDisplay.js, safeAreaInsets.js
+      │  ├─ nativeAuthSync.js, nativeMedia.js, openDocument.js
+      │  ├─ conversationPreferences.js, optimisticMessages.js
+      │  └─ appRoutes.js, chatListScroll.js, sharedMedia.js, …
       ├─ pages/
-      │  ├─ Login.jsx
-      │  ├─ ChatApp.jsx              ← client / employee / admin-on-/chat
-      │  ├─ AdminDashboard.jsx
-      │  ├─ UserProfilePage.jsx      ← contact info + shared media
-      │  └─ DietPlanPage.jsx
+      │  ├─ ChatApp.jsx, AdminDashboard.jsx, Login.jsx
+      │  ├─ DietPlanPage.jsx, MedicalProfilePage.jsx, RaiseComplaintPage.jsx
+      │  ├─ ProfileSettingsPage.jsx, UserProfilePage.jsx, …
       └─ components/
-         ├─ ChatSidebar.jsx          ← list, search, long-press selection bar
-         ├─ ChatWindow.jsx           ← thread, dividers, in-chat search, stars
-         ├─ TopBar.jsx               ← ChatFlow branding, refresh, 56px toolbar
-         ├─ ProfileQuickView.jsx
-         ├─ SharedMediaSection.jsx
-         ├─ layout/PanelBottomNav.jsx
-         ├─ PasswordInput.jsx
-         ├─ CreateAccountDialog.jsx
-         ├─ ResetPasswordDialog.jsx
-         └─ ProfileDialog.jsx
+         ├─ ChatSidebar.jsx, ChatWindow.jsx, TopBar.jsx
+         ├─ InAppMessageBanner.jsx, PushNotificationBootstrap.jsx
+         ├─ SplashScreenBootstrap.jsx, SharedMediaSection.jsx
+         └─ layout/PanelBottomNav.jsx, diet/, chat/, …
 ```
 
 ---
@@ -308,6 +358,9 @@ DEFAULT_PHONE_COUNTRY=IN
 CORS_ORIGINS="http://localhost:3000"
 COOKIE_SECURE=false
 COOKIE_SAMESITE=strict
+
+# Optional — push notifications (local: place firebase-adminsdk.json in backend/)
+# FIREBASE_SERVICE_ACCOUNT_FILE=
 ```
 
 On first boot the server seeds:
@@ -328,12 +381,16 @@ yarn install
 yarn start
 ```
 
-`frontend/.env`:
+`frontend/.env` (see [`frontend/.env.example`](./frontend/.env.example)):
 
 ```env
 REACT_APP_BACKEND_URL=http://localhost:8001
+# Native APK dev on a phone (LAN IP, match uvicorn port):
+REACT_APP_BACKEND_URL_MOBILE=http://192.168.1.13:8001
 WDS_SOCKET_PORT=0
 ```
+
+For a **production APK** against OCI, set both mobile and web URLs to your public HTTPS host (e.g. `https://140-245-209-196.sslip.io`) before `npm run build:mobile`.
 
 ---
 
@@ -354,12 +411,52 @@ WDS_SOCKET_PORT=0
 
 ---
 
-## Production deployment — Render
+## Production deployment
+
+Stack in all setups: **MongoDB Atlas** + **AWS S3** for uploads. Choose either **OCI VPS** (Nginx + PM2) or **Render/Vercel** below.
+
+### Option A — Oracle Cloud (OCI) VPS
+
+Typical layout: Ubuntu VM, Nginx serves the CRA `build/` and proxies `/api` → `127.0.0.1:8000`, PM2 runs Uvicorn, Atlas + S3 + Firebase for push.
+
+| Piece | Notes |
+| ----- | ----- |
+| **Repo on server** | e.g. `/home/ubuntu/chatflow` |
+| **Backend** | `backend/.venv`, `uvicorn` on port `8000` (localhost only) |
+| **PM2** | [`backend/ecosystem.config.cjs`](./backend/ecosystem.config.cjs) — `pm2 start ecosystem.config.cjs` |
+| **Frontend** | `cd frontend && npm run build` → Nginx `root` points at `build/` |
+| **HTTPS** | sslip.io, Let’s Encrypt, or your domain |
+| **CORS** | Include `https://YOUR_HOST`, `http://localhost`, `capacitor://localhost`, `ionic://localhost` |
+| **Firebase** | `FIREBASE_SERVICE_ACCOUNT_FILE=/home/ubuntu/chatflow/backend/firebase-adminsdk.json` |
+
+**Update commands (SSH into the VM):**
+
+```bash
+cd /home/ubuntu/chatflow && git pull
+
+# Backend
+cd backend && source .venv/bin/activate && pip install -r requirements.txt && deactivate
+pm2 restart chatflow-backend && pm2 save
+
+# Frontend
+cd ../frontend && npm install && npm run build
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+After `.env` changes: `pm2 restart chatflow-backend --update-env`.
+
+**Browser API URL:** on sslip.io hosts, the app uses same-origin `/api` automatically (`backendUrl.js`). No `:8000` in the public URL.
+
+**Mobile release:** set `REACT_APP_BACKEND_URL` and `REACT_APP_BACKEND_URL_MOBILE` to `https://YOUR_HOST`, run `npm run build:mobile`, then build a signed APK in Android Studio. Add your host to `capacitor.config.json` → `server.allowNavigation` if needed.
+
+---
+
+### Option B — Render / Vercel
 
 End-to-end recipe: backend on **Render Web Service**, frontend on **Render
-Static Site** (or Vercel), database on **MongoDB Atlas**, uploads on **AWS S3**.
+Static Site** (or Vercel).
 
-### 1. Backend — Render Web Service
+#### 1. Backend — Render Web Service
 
 | Setting              | Value                                                     |
 | -------------------- | --------------------------------------------------------- |
@@ -389,7 +486,7 @@ Then in **Environment → Add Environment Variable**, paste the values from
 > use `COOKIE_SECURE=true` + `COOKIE_SAMESITE=none`. With those settings the
 > cookie only works over HTTPS (which Render gives you for free).
 
-### 2. Frontend — Render Static Site (or Vercel)
+#### 2. Frontend — Render Static Site (or Vercel)
 
 | Setting           | Value                                |
 | ----------------- | ------------------------------------ |
@@ -401,7 +498,7 @@ Build-time environment variables (from [`frontend/.env.example`](./frontend/.env
 
 - `REACT_APP_BACKEND_URL` = your Render backend URL, e.g. `https://chatflow-api.onrender.com`
 
-### 3. Capacitor — installable app on other phones
+#### 3. Capacitor — installable app on other phones
 
 The JS bundle bakes API URLs at **build time**. Other people’s phones do **not** use your LAN IP; they must talk to the same **public HTTPS** API as production web.
 

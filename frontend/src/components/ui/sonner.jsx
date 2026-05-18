@@ -9,7 +9,7 @@ const Toaster = ({
   return (
     <Sonner
       theme={theme}
-      className="toaster group [&_[data-sonner-toaster]]:notification-viewport-top [&_[data-sonner-toaster]]:!z-[9998]"
+      className="toaster group [&_[data-sonner-toaster]]:!z-[9998]"
       toastOptions={{
         classNames: {
           toast:

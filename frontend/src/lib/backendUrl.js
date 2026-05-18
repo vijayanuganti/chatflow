@@ -45,6 +45,11 @@ function isValidHttpUrl(url) {
   }
 }
 
+/** Browser production on OCI — same host, Nginx proxies /api (no :8000). */
+function isNginxGatewayHost(hostname) {
+  return (hostname || "").includes("sslip.io");
+}
+
 /**
  * Resolves the FastAPI base URL (no path, no trailing slash).
  *
@@ -53,7 +58,8 @@ function isValidHttpUrl(url) {
  * - **Capacitor (native):** `REACT_APP_BACKEND_URL_MOBILE`, then `REACT_APP_BACKEND_URL`.
  *   Never uses localhost — set your PC LAN IP (e.g. http://192.168.1.13:8000).
  * - **Browser + development:** same host as the page, port `8001`.
- * - **Browser + production:** `REACT_APP_BACKEND_URL`.
+ * - **Browser + OCI (sslip.io):** same origin as the page (no port); `getApiBaseUrl()` → `/api`.
+ * - **Browser + other production:** `REACT_APP_BACKEND_URL`.
  */
 export function resolveBackendUrl() {
   const explicit = trimUrl(process.env.REACT_APP_BASE_URL);
@@ -90,6 +96,10 @@ export function resolveBackendUrl() {
 
   if (explicit) return explicit;
 
+  if (isNginxGatewayHost(window.location.hostname)) {
+    return `${window.location.protocol}//${window.location.hostname}`;
+  }
+
   if (process.env.NODE_ENV === "development") {
     return `${window.location.protocol}//${window.location.hostname}:8001`;
   }
@@ -105,5 +115,6 @@ export function resolveBackendUrl() {
 export function getMobileBackendUrlFromEnv() {
   const explicit = normalizeBackendOrigin(process.env.REACT_APP_BASE_URL);
   const mobile = normalizeBackendOrigin(process.env.REACT_APP_BACKEND_URL_MOBILE);
-  return explicit || mobile || "";
+  const general = normalizeBackendOrigin(process.env.REACT_APP_BACKEND_URL);
+  return explicit || mobile || general || "";
 }

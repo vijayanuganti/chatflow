@@ -15,6 +15,7 @@ import {
 } from "@/lib/nativeMedia";
 import { toast } from "sonner";
 import { formatApiError } from "@/lib/api";
+import ReplyPreviewBar from "@/components/chat/ReplyPreviewBar";
 
 /**
  * WhatsApp-style composer: pill (emoji | text | attach | camera) + mic/send FAB.
@@ -34,6 +35,8 @@ export default function ChatComposer({
   disabled = false,
   onRecordingChange,
   onEmojiOpenChange,
+  replyingTo = null,
+  onCancelReply,
 }) {
   const [voiceRecording, setVoiceRecording] = useState(false);
 
@@ -121,6 +124,7 @@ export default function ChatComposer({
 
   return (
     <div className="flex w-full flex-col">
+      <ReplyPreviewBar replyingTo={replyingTo} onCancel={onCancelReply} />
       <input ref={photoInputRef} type="file" className="hidden" accept="image/*" onChange={handleFileInput} />
       <input ref={videoInputRef} type="file" className="hidden" accept="video/*" onChange={handleFileInput} />
       <input ref={audioInputRef} type="file" className="hidden" accept="audio/*" onChange={handleFileInput} />

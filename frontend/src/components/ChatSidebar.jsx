@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { NO_SELECT_STYLE } from "@/lib/noSelectStyles";
 import {
   Search,
   Plus,
@@ -18,6 +19,7 @@ import { useAuth } from "@/context/AuthContext";
 import { partitionConversations } from "@/lib/conversationPreferences";
 import { loadChatListScroll, saveChatListScroll } from "@/lib/chatListScroll";
 import { hapticSelectionStart } from "@/lib/selectionHaptics";
+import ComposeIcon from "@/components/icons/ComposeIcon";
 
 function formatLastTime(iso) {
   if (!iso) return "";
@@ -85,7 +87,7 @@ function ConversationRow({
 
   return (
     <div
-      className={`w-full text-left px-4 py-3 flex gap-3 items-center border-b border-gray-50 dark:border-gray-800/60 transition-colors duration-200 ease-out ${
+      className={`chat-list-row w-full text-left px-4 py-3 flex gap-3 items-center border-b border-gray-50 dark:border-gray-800/60 transition-colors duration-200 ease-out ${
         isSelectionHighlight
           ? "bg-emerald-200/70 dark:bg-emerald-800/55 ring-1 ring-inset ring-emerald-500/35"
           : isActiveChat
@@ -93,6 +95,7 @@ function ConversationRow({
             : "hover:bg-gray-50 dark:hover:bg-gray-900/50"
       }`}
       data-testid={`conversation-item-${c.id}`}
+      style={NO_SELECT_STYLE}
     >
       <button
         type="button"
@@ -292,7 +295,7 @@ export default function ChatSidebar({
 
   return (
     <aside
-      className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950 md:h-full md:w-80 md:flex-none lg:w-96"
+      className="chat-sidebar flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950 md:h-full md:w-80 md:flex-none lg:w-96"
       data-testid="chat-sidebar"
     >
       <div className="hidden md:flex p-4 border-b border-gray-100 dark:border-gray-800 items-center gap-3">
@@ -397,8 +400,8 @@ export default function ChatSidebar({
             {showArchived ? "No archived conversations." : "No conversations yet."}
             {!adminView && !showArchived && !inSelectionMode && (
               <div className="mt-3">
-                <Button onClick={onNewChat} variant="outline" className="rounded-full" data-testid="empty-state-new-chat-btn">
-                  <Plus className="h-4 w-4 mr-1" /> Start a chat
+                <Button onClick={onNewChat} variant="outline" className="rounded-full" data-testid="empty-state-new-chat-btn" title="New chat">
+                  <ComposeIcon className="mr-1.5" width={18} height={18} /> Start a chat
                 </Button>
               </div>
             )}

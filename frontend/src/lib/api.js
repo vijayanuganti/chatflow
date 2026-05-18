@@ -256,7 +256,7 @@ export const API = getApiBaseUrl();
  */
 export function getFcmTokenPostUrl() {
   if (isCapacitorNative()) {
-    const backend = getMobileBackendUrlFromEnv();
+    const backend = normalizeBackendOrigin(resolveBackendUrl());
     if (!backend) return null;
     return joinBackendPath(backend, "api", "users", "me", "fcm-token");
   }
@@ -267,7 +267,7 @@ export function getFcmTokenPostUrl() {
 /** API base used for FCM POST on native — always from REACT_APP_BACKEND_URL_MOBILE. */
 export function getFcmApiBaseUrl() {
   if (isCapacitorNative()) {
-    const backend = getMobileBackendUrlFromEnv();
+    const backend = normalizeBackendOrigin(resolveBackendUrl());
     return backend ? joinBackendPath(backend, "api") : null;
   }
   return getApiBaseUrl();
@@ -275,8 +275,16 @@ export function getFcmApiBaseUrl() {
 
 export const api = axios.create({
   baseURL: API,
-  withCredentials: true,
+  // JWT is in Authorization; cookies are unused. Credentials force CORS preflights
+  // that Android WebView often mishandles — native uses CapacitorHttp instead.
+  withCredentials: !isCapacitorNative(),
 });
+
+if (typeof window !== "undefined" && isCapacitorNative()) {
+  const base = getApiBaseUrl();
+  if (base) console.info("[api] Native API base:", base);
+  else console.error("[api] Native API base missing — set REACT_APP_BACKEND_URL_MOBILE and rebuild");
+}
 
 /**
  * Resolves when a JWT is stored and passes browser-id binding (post-login / session restore).
@@ -329,7 +337,15 @@ export function formatApiError(err) {
       .join(" ");
   }
   if (detail && typeof detail.msg === "string") return detail.msg;
-  return err?.message || "Something went wrong";
+  const msg = err?.message || "";
+  if (!err?.response && /network error/i.test(msg)) {
+    const base = getApiBaseUrl();
+    if (base) {
+      return `Cannot reach the server (${base}). Check mobile data/Wi‑Fi and that the API is online.`;
+    }
+    return "Cannot reach the server. Rebuild the app with REACT_APP_BACKEND_URL_MOBILE set.";
+  }
+  return msg || "Something went wrong";
 }
 
 /**

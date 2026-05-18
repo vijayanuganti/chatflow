@@ -33,6 +33,12 @@ public class ChatFlowNativePlugin extends Plugin {
         ChatFlowAuthStore.setActiveConversationId(ctx, conversationId == null ? "" : conversationId);
         if (inChat) {
             ChatFlowAppState.setAppForeground(ctx, true);
+            String groupKey = call.getString("groupKey", "");
+            if (groupKey != null && !groupKey.isEmpty()) {
+                ChatFlowNotificationHelper.cancelThread(ctx, groupKey);
+            } else if (conversationId != null && !conversationId.isEmpty()) {
+                ChatFlowNotificationHelper.cancelThread(ctx, "conv_" + conversationId.trim());
+            }
         }
         JSObject result = new JSObject();
         result.put("inChat", inChat);

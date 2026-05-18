@@ -4,6 +4,7 @@ import MobilePageShell from "@/components/layout/MobilePageShell";
 import DietPlanContent from "@/components/diet/DietPlanContent";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useNavigateBack } from "@/hooks/useNavigateBack";
 
 export default function DietPlanPage() {
   const { clientId: chatClientId, userId: adminClientId } = useParams();
@@ -14,17 +15,7 @@ export default function DietPlanPage() {
   const backTo = location.state?.backTo ?? "/chat";
   const pendingChat = location.state?.pendingChat;
 
-  const handleBack = () => {
-    if (typeof window !== "undefined" && window.history.length > 1) {
-      navigate(-1);
-      return;
-    }
-    if (pendingChat?.selectedConv?.id) {
-      navigate(backTo, { replace: true, state: { pendingChat } });
-      return;
-    }
-    navigate(backTo);
-  };
+  const handleBack = useNavigateBack({ backTo, pendingChat });
   const resolvedClientId =
     adminClientId || chatClientId || (me?.role === "client" ? me.id : null);
 

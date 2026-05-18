@@ -11,7 +11,10 @@ const AUTH_TOKEN_KEY = "auth_token";
 let appStateListener = null;
 
 function resolveApiBase() {
-  return getFcmApiBaseUrl() || getApiBaseUrl() || "";
+  const base = getFcmApiBaseUrl() || getApiBaseUrl() || "";
+  if (!base) return "";
+  // Native OkHttp client expects …/api prefix (paths are /notifications/…).
+  return base.endsWith("/api") ? base : `${base.replace(/\/$/, "")}/api`;
 }
 
 /**

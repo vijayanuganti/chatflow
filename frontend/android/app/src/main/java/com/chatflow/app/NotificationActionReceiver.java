@@ -44,7 +44,7 @@ public class NotificationActionReceiver extends BroadcastReceiver {
         logAuthTokenFromPrefs(context);
 
         // Optimistic dismissal the instant the user taps Reply / Mark as Read.
-        optimisticallyDismiss(context, messageId);
+        optimisticallyDismiss(context, intent, messageId);
 
         final PendingResult pendingResult = goAsync();
         final Context appContext = context.getApplicationContext();
@@ -81,12 +81,19 @@ public class NotificationActionReceiver extends BroadcastReceiver {
         }
     }
 
-    private void optimisticallyDismiss(Context context, String messageId) {
+    private void optimisticallyDismiss(Context context, Intent intent, String messageId) {
+        String groupKey =
+                intent != null ? intent.getStringExtra(ChatFlowNotificationHelper.EXTRA_GROUP_KEY) : null;
+        if (groupKey != null && !groupKey.isEmpty()) {
+            ChatFlowNotificationHelper.cancelThread(context, groupKey);
+            Log.d(SPEED_TAG, "Dismissed notification tag=" + groupKey + " (optimistic)");
+            return;
+        }
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) {
             int nid = ChatFlowNotificationHelper.notificationIdFor(messageId);
             nm.cancel(nid);
-            Log.d(SPEED_TAG, "Dismissed notification id=" + nid + " (optimistic)");
+            Log.d(SPEED_TAG, "Dismissed notification id=" + nid + " (optimistic legacy)");
         }
         ChatFlowNotificationHelper.cancel(context, messageId);
     }

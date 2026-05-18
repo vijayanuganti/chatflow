@@ -11,7 +11,12 @@ import {
   Search,
   Star,
   X,
+  Reply,
+  Forward,
 } from "lucide-react";
+import SwipeableMessageRow from "@/components/chat/SwipeableMessageRow";
+import ForwardMessageSheet from "@/components/chat/ForwardMessageSheet";
+import { messageReplySnippet } from "@/lib/messageReply";
 import { groupMessagesByDate } from "@/lib/chatDateGroups";
 import { sortMessagesChronologically } from "@/lib/optimisticMessages";
 import { Button } from "@/components/ui/button";
@@ -28,6 +33,7 @@ import ChatComposer from "./chat/ChatComposer";
 import ImageLightbox from "./ImageLightbox";
 import { formatWhatsAppLastSeen } from "@/lib/datetime";
 import { useAuth } from "@/context/AuthContext";
+import { useChat } from "@/context/ChatContext";
 import Avatar from "./Avatar";
 import MessageBubble from "./MessageBubble";
 import {
@@ -41,6 +47,7 @@ import {
 import { toast } from "sonner";
 import { Capacitor } from "@capacitor/core";
 import { setActiveChatState, clearActiveChatState } from "@/lib/activeChatState";
+import { fcmGroupKeyForSender } from "@/lib/notificationDisplay";
 import { ChatFlowNative } from "@/lib/nativeAuthSync";
 
 export default function ChatWindow({
@@ -48,6 +55,7 @@ export default function ChatWindow({
   messages,
   onSendMessage,
   onPatchMessage,
+  conversations = [],
   typingUsers, // Map of userId -> name for users currently typing (excluding self)
   onlineUsers,
   lastSeenByUser = {},
@@ -63,6 +71,7 @@ export default function ChatWindow({
   statusBarInset = false,
 }) {
   const { user } = useAuth();
+  const { setActiveConversationId } = useChat();
   const navigate = useNavigate();
 
   const resolvedBackTo =
@@ -85,6 +94,13 @@ export default function ChatWindow({
   const [threadSearchOpen, setThreadSearchOpen] = useState(false);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [selectedMessage, setSelectedMessage] = useState(null);
+  const isSelectionModeActive = useRef(false);
+  useEffect(() => {
+    isSelectionModeActive.current = !!selectedMessage;
+  }, [selectedMessage]);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [forwardOpen, setForwardOpen] = useState(false);
+  const [forwardMessage, setForwardMessage] = useState(null);
   const [starredIds, setStarredIds] = useState(() => getStarredIds(user?.id));
   const [text, setText] = useState("");
   const [composerFocused, setComposerFocused] = useState(false);
@@ -96,7 +112,21 @@ export default function ChatWindow({
   const typingTimeoutRef = useRef(null);
   const lastTypingPingRef = useRef(0);
   const [lightbox, setLightbox] = useState(null);
+  const handleImageClick = useCallback((src, alt) => {
+    setLightbox({ src, alt });
+  }, []);
   const blobUrlsRef = useRef(new Set());
+
+  const trayGroupKey = useMemo(() => {
+    const convId = conversation?.id;
+    if (!convId || !user?.id) return null;
+    const participants = conversation?.participants;
+    if (!Array.isArray(participants)) {
+      return fcmGroupKeyForSender(null, convId);
+    }
+    const peerId = participants.find((p) => String(p) !== String(user.id));
+    return fcmGroupKeyForSender(peerId != null ? String(peerId) : null, convId);
+  }, [conversation?.id, conversation?.participants, user?.id]);
 
   // Sync active thread to chatflow_native_prefs immediately (before FCM can fire).
   useLayoutEffect(() => {
@@ -105,14 +135,15 @@ export default function ChatWindow({
       void clearActiveChatState();
       return undefined;
     }
-    void setActiveChatState(String(convId));
+    setActiveConversationId(convId);
+    void setActiveChatState(String(convId), trayGroupKey || undefined);
     if (Capacitor.isNativePlatform()) {
       void ChatFlowNative.setAppForeground({ foreground: true }).catch(() => {});
     }
     return () => {
       void clearActiveChatState();
     };
-  }, [conversation?.id]);
+  }, [conversation?.id, trayGroupKey, setActiveConversationId]);
 
   /* Only show messages that actually belong to the currently-open
      conversation. Without this, switching from chat A â†’ chat B briefly
@@ -130,80 +161,83 @@ export default function ChatWindow({
      it would feel natural. If they've scrolled up to read history we leave
      them alone. */
   const stickToBottomRef = useRef(true);
+  const scrollHeightRef = useRef(0);
   const [showScrollDown, setShowScrollDown] = useState(false);
+
+  const isNearBottom = useCallback((el) => {
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
+
+  const syncScrollDown = useCallback(() => {
+    const el = scrollRef.current;
+    const atBottom = isNearBottom(el);
+    stickToBottomRef.current = atBottom;
+    setShowScrollDown(!atBottom);
+  }, [isNearBottom]);
+
+  const pinToBottom = useCallback((behavior = "auto") => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const top = el.scrollHeight;
+    if (behavior === "smooth") {
+      el.scrollTo({ top, behavior: "smooth" });
+    } else {
+      el.scrollTop = top;
+    }
+    scrollHeightRef.current = el.scrollHeight;
+  }, []);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return undefined;
-    const onScroll = () => {
-      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-      stickToBottomRef.current = dist < 80;
-      setShowScrollDown(dist >= 80);
-    };
+    const onScroll = () => syncScrollDown();
     el.addEventListener("scroll", onScroll, { passive: true });
+    syncScrollDown();
     return () => el.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [conversation?.id, syncScrollDown]);
 
-  useEffect(() => {
-    if (stickToBottomRef.current) setShowScrollDown(false);
-  }, [conversation?.id, visibleMessages.length]);
-
-  /* Helper: pin the scroll container to the bottom across multiple frames.
-     One write isn't enough on slow phones because images/videos finish
-     laying out a beat after React commits, which would otherwise leave the
-     user mid-conversation. */
-  const pinToBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-    requestAnimationFrame(() => {
-      const e2 = scrollRef.current;
-      if (e2) e2.scrollTop = e2.scrollHeight;
-      requestAnimationFrame(() => {
-        const e3 = scrollRef.current;
-        if (e3) e3.scrollTop = e3.scrollHeight;
-      });
-    });
-  }, []);
-
-  /* When the open conversation changes, jump straight to the latest message
-     (no smooth scroll). useLayoutEffect runs before paint so the user never
-     glimpses the middle of the thread. */
+  /* Open thread at latest message. */
   useLayoutEffect(() => {
     stickToBottomRef.current = true;
-    pinToBottom();
-  }, [conversation?.id, pinToBottom]);
+    setShowScrollDown(false);
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+      scrollHeightRef.current = el.scrollHeight;
+    }
+  }, [conversation?.id]);
 
-  /* Once the new conversation's messages arrive, do a settle-pass to make
-     sure the latest bubble is fully in view even if the previous render
-     beat the data. We do this whenever the visible-messages count changes
-     so newly-arrived messages also keep the user at the bottom (when
-     anchored). */
-  useEffect(() => {
-    if (stickToBottomRef.current) pinToBottom();
-  }, [visibleMessages.length, typingUsers, pinToBottom]);
+  /* New messages: grow scroll by delta only (no full jump — older bubbles stay still). */
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !stickToBottomRef.current) return;
+    const prev = scrollHeightRef.current;
+    const next = el.scrollHeight;
+    if (prev > 0 && next > prev) {
+      el.scrollTop += next - prev;
+    } else {
+      el.scrollTop = next;
+    }
+    scrollHeightRef.current = next;
+    syncScrollDown();
+  }, [visibleMessages.length, typingUsers, syncScrollDown]);
 
-  /* After the very last layout pass for the current conversation, force one
-     more pin on a short timer to defeat images that finish loading slightly
-     later. Cheap and bounded. */
-  useEffect(() => {
-    if (!conversation?.id) return undefined;
-    const timeouts = [80, 250, 700].map((ms) => setTimeout(() => {
-      if (stickToBottomRef.current) pinToBottom();
-    }, ms));
-    return () => timeouts.forEach(clearTimeout);
-  }, [conversation?.id, visibleMessages.length, pinToBottom]);
-
-  /* Images / videos / audio in the thread grow the scroll height once they
-     finish loading. If the user is still at the bottom we keep them pinned;
-     this is the WhatsApp behaviour where late-loading media doesn't strand
-     you mid-conversation. */
+  /* Late-loading images: keep view pinned when user was already at the bottom. */
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return undefined;
     const reanchor = () => {
-      if (stickToBottomRef.current && scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      if (!stickToBottomRef.current || !scrollRef.current) return;
+      const node = scrollRef.current;
+      const prev = scrollHeightRef.current;
+      const next = node.scrollHeight;
+      if (prev > 0 && next > prev) {
+        node.scrollTop += next - prev;
+      } else {
+        node.scrollTop = next;
       }
+      scrollHeightRef.current = next;
     };
     el.addEventListener("load", reanchor, true);
     el.addEventListener("loadedmetadata", reanchor, true);
@@ -211,7 +245,7 @@ export default function ChatWindow({
       el.removeEventListener("load", reanchor, true);
       el.removeEventListener("loadedmetadata", reanchor, true);
     };
-  }, []);
+  }, [conversation?.id]);
 
   useEffect(() => {
     lastTypingPingRef.current = 0;
@@ -268,17 +302,71 @@ export default function ChatWindow({
     }, 2800);
   };
 
+  const startReply = useCallback((message) => {
+    if (!message || readOnly) return;
+    const mine = message.sender_id === user?.id;
+    setReplyingTo({
+      id: message.id,
+      sender_name: mine ? "You" : (message.sender_name || "User"),
+      snippet: messageReplySnippet(message),
+      mine,
+    });
+    setSelectedMessage(null);
+    requestAnimationFrame(() => {
+      try {
+        composerRef.current?.focus({ preventScroll: true });
+      } catch {
+        composerRef.current?.focus();
+      }
+    });
+  }, [readOnly, user?.id]);
+
+  const startReplyRef = useRef(startReply);
+  startReplyRef.current = startReply;
+
+  const buildSendPayload = useCallback((base) => {
+    if (!replyingTo?.id) return base;
+    return {
+      ...base,
+      reply_to_id: replyingTo.id,
+      reply_to_snippet: replyingTo.snippet,
+      reply_to_sender: replyingTo.sender_name,
+    };
+  }, [replyingTo]);
+
+  const handleRetryMessage = useCallback((failed) => {
+    if (!conversation || !onSendMessage || !failed?.__error) return;
+    const body = {
+      conversation_id: conversation.id,
+      content: failed.content || "",
+      message_type: failed.message_type || "text",
+      file_url: failed.file_url,
+      file_name: failed.file_name,
+    };
+    if (failed.reply_to_id) {
+      body.reply_to_id = failed.reply_to_id;
+      body.reply_to_snippet = failed.reply_to_snippet;
+      body.reply_to_sender = failed.reply_to_sender;
+    }
+    onSendMessage(body, { tempId: failed.__tempId || failed.id });
+  }, [conversation, onSendMessage]);
+
+  const openForward = useCallback((message) => {
+    setForwardMessage(message);
+    setForwardOpen(true);
+    setSelectedMessage(null);
+  }, []);
+
   const handleSendText = () => {
     const value = text.trim();
     if (!value || !conversation) return;
-    // Fire-and-forget: the parent (ChatApp) renders an optimistic bubble
-    // immediately. We never block the composer waiting for the server.
-    onSendMessage({
+    onSendMessage(buildSendPayload({
       conversation_id: conversation.id,
       content: value,
       message_type: "text",
-    });
+    }));
     setText("");
+    setReplyingTo(null);
     flushTypingStop();
     // Keep the keyboard open after send (WhatsApp-style). Refocus on the
     // next frame so the click that triggered us has fully settled - without
@@ -423,26 +511,29 @@ export default function ChatWindow({
     blobUrlsRef.current.clear();
   }, []);
 
-  const messageGroups = useMemo(() => groupMessagesByDate(visibleMessages), [visibleMessages]);
-
-  const filteredMessageGroups = useMemo(() => {
+  const displayItems = useMemo(() => {
     const q = threadSearchQuery.trim().toLowerCase();
-    if (!q) return messageGroups;
-    return messageGroups.filter((item) => {
+    const msgs = !q
+      ? visibleMessages
+      : visibleMessages.filter((m) => {
+          const content = (m.content || "").toLowerCase();
+          const fname = (m.file_name || "").toLowerCase();
+          return content.includes(q) || fname.includes(q);
+        });
+    const groups = groupMessagesByDate(msgs);
+    if (!q) return groups;
+    return groups.filter((item) => {
       if (item.type === "divider") return true;
       const content = (item.message?.content || "").toLowerCase();
       const fname = (item.message?.file_name || "").toLowerCase();
       return content.includes(q) || fname.includes(q);
     });
-  }, [messageGroups, threadSearchQuery]);
+  }, [visibleMessages, threadSearchQuery]);
 
   const scrollToLatest = useCallback(() => {
     stickToBottomRef.current = true;
     setShowScrollDown(false);
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    requestAnimationFrame(() => pinToBottom());
+    pinToBottom("smooth");
   }, [pinToBottom]);
 
   if (!conversation) {
@@ -521,7 +612,7 @@ export default function ChatWindow({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950" data-testid="chat-window">
       {/* Header: optional status-bar spacer when this window is the top chrome (admin mobile chat). */}
-      <div className="z-10 flex shrink-0 flex-col border-b border-gray-200 bg-white/90 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-950/80">
+      <div className="chat-header z-10 flex shrink-0 flex-col border-b border-gray-200 bg-white/90 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-950/80">
         {statusBarInset ? (
           <div
             className="w-full shrink-0 bg-white/90 dark:bg-gray-950/80"
@@ -536,6 +627,12 @@ export default function ChatWindow({
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <span className="flex-1 text-sm font-medium dark:text-gray-100">1 selected</span>
+            <Button size="icon" variant="ghost" className="rounded-full text-emerald-700" onClick={() => startReply(selectedMessage)} data-testid="message-selection-reply" title="Reply">
+              <Reply className="h-5 w-5" />
+            </Button>
+            <Button size="icon" variant="ghost" className="rounded-full text-emerald-700" onClick={() => openForward(selectedMessage)} data-testid="message-selection-forward" title="Forward">
+              <Forward className="h-5 w-5" />
+            </Button>
             <Button size="icon" variant="ghost" className="rounded-full text-amber-600" onClick={toggleStarSelected} data-testid="message-selection-star">
               <Star className={`h-5 w-5 ${starredIds.has(String(selectedMessage.id)) ? "fill-amber-500" : ""}`} />
             </Button>
@@ -562,7 +659,7 @@ export default function ChatWindow({
           <Avatar name={otherUser?.full_name} avatarUrl={otherUser?.avatar_url} online={isOnline} status={otherUser?.status} size={42} />
         )}
         <div className="flex-1 min-w-0">
-          <div className="font-display font-semibold text-sm sm:text-base truncate flex items-center gap-2 dark:text-gray-100" data-testid="chat-header-name">
+          <div className="chat-header-name font-display font-semibold text-sm sm:text-base truncate flex items-center gap-2 dark:text-gray-100" data-testid="chat-header-name">
             {headerName}
             {readOnly && (
               <span className="inline-flex items-center gap-1 text-[10px] tracking-[0.2em] uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
@@ -683,13 +780,17 @@ export default function ChatWindow({
 
       {/* Messages */}
       <div className="relative min-h-0 flex-1">
-        <div ref={scrollRef} className="chat-bg h-full space-y-2 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5" data-testid="messages-container">
+        <div
+          ref={scrollRef}
+          className="chat-bg h-full space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 sm:px-4 sm:py-5"
+          data-testid="messages-container"
+        >
         {visibleMessages.length === 0 && (
           <div className="text-center text-sm text-gray-400 py-10" data-testid="empty-messages">
             No messages yet. {readOnly ? "Conversation is quiet." : "Say hi!"}
           </div>
         )}
-        {filteredMessageGroups.map((item) => {
+        {displayItems.map((item) => {
           if (item.type === "divider") {
             return (
               <div key={item.key} className="flex justify-center py-2" data-testid="message-date-divider">
@@ -709,21 +810,32 @@ export default function ChatWindow({
           } else {
             mine = m.sender_id === user.id;
           }
-          return (
+          const bubble = (
             <MessageBubble
-              key={m.__tempId || m.id}
               message={m}
               mine={mine}
               showSenderName={showSenderNames}
               totalRecipients={totalRecipients}
               showReceipts={!readOnly}
-              onImageClick={(src, alt) => setLightbox({ src, alt })}
+              onImageClick={handleImageClick}
               selected={selectedMessage?.id === m.id}
               starred={m.id ? starredIds.has(String(m.id)) : false}
               searchQuery={threadSearchQuery}
               onLongPress={readOnly ? undefined : setSelectedMessage}
               dimmed={!!selectedMessage && selectedMessage?.id !== m.id}
+              onRetry={readOnly ? undefined : handleRetryMessage}
             />
+          );
+          return (
+            <SwipeableMessageRow
+              key={m.__tempId || m.id}
+              isSent={mine}
+              disabled={readOnly || !!selectedMessage}
+              selectionModeRef={isSelectionModeActive}
+              onSwipeReply={() => startReplyRef.current(m)}
+            >
+              {bubble}
+            </SwipeableMessageRow>
           );
         })}
         </div>
@@ -731,11 +843,11 @@ export default function ChatWindow({
           <button
             type="button"
             onClick={scrollToLatest}
-            className="absolute bottom-4 right-3 z-10 h-10 w-10 rounded-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-lg flex items-center justify-center text-emerald-900 dark:text-emerald-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-transform active:scale-95"
+            className="absolute bottom-4 right-3 z-20 flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white text-emerald-800 shadow-lg ring-2 ring-white/80 active:scale-95 dark:border-gray-600 dark:bg-gray-900 dark:text-emerald-300 dark:ring-gray-950/80"
             data-testid="scroll-to-bottom-btn"
-            aria-label="Scroll to latest messages"
+            aria-label="Jump to latest messages"
           >
-            <ChevronDown className="h-5 w-5" />
+            <ChevronDown className="h-6 w-6" strokeWidth={2.5} />
           </button>
         )}
       </div>
@@ -773,9 +885,19 @@ export default function ChatWindow({
             recording={recording}
             onRecordingChange={setRecording}
             onEmojiOpenChange={setEmojiPanelOpen}
+            replyingTo={replyingTo}
+            onCancelReply={() => setReplyingTo(null)}
           />
         </div>
       )}
+
+      <ForwardMessageSheet
+        open={forwardOpen}
+        onOpenChange={setForwardOpen}
+        message={forwardMessage}
+        conversations={conversations}
+        currentConversationId={conversation?.id}
+      />
     </div>
   );
 }

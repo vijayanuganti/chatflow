@@ -236,15 +236,27 @@ _firebase_app = None
 
 
 def _firebase_credential_path() -> Optional[Path]:
+    """Resolve service-account JSON: env absolute path, then files under backend/."""
+    file_env = (os.environ.get("FIREBASE_SERVICE_ACCOUNT_FILE") or "").strip()
+    if file_env:
+        candidate = Path(file_env).expanduser()
+        if not candidate.is_absolute():
+            candidate = (ROOT_DIR / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+        if candidate.is_file():
+            return candidate
+        logger.warning("FIREBASE_SERVICE_ACCOUNT_FILE not found: %s", candidate)
+
     for name in ("firebase-adminsdk.json", "firebase-adminsdk.json.json"):
-        path = ROOT_DIR / name
+        path = (ROOT_DIR / name).resolve()
         if path.is_file():
             return path
     return None
 
 
 def _load_firebase_credentials():
-    """Prefer FIREBASE_SERVICE_ACCOUNT_JSON env (Render); fall back to local JSON file."""
+    """FIREBASE_SERVICE_ACCOUNT_JSON (inline) → FIREBASE_SERVICE_ACCOUNT_FILE → backend/*.json."""
     import firebase_admin
     from firebase_admin import credentials
 
@@ -261,7 +273,7 @@ def _load_firebase_credentials():
 
     cred_path = _firebase_credential_path()
     if cred_path:
-        logger.info("Firebase credentials loaded from file: %s", cred_path.name)
+        logger.info("Firebase credentials loaded from file: %s", cred_path)
         return credentials.Certificate(str(cred_path))
 
     return None
@@ -302,36 +314,89 @@ def _fcm_data_payload(data: Optional[Dict]) -> Dict[str, str]:
     return payload
 
 
-def _send_fcm_multicast_blocking(tokens: List[str], title: str, body: str, data: Dict[str, str]):
+# Must match frontend/src/lib/push.js and ChatFlowNotificationHelper.CHANNEL_ID on Android.
+FCM_ANDROID_CHANNEL_ID = "chatflow_messages_actions"
+
+
+def _fcm_group_key(data: Optional[Dict[str, str]]) -> str:
+    """One tray slot per sender — used as collapse_key, Android tag, Web tag, iOS thread-id."""
+    payload = data or {}
+    sender_id = str(payload.get("sender_id") or "").strip()
+    if sender_id:
+        return f"sender_{sender_id}"
+    conversation_id = str(payload.get("conversation_id") or "").strip()
+    if conversation_id:
+        return f"conv_{conversation_id}"
+    message_id = str(payload.get("message_id") or "").strip() or uuid.uuid4().hex
+    return f"msg_{message_id}"
+
+
+def _send_fcm_multicast_blocking(
+    user_id: str,
+    tokens: List[str],
+    title: str,
+    body: str,
+    data: Dict[str, str],
+):
     from firebase_admin import messaging
 
-    # Unique tag per message so Android does not replace prior banners (sound-only updates).
-    message_id = (data or {}).get("message_id") or uuid.uuid4().hex
-    notification_tag = f"msg-{message_id}"
     payload_data = dict(data or {})
-    payload_data["android_priority"] = "2"  # PRIORITY_MAX on Android
+    message_id = (payload_data.get("message_id") or "").strip() or uuid.uuid4().hex
+    payload_data["message_id"] = message_id
 
-    # Android: data-only so ChatFlowMessagingService can attach Reply / Mark as Read actions.
+    sender_id = str(payload_data.get("sender_id") or "").strip()
+    conversation_id = str(payload_data.get("conversation_id") or "").strip()
+    if not sender_id or not conversation_id:
+        logger.warning(
+            "FCM routing fields missing for user_id=%s message_id=%s sender_id=%s conversation_id=%s keys=%s",
+            user_id,
+            message_id,
+            sender_id or "(empty)",
+            conversation_id or "(empty)",
+            sorted(payload_data.keys()),
+        )
+
+    group_key = _fcm_group_key(payload_data)
+    payload_data["android_priority"] = "2"  # PRIORITY_MAX on Android
+    payload_data["android_channel_id"] = FCM_ANDROID_CHANNEL_ID
+    payload_data["group_key"] = group_key
+    payload_data["notification_tag"] = group_key
+
+    # Data-only — ChatFlowMessagingService posts the tray UI (Reply / Mark read).
+    # collapse_key collapses in-flight FCM; group_key in data is the on-device tag/slot id.
     payload_data["title"] = title
     payload_data["body"] = body
-    payload_data["notification_tag"] = notification_tag
 
+    apns_headers = {"apns-collapse-id": group_key[:64]}
     message = messaging.MulticastMessage(
         data=payload_data,
         tokens=tokens,
         android=messaging.AndroidConfig(
             priority="high",
+            collapse_key=group_key,
             ttl=timedelta(hours=24),
             direct_boot_ok=True,
         ),
         apns=messaging.APNSConfig(
+            headers=apns_headers,
             payload=messaging.APNSPayload(
                 aps=messaging.Aps(
+                    thread_id=group_key,
                     alert=messaging.ApsAlert(title=title, body=body),
                     sound="default",
                 )
-            )
+            ),
         ),
+    )
+    logger.info(
+        "Attempting to send FCM to user_id=%s tokens=%s message_id=%s group_key=%s sender_id=%s conversation_id=%s keys=%s",
+        user_id,
+        len(tokens),
+        message_id,
+        group_key,
+        sender_id or "(empty)",
+        conversation_id or "(empty)",
+        sorted(payload_data.keys()),
     )
     return messaging.send_each_for_multicast(message)
 
@@ -351,35 +416,58 @@ async def send_fcm_notification(
     data: Optional[Dict] = None,
     *,
     conversation_id: Optional[str] = None,
+    sender_id: Optional[str] = None,
 ) -> None:
     """Send an FCM v1 notification+data payload to all tokens for a user."""
     if not _init_firebase():
+        logger.warning(
+            "FCM skipped for user %s — Firebase not configured "
+            "(set FIREBASE_SERVICE_ACCOUNT_JSON on the server or add firebase-adminsdk.json)",
+            user_id,
+        )
         return
     if conversation_id and await _conversation_muted_for_user(user_id, conversation_id):
+        logger.info("FCM skipped for user %s — conversation %s muted", user_id, conversation_id)
         return
 
     doc = await db.users.find_one({"id": user_id}, {"fcm_tokens": 1, "_id": 0})
     tokens = [t for t in (doc or {}).get("fcm_tokens") or [] if isinstance(t, str) and t.strip()]
     if not tokens:
+        logger.info(
+            "FCM skipped for user %s — no device tokens (open the Android app, allow notifications, log in)",
+            user_id,
+        )
         return
 
     str_data = _fcm_data_payload(data)
+    if conversation_id:
+        str_data["conversation_id"] = str(conversation_id).strip()
+    if sender_id:
+        str_data["sender_id"] = str(sender_id).strip()
     try:
         response = await asyncio.to_thread(
-            _send_fcm_multicast_blocking, tokens, title, body, str_data
+            _send_fcm_multicast_blocking, user_id, tokens, title, body, str_data
         )
     except Exception as e:
         logger.warning("FCM send failed for user %s: %s", user_id, e)
         return
 
     invalid: List[str] = []
+    success_count = 0
     try:
         from firebase_admin import messaging
 
         for idx, resp in enumerate(response.responses):
             if resp.success:
+                success_count += 1
                 continue
             exc = resp.exception
+            logger.warning(
+                "FCM delivery failed user=%s token[%s] err=%s",
+                user_id,
+                idx,
+                exc,
+            )
             if isinstance(
                 exc,
                 (
@@ -390,6 +478,15 @@ async def send_fcm_notification(
                 invalid.append(tokens[idx])
     except Exception:
         pass
+
+    logger.info(
+        "FCM sent user=%s tokens=%s success=%s invalid=%s conv=%s",
+        user_id,
+        len(tokens),
+        success_count,
+        len(invalid),
+        conversation_id or "",
+    )
 
     if invalid:
         await db.users.update_one(
@@ -626,10 +723,8 @@ def _upload_to_s3(fileobj, key: str, content_type: str) -> str:
 
 # ---------- Models ----------
 class LoginBody(BaseModel):
-    # Either `phone_number` (with optional country code dropdown applied
-    # client-side) OR `username` can be supplied. Server picks whichever is
-    # present. We keep them optional rather than using a oneOf so that
-    # existing clients posting just `phone_number` continue to work.
+    # Unified `identifier` (phone or username), or legacy `phone_number` / `username`.
+    identifier: Optional[str] = None
     phone_number: Optional[str] = None
     username: Optional[str] = None
     password: str
@@ -764,6 +859,10 @@ class MessageBody(BaseModel):
     message_type: str = "text"
     file_url: Optional[str] = None
     file_name: Optional[str] = None
+    client_message_id: Optional[str] = None
+    reply_to_id: Optional[str] = None
+    reply_to_snippet: Optional[str] = None
+    reply_to_sender: Optional[str] = None
 
 
 class ConversationPreferencesBody(BaseModel):
@@ -1043,20 +1142,45 @@ async def login(body: LoginBody, request: Request):
     are provided. We deliberately don't leak which lookup failed — the user
     always sees the same "invalid phone/username or password" error.
     """
-    phone_raw = (body.phone_number or "").strip()
-    username_raw = (body.username or "").strip()
+    identifier_raw = (body.identifier or body.phone_number or body.username or "").strip()
+    phone_raw = (body.phone_number or "").strip() if not body.identifier else ""
+    username_raw = (body.username or "").strip() if not body.identifier else ""
 
-    if not phone_raw and not username_raw:
+    if not identifier_raw:
         raise HTTPException(status_code=400, detail="Enter your phone number or username")
 
     user = None
-    audit_meta: dict = {"ip": _client_ip(request)}
+    audit_meta: dict = {"ip": _client_ip(request), "login_identifier": identifier_raw[:64]}
 
-    if phone_raw:
+    # Unified identifier: phone if starts with + or is digits-only (7–15).
+    if body.identifier:
+        ident = identifier_raw
+        digits_only = "".join(ch for ch in ident if ch.isdigit())
+        looks_like_phone = ident.startswith("+") or (
+            digits_only and len(digits_only) >= 7 and len(digits_only) <= 15 and not any(c.isalpha() for c in ident)
+        )
+        if looks_like_phone:
+            try:
+                phone = normalize_phone(ident if ident.startswith("+") else f"+{digits_only}")
+            except HTTPException:
+                await log_audit(
+                    actor_user_id=None,
+                    action="auth.login_failed",
+                    metadata={"reason": "phone_format", **audit_meta},
+                )
+                raise HTTPException(status_code=401, detail="Invalid phone/username or password")
+            audit_meta["phone_masked"] = _mask_phone(phone)
+            user = await db.users.find_one({"phone_number": phone})
+        else:
+            username_norm = ident.lower()
+            audit_meta["username"] = username_norm
+            user = await db.users.find_one({"username": username_norm})
+            if not user:
+                user = await db.users.find_one({"username": ident})
+    elif phone_raw:
         try:
             phone = normalize_phone(phone_raw)
         except HTTPException:
-            # Phone format invalid → keep the response generic.
             await log_audit(
                 actor_user_id=None,
                 action="auth.login_failed",
@@ -1067,8 +1191,6 @@ async def login(body: LoginBody, request: Request):
         user = await db.users.find_one({"phone_number": phone})
 
     if not user and username_raw:
-        # Username lookup is case-insensitive (usernames are stored lower-cased
-        # by `_create_user_internal`, but be defensive in case of legacy rows).
         username_norm = username_raw.lower()
         audit_meta["username"] = username_norm
         user = await db.users.find_one({"username": username_norm})
@@ -1225,18 +1347,24 @@ async def register_fcm_token(
     token = body.token.strip()
     if not token:
         raise HTTPException(status_code=400, detail="Token is required")
-    print(f"DEBUG: Received token for user {user['id']}")
     result = await db.users.update_one(
         {"id": user["id"]},
         {"$addToSet": {"fcm_tokens": token}},
     )
+    doc = await db.users.find_one({"id": user["id"]}, {"fcm_tokens": 1, "_id": 0})
+    token_count = len((doc or {}).get("fcm_tokens") or [])
     logger.info(
-        "FCM token registered for user %s (matched=%s modified=%s)",
+        "FCM token registered for user %s (matched=%s modified=%s total_tokens=%s)",
         user["id"],
         result.matched_count,
         result.modified_count,
+        token_count,
     )
-    return {"message": "Token registered", "stored": result.modified_count > 0 or result.matched_count > 0}
+    return {
+        "message": "Token registered",
+        "stored": result.modified_count > 0 or result.matched_count > 0,
+        "token_count": token_count,
+    }
 
 
 @api_router.post("/users/me/password")
@@ -2623,6 +2751,13 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
         "read_by": [user["id"]],
         "status": "sent",
     }
+    if body.client_message_id:
+        msg["client_message_id"] = body.client_message_id.strip()
+        msg["client_temp_id"] = msg["client_message_id"]
+    if body.reply_to_id:
+        msg["reply_to_id"] = body.reply_to_id.strip()
+        msg["reply_to_snippet"] = (body.reply_to_snippet or "")[:500]
+        msg["reply_to_sender"] = (body.reply_to_sender or "")[:120]
 
     await db.messages.insert_one(dict(msg))
     preview = body.content if body.message_type == "text" else f"[{body.message_type}]"
@@ -2636,29 +2771,28 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
 
     await manager.broadcast_message(msg, conv)
 
-    # Always send FCM — WebSocket may still be registered while the WebView is suspended
-    # in the background (common on OPPO/Xiaomi/Vivo), which would skip push and drop messages.
+    if conv["type"] == "group":
+        fcm_title = (conv.get("name") or "Group")[:80]
+        fcm_body = preview
+    else:
+        fcm_title = (user.get("full_name") or "New message")[:80]
+        fcm_body = preview
+    sender_avatar = (user.get("avatar_url") or "").strip()
+    fcm_data = {
+        "type": "new_message",
+        "conversation_id": conv["id"],
+        "message_id": msg["id"],
+        "sender_id": str(user["id"]),
+        "sender_avatar_url": sender_avatar,
+    }
     for recipient_id in msg["recipient_ids"]:
-        if conv["type"] == "group":
-            fcm_title = (conv.get("name") or "Group")[:80]
-            fcm_body = preview
-        else:
-            fcm_title = (user.get("full_name") or "New message")[:80]
-            fcm_body = preview
-        sender_avatar = (user.get("avatar_url") or "").strip()
-        asyncio.create_task(
-            send_fcm_notification(
-                recipient_id,
-                fcm_title,
-                fcm_body,
-                {
-                    "type": "new_message",
-                    "conversation_id": conv["id"],
-                    "message_id": msg["id"],
-                    "sender_avatar_url": sender_avatar,
-                },
-                conversation_id=conv["id"],
-            )
+        _schedule_fcm_for_recipient(
+            recipient_id=recipient_id,
+            title=fcm_title,
+            body=fcm_body,
+            data=fcm_data,
+            conversation_id=conv["id"],
+            sender_id=str(user["id"]),
         )
 
     return msg
@@ -3034,6 +3168,10 @@ class ConnectionManager:
     def __init__(self):
         self.active: Dict[str, Set[WebSocket]] = {}
 
+    def has_active_connection(self, user_id: str) -> bool:
+        """True when at least one WebSocket is still registered for this user."""
+        return bool(self.active.get(user_id))
+
     async def connect(self, user_id: str, ws: WebSocket):
         await ws.accept()
         self.active.setdefault(user_id, set()).add(ws)
@@ -3131,6 +3269,56 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+def _schedule_fcm_for_recipient(
+    *,
+    recipient_id: str,
+    title: str,
+    body: str,
+    data: Dict[str, str],
+    conversation_id: str,
+    sender_id: str,
+) -> None:
+    """
+    Queue FCM for a message recipient.
+
+    Sends push even when a WebSocket is still open — mobile WebViews often keep the
+    socket connected while the app is backgrounded. Logs websocket_active so PM2 logs
+    show why push was scheduled.
+    """
+
+    async def _run() -> None:
+        ws_active = manager.has_active_connection(recipient_id)
+        logger.info(
+            "Scheduling FCM for user_id=%s conversation_id=%s websocket_active=%s",
+            recipient_id,
+            conversation_id,
+            ws_active,
+        )
+        if not ws_active:
+            logger.info(
+                "Recipient user_id=%s has no active WebSocket — FCM required for delivery",
+                recipient_id,
+            )
+        await send_fcm_notification(
+            recipient_id,
+            title,
+            body,
+            data,
+            conversation_id=conversation_id,
+            sender_id=sender_id,
+        )
+
+    task = asyncio.create_task(_run())
+
+    def _on_done(t: asyncio.Task) -> None:
+        try:
+            t.result()
+        except Exception:
+            logger.exception("FCM background task failed for user_id=%s", recipient_id)
+
+    task.add_done_callback(_on_done)
 
 
 @app.websocket("/api/ws")
@@ -3342,6 +3530,15 @@ async def on_startup():
         await db.complaints.create_index([("status", 1), ("created_at", -1)])
         await db.complaints.create_index("client_id")
         await db.complaints.create_index("employee_id")
+
+        if _init_firebase():
+            logger.info("Firebase Admin ready — background push (FCM) enabled")
+        else:
+            logger.warning(
+                "Firebase Admin NOT configured — push notifications will not be sent. "
+                "Set FIREBASE_SERVICE_ACCOUNT_FILE or FIREBASE_SERVICE_ACCOUNT_JSON, "
+                "or add firebase-adminsdk.json under backend/"
+            )
     except Exception as e:
         logger.exception("Database startup failed")
         raise RuntimeError(

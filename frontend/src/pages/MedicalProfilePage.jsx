@@ -19,6 +19,7 @@ import {
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
+import { useNavigateBack } from "@/hooks/useNavigateBack";
 
 export default function MedicalProfilePage() {
   const { userId: routeUserId } = useParams();
@@ -39,17 +40,7 @@ export default function MedicalProfilePage() {
   const backTo = resolveBackTo(location.state, defaultBackTo);
   const pendingChat = location.state?.pendingChat;
 
-  const handleBack = () => {
-    if (typeof window !== "undefined" && window.history.length > 1) {
-      navigate(-1);
-      return;
-    }
-    if (pendingChat?.selectedConv?.id) {
-      navigate(backTo, { replace: true, state: { pendingChat } });
-      return;
-    }
-    navigate(backTo);
-  };
+  const handleBack = useNavigateBack({ backTo, pendingChat });
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

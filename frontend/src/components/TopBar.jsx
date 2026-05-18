@@ -31,7 +31,7 @@ export default function TopBar({
 
   return (
     <header
-      className="sticky top-0 z-20 flex flex-col border-b border-gray-200 bg-white/95 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-950/90"
+      className="chat-header sticky top-0 z-20 flex flex-col border-b border-gray-200 bg-white/95 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-950/90"
       data-testid="topbar"
     >
       {/* Reserve space for the OS status bar (signal, wifi, battery). Below this, app chrome starts. */}
@@ -51,7 +51,7 @@ export default function TopBar({
           <MessageCircle className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
         </div>
         <div className="min-w-0">
-          <div className="font-display text-sm font-semibold leading-tight truncate sm:text-base">{title}</div>
+          <div className="app-title font-display text-sm font-semibold leading-tight truncate sm:text-base">{title}</div>
         </div>
       </div>
 

@@ -14,13 +14,14 @@ export function formatChatDateDivider(iso) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
+/** Chronological messages with a date pill before each day (standard chat order). */
 export function groupMessagesByDate(messages) {
   const groups = [];
   let lastKey = null;
   for (const m of messages || []) {
     const key = formatChatDateDivider(m.created_at);
-    if (key !== lastKey) {
-      groups.push({ type: "divider", key: `${key}-${m.id}`, label: key });
+    if (key && key !== lastKey) {
+      groups.push({ type: "divider", key: `div-${key}-${m.id}`, label: key });
       lastKey = key;
     }
     groups.push({ type: "message", message: m });

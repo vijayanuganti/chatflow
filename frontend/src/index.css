@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,7 +5,7 @@
 
 body {
     margin: 0;
-    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background: #F9FAFB;
@@ -19,9 +18,14 @@ html.dark body {
     color: #f3f4f6;
 }
 
-h1, h2, h3, h4, h5, h6, .font-display {
-    font-family: 'Manrope', sans-serif;
+h1, h2, h3, h4, h5, h6, .font-display,
+.app-title, .chat-header-name {
+    font-family: 'Sora', sans-serif;
     letter-spacing: -0.02em;
+}
+
+.chat-message-text {
+    font-family: 'Plus Jakarta Sans', sans-serif;
 }
 
 @layer base {
@@ -85,17 +89,26 @@ h1, h2, h3, h4, h5, h6, .font-display {
 }
 
 /*
- * App-like UX: stop the browser from selecting labels / nav items / message
- * metadata when the user just taps something. Inputs, textareas, and the
- * actual chat-message body keep their selection (so editing still works and
- * users can still long-press to copy a message, WhatsApp-style).
+ * App-like UX: native chat apps do not highlight text on long-press.
+ * Inputs and the composer stay selectable.
  */
 html, body {
+    -webkit-tap-highlight-color: transparent;
+}
+
+.chat-message,
+.message-bubble,
+.message-text,
+.message-timestamp,
+.message-sender-name,
+.chat-list-row,
+.chat-sidebar,
+.chat-header,
+.panel-bottom-nav {
     -webkit-user-select: none;
     -moz-user-select: none;
     -ms-user-select: none;
     user-select: none;
-    -webkit-tap-highlight-color: transparent;
     -webkit-touch-callout: none;
 }
 
@@ -104,11 +117,7 @@ textarea,
 select,
 [contenteditable="true"],
 [contenteditable=""],
-.allow-select,
-.bubble-sent,
-.bubble-received,
-.bubble-sent *,
-.bubble-received * {
+.allow-select {
     -webkit-user-select: text;
     -moz-user-select: text;
     -ms-user-select: text;
@@ -285,8 +294,13 @@ html.dark[data-chat-theme="dots"] .chat-bg {
 }
 
 /* Foreground banners/toasts: below OS status bar (WebView may report 0 safe-area). */
-.notification-viewport-top {
-    top: max(3rem, calc(env(safe-area-inset-top, 0px) + 0.75rem)) !important;
+:root {
+    --app-safe-area-top: max(env(safe-area-inset-top, 0px), 36px);
+}
+
+.notification-viewport-top,
+[data-sonner-toaster] {
+    top: calc(var(--app-safe-area-top) + 0.75rem) !important;
 }
 
 .animate-banner-drop {

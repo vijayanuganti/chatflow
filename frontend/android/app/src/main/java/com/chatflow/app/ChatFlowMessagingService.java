@@ -1,5 +1,6 @@
 package com.chatflow.app;
 
+import android.os.PowerManager;
 import android.util.Log;
 import androidx.annotation.NonNull;
 import com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin;
@@ -17,9 +18,26 @@ public class ChatFlowMessagingService extends FirebaseMessagingService {
     public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
         Log.i(TAG, "onMessageReceived keys=" + remoteMessage.getData().keySet());
 
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        PowerManager.WakeLock wakeLock = null;
+        if (pm != null) {
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ChatFlow:FCM");
+            wakeLock.acquire(15_000L);
+        }
+
+        try {
+            handleRemoteMessage(remoteMessage);
+        } finally {
+            if (wakeLock != null && wakeLock.isHeld()) {
+                wakeLock.release();
+            }
+        }
+    }
+
+    private void handleRemoteMessage(@NonNull RemoteMessage remoteMessage) {
         java.util.Map<String, String> data = remoteMessage.getData();
         android.content.Context appCtx = getApplicationContext();
-        String incomingChatId = data != null ? data.get("conversation_id") : null;
+        String incomingChatId = ChatFlowFcmData.get(data, "conversation_id", "conversationId");
         String activeChatId = ChatFlowAuthStore.getActiveConversationId(appCtx);
         boolean foreground = ChatFlowAppState.isAppForeground(appCtx);
         boolean suppressActiveChat =
@@ -40,27 +58,38 @@ public class ChatFlowMessagingService extends FirebaseMessagingService {
                         + " suppressActiveChat="
                         + suppressActiveChat);
 
+        String messageId = extractMessageId(data);
+
         if (suppressActiveChat) {
             ChatFlowConversationSound.maybePlayIncoming(appCtx);
-            String messageId = extractMessageId(data);
             if (messageId != null && !messageId.isEmpty()) {
                 postDeliveredReceiptSync(messageId);
                 postSeenReceiptSync(messageId);
             }
+            PushNotificationsPlugin.sendRemoteMessage(remoteMessage);
             return;
         }
 
-        ChatFlowAppState.NotifyMode mode =
-                ChatFlowAppState.resolveNotifyMode(appCtx, incomingChatId);
-        Log.i(TAG, "notifyMode=" + mode + " conversation_id=" + incomingChatId);
-
-        if (mode == ChatFlowAppState.NotifyMode.FULL) {
-            ChatFlowNotificationHelper.showFromFcm(appCtx, remoteMessage);
-        } else if (mode == ChatFlowAppState.NotifyMode.SOFT) {
-            showSoftFromFcm(remoteMessage);
+        if (foreground) {
+            Log.i(TAG, "App foreground — skip OS tray; WebView handles in-app alerts");
+            if (messageId != null && !messageId.isEmpty()) {
+                postDeliveredReceiptSync(messageId);
+            }
+            PushNotificationsPlugin.sendRemoteMessage(remoteMessage);
+            return;
         }
 
-        String messageId = extractMessageId(data);
+        String title = ChatFlowFcmData.get(data, "title");
+        String groupKey =
+                ChatFlowNotificationHelper.resolveThreadKey(
+                        data, messageId, incomingChatId, title);
+        Log.i(
+                TAG,
+                "App background — posting tray group_key="
+                        + groupKey
+                        + " conversation_id="
+                        + incomingChatId);
+        ChatFlowNotificationHelper.showFromFcm(appCtx, remoteMessage);
         Log.i(
                 TAG,
                 "delivered receipt message_id="
@@ -72,8 +101,7 @@ public class ChatFlowMessagingService extends FirebaseMessagingService {
         } else {
             Log.w(TAG, "skipping /update-status: message_id missing from FCM data payload");
         }
-
-        PushNotificationsPlugin.sendRemoteMessage(remoteMessage);
+        // Background: tray already shown natively — do not forward to Capacitor (avoids duplicate handling).
     }
 
     private void postSeenReceiptSync(final String messageId) {

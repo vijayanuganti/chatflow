@@ -1,4 +1,5 @@
 import { Capacitor } from "@capacitor/core";
+import { App } from "@capacitor/app";
 import { PushNotifications } from "@capacitor/push-notifications";
 import {
   api,
@@ -12,9 +13,14 @@ import {
   playSoftForegroundTone,
   notificationToneSuppressesOsSound,
 } from "./notificationTone";
-import { isInActiveConversation } from "./activeChatState";
 import { markMessageSeen } from "./messageSeen";
 import { showInAppMessageBanner } from "./inAppNotifications";
+import {
+  fcmGroupKeyForSender,
+  shouldShowInAppAlert,
+  shouldShowSystemTrayNotification,
+  shouldSuppressAllNotifications,
+} from "./notificationDisplay";
 import { syncNativeAuthForPush, ChatFlowNative } from "./nativeAuthSync";
 
 export const FCM_MESSAGE_EVENT = "chatflow:fcm-message";
@@ -26,6 +32,8 @@ let activeUserId = null;
 let listeners = [];
 let onNotificationActionRef = null;
 let onMarkReadRef = null;
+let lastRegistrationToken = null;
+let appResumeListener = null;
 
 function logPush(...args) {
   console.log("[push]", ...args);
@@ -130,9 +138,24 @@ function onRegistration(token) {
     console.warn("[push] registration event with empty token:", token);
     return;
   }
+  lastRegistrationToken = token;
   console.log(`DEBUG_TOKEN_VAL: ${token.value}`);
   logPush("FCM registration received, length=", token.value.length);
   void postFcmTokenToApi(token);
+}
+
+async function refreshFcmRegistration(reason) {
+  if (!Capacitor.isNativePlatform() || !activeUserId) return;
+  logPush("refreshFcmRegistration:", reason);
+  try {
+    await syncNativeAuthForPush();
+    await PushNotifications.register();
+    if (lastRegistrationToken?.value) {
+      void postFcmTokenToApi(lastRegistrationToken);
+    }
+  } catch (err) {
+    console.warn("[push] refreshFcmRegistration failed:", err);
+  }
 }
 
 function onRegistrationError(err) {
@@ -149,9 +172,18 @@ export function teardownCapacitorPush() {
     }
   });
   listeners = [];
+  if (appResumeListener) {
+    try {
+      appResumeListener.remove();
+    } catch {
+      /* ignore */
+    }
+    appResumeListener = null;
+  }
   activeUserId = null;
   onNotificationActionRef = null;
   onMarkReadRef = null;
+  lastRegistrationToken = null;
 }
 
 /**
@@ -232,17 +264,32 @@ export async function initCapacitorPush(userId, onNotificationAction, onMarkRead
       }
       const title = notification?.title || data.title || "ChatFlow";
       const body = notification?.body || data.body || "";
-      const appVisible = document.visibilityState === "visible";
-      const inActiveChat = appVisible && isInActiveConversation(convId);
+      const suppressAll = shouldSuppressAllNotifications(convId);
+      const showTray = shouldShowSystemTrayNotification();
+      const showInApp = shouldShowInAppAlert(convId);
+      const groupKey = fcmGroupKeyForSender(senderId, convId);
 
       logPush(
         "pushNotificationReceived:",
         notification?.id ?? title,
+        "groupKey=",
+        groupKey,
         "visible=",
         document.visibilityState,
-        "inActiveChat=",
-        inActiveChat,
+        "suppressAll=",
+        suppressAll,
+        "showTray=",
+        showTray,
+        "showInApp=",
+        showInApp,
       );
+
+      if (showTray) {
+        logPush("background — native tray handles OS notification; skip JS UI");
+        if (notificationToneSuppressesOsSound()) {
+          void playInboundMessageTone();
+        }
+      }
 
       try {
         window.dispatchEvent(
@@ -250,8 +297,8 @@ export async function initCapacitorPush(userId, onNotificationAction, onMarkRead
             detail: {
               notification,
               data,
-              inActiveChat,
-              foreground: appVisible,
+              inActiveChat: suppressAll,
+              foreground: !showTray,
             },
           }),
         );
@@ -259,29 +306,28 @@ export async function initCapacitorPush(userId, onNotificationAction, onMarkRead
         /* ignore */
       }
 
-      if (!appVisible) {
-        if (notificationToneSuppressesOsSound()) {
-          void playInboundMessageTone();
-        }
-        return;
-      }
-
-      if (inActiveChat) {
+      if (suppressAll) {
         if (data.message_id) markMessageSeen(data.message_id);
         return;
       }
 
-      void playSoftForegroundTone();
-      showInAppMessageBanner({
-        title,
-        body,
-        conversationId: convId,
-        onOpen: () => {
-          onNotificationActionRef?.({
-            data: { conversation_id: convId },
-          });
-        },
-      });
+      if (showTray) {
+        return;
+      }
+
+      if (showInApp) {
+        void playSoftForegroundTone();
+        showInAppMessageBanner({
+          title,
+          body,
+          conversationId: convId,
+          onOpen: () => {
+            onNotificationActionRef?.({
+              data: { conversation_id: convId },
+            });
+          },
+        });
+      }
     }),
     await PushNotifications.addListener("pushNotificationActionPerformed", (event) => {
       const data = event?.notification?.data || {};
@@ -325,6 +371,20 @@ export async function initCapacitorPush(userId, onNotificationAction, onMarkRead
     } catch (err) {
       console.warn("[push] ChatFlowNative markRead listener failed:", err);
     }
+  }
+
+  if (!appResumeListener) {
+    App.addListener("appStateChange", ({ isActive }) => {
+      if (isActive) {
+        void refreshFcmRegistration("app foreground");
+      }
+    })
+      .then((handle) => {
+        appResumeListener = handle;
+      })
+      .catch((err) => {
+        console.warn("[push] appStateChange listener failed:", err);
+      });
   }
 
   logPush("listeners attached, calling PushNotifications.register()");

@@ -11,6 +11,7 @@ import {
   AUTH_REMEMBER_KEY,
 } from "../lib/api";
 import { syncNativeAuthForPush, clearNativeAuth } from "../lib/nativeAuthSync";
+import { clearStoredActiveConversationId } from "../lib/activeConversationStorage";
 
 const AuthContext = React.createContext(null);
 
@@ -171,6 +172,7 @@ export function AuthProvider({ children }) {
       /* ignore */
     }
     clearAuthSession();
+    clearStoredActiveConversationId();
     setUserState(null);
     void clearNativeAuth();
   }, []);

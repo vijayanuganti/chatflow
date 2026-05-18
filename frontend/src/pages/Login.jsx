@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import { SplashScreen } from "@capacitor/splash-screen";
@@ -42,6 +42,8 @@ export default function LoginPage() {
   const [countryQuery, setCountryQuery] = useState("");
   /** When false, session is tab-only (no token in localStorage); new tabs in this profile start logged out. */
   const [staySignedIn, setStaySignedIn] = useState(true);
+  const loginCardRef = useRef(null);
+  const passwordRef = useRef(null);
 
   // If the user is already authenticated (e.g. they pressed the system Back
   // button from inside the app and somehow landed here), bounce them right
@@ -51,6 +53,25 @@ export default function LoginPage() {
     const target = user.role === "admin" ? "/admin" : "/chat";
     navigate(target, { replace: true });
   }, [loading, user, navigate]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.minHeight = "100dvh";
+    const handler = () => {
+      const card = loginCardRef.current;
+      if (!card || !window.visualViewport) return;
+      const keyboardHeight = Math.max(0, window.innerHeight - window.visualViewport.height);
+      card.style.transform = keyboardHeight > 0 ? `translateY(-${keyboardHeight * 0.4}px)` : "";
+    };
+    window.visualViewport?.addEventListener("resize", handler);
+    window.visualViewport?.addEventListener("scroll", handler);
+    return () => {
+      root.style.minHeight = "";
+      if (loginCardRef.current) loginCardRef.current.style.transform = "";
+      window.visualViewport?.removeEventListener("resize", handler);
+      window.visualViewport?.removeEventListener("scroll", handler);
+    };
+  }, []);
 
   const country = getCountry(countryCode);
   const isUsername = useMemo(() => looksLikeUsername(identifier), [identifier]);
@@ -71,22 +92,24 @@ export default function LoginPage() {
     if (!trimmed) return toast.error("Enter your phone number or username");
     if (!password) return toast.error("Enter your password");
 
-    // Build the payload depending on what the user typed.
-    let payload;
-    if (isUsername) {
-      payload = { username: trimmed, password };
-    } else {
-      // Only digits — combine with the selected country code so the server
-      // sees a full E.164 number it can normalise.
-      const localDigits = digitsOnly(trimmed);
-      if (!localDigits) {
-        return toast.error("Enter a valid phone number or username");
-      }
-      payload = {
-        phone_number: `${country.dial}${localDigits}`,
-        password,
-      };
+    const localDigits = digitsOnly(trimmed);
+    const looksLikePhone =
+      trimmed.startsWith("+") ||
+      (/^\d{7,15}$/.test(localDigits) && !isUsername);
+    const resolvedIdentifier = looksLikePhone
+      ? (trimmed.startsWith("+") ? trimmed : `${country.dial}${localDigits}`)
+      : trimmed;
+    if (looksLikePhone && !localDigits) {
+      return toast.error("Enter a valid phone number or username");
     }
+    // Send legacy fields too — production API may not have `identifier` until backend is redeployed.
+    const payload = {
+      identifier: resolvedIdentifier,
+      password,
+      ...(looksLikePhone
+        ? { phone_number: resolvedIdentifier }
+        : { username: resolvedIdentifier }),
+    };
 
     setSubmitting(true);
     try {
@@ -115,10 +138,10 @@ export default function LoginPage() {
 
   return (
     <div
-      className="min-h-screen overflow-y-auto overflow-x-hidden flex flex-col max-w-[100vw] bg-white dark:bg-gray-950 pt-[calc(env(safe-area-inset-top,0px)+1.5rem)] pb-[max(1rem,env(safe-area-inset-bottom,0px))]"
+      className="min-h-[100dvh] flex flex-col max-w-[100vw] bg-white dark:bg-gray-950 pt-[calc(env(safe-area-inset-top,0px)+1.5rem)] pb-[max(1rem,env(safe-area-inset-bottom,0px))]"
       data-testid="login-page"
     >
-      <div className="flex flex-col w-full lg:grid lg:grid-cols-2">
+      <div className="flex flex-col w-full min-h-0 flex-1 lg:grid lg:grid-cols-2 overflow-y-auto overflow-x-hidden">
       {/* Brand panel */}
       <div className="hidden lg:flex min-h-0 flex-col justify-between py-12 pl-[max(3rem,env(safe-area-inset-left,0px))] pr-[max(3rem,env(safe-area-inset-right,0px))] pb-[max(3rem,env(safe-area-inset-bottom,0px))] bg-emerald-900 text-white relative overflow-hidden">
         <div className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-emerald-700 opacity-30 blur-3xl" />
@@ -158,7 +181,7 @@ export default function LoginPage() {
 
       {/* Form panel */}
       <div className="flex flex-col bg-white dark:bg-gray-950 p-6 md:p-12 pl-[max(1.5rem,env(safe-area-inset-left,0px))] pr-[max(1.5rem,env(safe-area-inset-right,0px))]">
-        <div className="m-auto w-full max-w-md min-w-0">
+        <div ref={loginCardRef} className="m-auto w-full max-w-md min-w-0 transition-transform duration-200 ease-out">
           <div className="lg:hidden flex items-center gap-3 mb-6">
             <div className="h-10 w-10 rounded-xl bg-emerald-900 text-white flex items-center justify-center">
               <MessageCircle className="h-6 w-6" />
@@ -173,7 +196,7 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-5 w-full min-w-0" data-testid="login-form">
             <div className="space-y-2 w-full min-w-0">
-              <Label htmlFor="identifier">Phone or username</Label>
+              <Label htmlFor="identifier">Phone number or username</Label>
               <div className="flex w-full min-w-0 items-stretch gap-2">
                 {/* Country code selector — disabled when the input looks like
                     a username (we don't need a dial code in that case). */}
@@ -254,7 +277,7 @@ export default function LoginPage() {
                     className="w-full pl-10 h-12 rounded-xl"
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
-                    placeholder="Enter your number"
+                    placeholder="+91XXXXXXXXXX or username"
                     inputMode={isUsername ? "text" : "tel"}
                     autoComplete={isUsername ? "username" : "tel"}
                     required
@@ -271,11 +294,17 @@ export default function LoginPage() {
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <PasswordInput
+                ref={passwordRef}
                 id="password"
                 data-testid="login-password-input"
                 className="w-full h-12 rounded-xl"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onFocus={() => {
+                  window.setTimeout(() => {
+                    passwordRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+                  }, 300);
+                }}
                 placeholder="Enter your password"
                 autoComplete="current-password"
                 required

@@ -28,8 +28,7 @@ export function useOptimisticMessageSend({
       const raw = typeof updater === "function" ? updater(prev) : updater;
       if (!Array.isArray(raw)) return prev;
       const next = sortMessagesChronologically(raw);
-      if (next === prev) return prev;
-      if (user?.id && isViewingConversation(conversationId, selectedIdRef.current)) {
+      if (user?.id && conversationId && isViewingConversation(conversationId, selectedIdRef.current)) {
         setCachedMessages(user.id, conversationId, next);
       }
       return next;
@@ -89,7 +88,7 @@ export function useOptimisticMessageSend({
     if (skipOptimistic && existingTempId) {
       (async () => {
         try {
-          const res = await api.post("/messages", body);
+          const res = await api.post("/messages", { ...body, client_message_id: tempId });
           applyServerMessage(tempId, res.data, convId);
           updateConversationPreview(res.data, res.data.created_at);
         } catch (err) {
@@ -104,7 +103,23 @@ export function useOptimisticMessageSend({
       return tempId;
     }
 
-    if (!skipOptimistic && !existingTempId) {
+    if (!skipOptimistic && existingTempId) {
+      commitMessages(convId, (prev) => prev.map((m) => (
+        String(m.__tempId) === String(tempId) || String(m.id) === String(tempId)
+          ? {
+            ...m,
+            __pending: true,
+            __error: false,
+            __uploadProgress: undefined,
+            content: body.content ?? m.content,
+            message_type: body.message_type ?? m.message_type,
+            file_url: body.file_url ?? m.file_url,
+            file_name: body.file_name ?? m.file_name,
+            ...extraFields,
+          }
+          : m
+      )));
+    } else if (!skipOptimistic && !existingTempId) {
       const recipientIds = conv
         ? (conv.participants || []).filter((p) => p !== user?.id)
         : [];
@@ -125,14 +140,18 @@ export function useOptimisticMessageSend({
         read_by: [user?.id],
         recipient_ids: recipientIds,
         status: "sent",
+        reply_to_id: body.reply_to_id,
+        reply_to_snippet: body.reply_to_snippet,
+        reply_to_sender: body.reply_to_sender,
         ...extraFields,
       });
 
-      if (convId && isViewingConversation(convId, selectedIdRef.current)) {
+      if (convId) {
         commitMessages(convId, (prev) => appendToMessageList(prev, optimistic));
-      } else if (convId && user?.id) {
-        const cached = getCachedMessages(convId) || [];
-        setCachedMessages(user.id, convId, appendToMessageList(cached, optimistic));
+        if (user?.id && !isViewingConversation(convId, selectedIdRef.current)) {
+          const cached = getCachedMessages(convId) || [];
+          setCachedMessages(user.id, convId, appendToMessageList(cached, optimistic));
+        }
       }
 
       updateConversationPreview(optimistic, nowIso);
@@ -140,9 +159,14 @@ export function useOptimisticMessageSend({
 
     if (deferPost) return tempId;
 
+    const postBody = {
+      ...body,
+      client_message_id: tempId,
+    };
+
     (async () => {
       try {
-        const res = await api.post("/messages", body);
+        const res = await api.post("/messages", postBody);
         applyServerMessage(tempId, res.data, convId);
         updateConversationPreview(res.data, res.data.created_at);
       } catch (err) {
