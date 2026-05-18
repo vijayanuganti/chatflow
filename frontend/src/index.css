@@ -163,6 +163,24 @@ html.dark .bubble-received {
     border-radius: 8px;
 }
 
+/* Bubble sizes to message text (not full row width) */
+.message-bubble {
+    display: inline-block;
+    width: fit-content;
+    max-width: 75%;
+    min-width: 48px;
+    vertical-align: top;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+.message-bubble .message-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    margin: 0;
+    padding: 0;
+}
+
 /* Typing dots */
 .typing-dot {
     width: 6px;
