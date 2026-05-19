@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { toast } from "sonner";
 import { api, formatApiError } from "@/lib/api";
+import { lastMessageFieldsFromMsg } from "@/lib/chatListPreview";
 import { getCachedMessages, setCachedMessages } from "@/lib/messageCache";
 import {
   makeOptimisticMessageId,
@@ -63,16 +64,19 @@ export function useOptimisticMessageSend({
 
     const updateConversationPreview = (previewSource, createdAt) => {
       if (!setConversations || !convId) return;
-      const preview = previewSource.content || `[${previewSource.message_type}]`;
-      const previewText = conv?.type === "group"
-        ? `${previewSource.sender_name}: ${preview}`
-        : preview;
       setConversations((prev) => {
         let found = false;
         const updated = prev.map((c) => {
           if (c.id === convId) {
             found = true;
-            return { ...c, last_message: previewText, last_message_at: createdAt };
+            return {
+              ...c,
+              ...lastMessageFieldsFromMsg(
+                { ...previewSource, created_at: createdAt || previewSource.created_at },
+                c,
+                user?.id,
+              ),
+            };
           }
           return c;
         });

@@ -872,6 +872,7 @@ export default function ChatWindow({
               onToggleSelect={readOnly ? undefined : toggleSelect}
               dimmed={isSelectionMode && !selectedMessages.includes(mKey)}
               onRetry={readOnly ? undefined : handleRetryMessage}
+              viewerUserId={user?.id}
             />
           );
           return (

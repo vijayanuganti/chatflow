@@ -81,6 +81,7 @@ function MessageBubble({
   dimmed = false,
   onRetry,
   bubbleRef,
+  viewerUserId,
 }) {
   const longPressRef = useRef(null);
   const didLongPressRef = useRef(false);
@@ -215,7 +216,10 @@ function MessageBubble({
 
           {(message.is_forwarded || message.reply_to_id || message.reply_to_snippet) && (
             <div className={`${isMediaBubble ? "px-3 pt-2" : ""}`}>
-              {message.is_forwarded && (
+              {message.is_forwarded &&
+                message.original_sender_id &&
+                viewerUserId &&
+                String(message.original_sender_id) !== String(viewerUserId) && (
                 <p className="text-[10px] italic text-gray-500 dark:text-gray-400 mb-0.5" data-testid={`message-forwarded-${message.id}`}>
                   ↪ Forwarded
                 </p>
@@ -398,6 +402,7 @@ function messageBubblePropsEqual(prev, next) {
   if (a?.__uploadProgress !== b?.__uploadProgress) return false;
   if (a?.content !== b?.content) return false;
   if (a?.is_forwarded !== b?.is_forwarded) return false;
+  if (a?.original_sender_id !== b?.original_sender_id) return false;
   if (a?.reply_to_id !== b?.reply_to_id) return false;
   if (a?.reply_to_snippet !== b?.reply_to_snippet) return false;
   if (a?.file_url !== b?.file_url) return false;

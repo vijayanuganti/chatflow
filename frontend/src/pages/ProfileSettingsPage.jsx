@@ -30,6 +30,7 @@ import {
   setConversationSoundsEnabled,
   syncConversationSoundsFromNative,
 } from "@/lib/conversationSounds";
+import LoginHistorySection from "@/components/LoginHistorySection";
 
 const STATUS_OPTIONS = [
   { value: "available", label: "Available", color: "bg-emerald-500" },
@@ -540,6 +541,9 @@ export default function ProfileSettingsPage() {
             <Button onClick={changePassword} disabled={saving} data-testid="change-password-btn" className="w-full rounded-full bg-emerald-900 hover:bg-emerald-950 h-11">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Update password"}
             </Button>
+            <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
+              <LoginHistorySection />
+            </div>
           </TabsContent>
 
         </Tabs>

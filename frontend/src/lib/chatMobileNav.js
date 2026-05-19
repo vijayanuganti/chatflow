@@ -6,7 +6,9 @@
 export const CHAT_CONVERSATION_QUERY = "c";
 
 export function getChatConversationId(searchParams) {
-  const id = searchParams.get(CHAT_CONVERSATION_QUERY);
+  const id =
+    searchParams.get(CHAT_CONVERSATION_QUERY) ||
+    searchParams.get("open_conversation");
   return id && id.length > 0 ? id : null;
 }
 

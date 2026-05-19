@@ -67,6 +67,7 @@ export default function ForwardModal({
             file_url: msg.file_url || undefined,
             file_name: msg.file_name || undefined,
             is_forwarded: true,
+            original_sender_id: msg.sender_id,
           });
         }
       }

@@ -69,10 +69,17 @@ self.addEventListener("notificationclick", (event) => {
           }
         }
         if (event.notification.data) {
+          const convId = event.notification.data.conversation_id;
           client.postMessage({
             type: "chatflow:notification-click",
             data: event.notification.data,
           });
+          if (convId) {
+            client.postMessage({
+              type: "OPEN_CONVERSATION",
+              conversationId: String(convId),
+            });
+          }
         }
         return;
       } catch {

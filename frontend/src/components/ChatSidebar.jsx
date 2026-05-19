@@ -20,6 +20,7 @@ import { partitionConversations } from "@/lib/conversationPreferences";
 import { loadChatListScroll, saveChatListScroll } from "@/lib/chatListScroll";
 import { hapticSelectionStart } from "@/lib/selectionHaptics";
 import ComposeIcon from "@/components/icons/ComposeIcon";
+import { getLastMsgPreview, LastMessageTicks } from "@/lib/chatListPreview";
 
 function formatLastTime(iso) {
   if (!iso) return "";
@@ -42,6 +43,7 @@ function ConversationRow({
   onLongPressSelect,
   onAvatarPress,
   readOnlyPrefs,
+  currentUserId,
 }) {
   const longPressRef = useRef(null);
   const didLongPressRef = useRef(false);
@@ -147,8 +149,17 @@ function ConversationRow({
               </span>
             </div>
           </div>
-          <div className={`text-sm truncate ${unreadCount > 0 ? "text-gray-800 dark:text-gray-200 font-medium" : "text-gray-500 dark:text-gray-400"}`}>
-            {c.last_message || (adminView ? "Monitoring" : "Say hello 👋")}
+          <div className="flex items-center gap-1 text-sm min-w-0">
+            {!adminView && currentUserId ? (
+              <span className="shrink-0 flex items-center">
+                <LastMessageTicks conv={c} currentUserId={currentUserId} />
+              </span>
+            ) : null}
+            <span
+              className={`truncate ${unreadCount > 0 ? "text-gray-800 dark:text-gray-200 font-medium" : "text-gray-500 dark:text-gray-400"}`}
+            >
+              {getLastMsgPreview(c) || (adminView ? "Monitoring" : "Say hello 👋")}
+            </span>
           </div>
         </div>
       </button>
@@ -419,6 +430,7 @@ export default function ChatSidebar({
               onLongPressSelect={readOnlyPrefs ? undefined : onSelectedConversationChange}
               onAvatarPress={onAvatarPress}
               readOnlyPrefs={readOnlyPrefs}
+              currentUserId={user?.id}
             />
           ))
         )}

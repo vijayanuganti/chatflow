@@ -85,7 +85,7 @@ export default function ImageLightbox({ open, src, alt = "Image", onClose }) {
       role="dialog"
       aria-modal="true"
       aria-label="Image preview"
-      className="fixed inset-0 z-[200] flex flex-col bg-black/95"
+      className="fixed inset-0 z-[9999] flex flex-col bg-black/95"
       onClick={onClose}
       data-testid="image-lightbox"
     >

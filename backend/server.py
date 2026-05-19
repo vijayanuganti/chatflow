@@ -621,8 +621,9 @@ async def get_location_from_ip(ip: Optional[str]) -> str:
 
 
 async def assert_active_session(jti: Optional[str]) -> None:
-    if not jti:
-        raise HTTPException(status_code=401, detail="Session expired. Please login again.")
+    """Require an active server session when JWT includes `jti` (legacy tokens without jti still work until expiry)."""
+    if not jti or not str(jti).strip():
+        return
     session = await db.sessions.find_one({"token_jti": jti, "is_active": True}, {"_id": 1})
     if not session:
         raise HTTPException(status_code=401, detail="Session expired. Please login again.")
@@ -931,6 +932,7 @@ class MessageBody(BaseModel):
     reply_to_snippet: Optional[str] = None
     reply_to_sender: Optional[str] = None
     is_forwarded: bool = False
+    original_sender_id: Optional[str] = None
 
 
 class ConversationPreferencesBody(BaseModel):
@@ -1360,14 +1362,56 @@ async def logout(response: Response, request: Request):
 
 
 @api_router.get("/auth/login-history")
-async def login_history(user: dict = Depends(get_current_user)):
+@api_router.get("/users/me/sessions")
+async def login_history(request: Request, user: dict = Depends(get_current_user)):
     """Recent sign-in sessions for the current account (newest first)."""
+    current_jti = None
+    token = _extract_jwt_from_request(request)
+    if token:
+        try:
+            current_jti = decode_token(token).get("jti")
+        except Exception:
+            current_jti = None
+
     sessions = (
         await db.sessions.find({"user_id": user["id"]}, {"_id": 0})
         .sort("created_at", -1)
         .to_list(50)
     )
+    for s in sessions:
+        s["is_current"] = bool(
+            current_jti and s.get("token_jti") and str(s["token_jti"]) == str(current_jti)
+        )
     return {"sessions": sessions}
+
+
+@api_router.post("/auth/sessions/{session_id}/revoke")
+async def revoke_session(
+    session_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Deactivate a past session (remote sign-out). Use logout for the current device."""
+    session = await db.sessions.find_one({"id": session_id, "user_id": user["id"]}, {"_id": 0})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    token = _extract_jwt_from_request(request)
+    current_jti = None
+    if token:
+        try:
+            current_jti = decode_token(token).get("jti")
+        except Exception:
+            current_jti = None
+    if current_jti and session.get("token_jti") and str(session["token_jti"]) == str(current_jti):
+        raise HTTPException(
+            status_code=400,
+            detail="Use Sign out to end your current session on this device.",
+        )
+    await db.sessions.update_one(
+        {"id": session_id, "user_id": user["id"]},
+        {"$set": {"is_active": False, "last_active": now_iso()}},
+    )
+    return {"message": "Session revoked"}
 
 
 @api_router.get("/auth/verify")
@@ -2872,6 +2916,8 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
         msg["reply_to_sender"] = (body.reply_to_sender or "")[:120]
     if body.is_forwarded:
         msg["is_forwarded"] = True
+        if body.original_sender_id:
+            msg["original_sender_id"] = body.original_sender_id.strip()
 
     await db.messages.insert_one(dict(msg))
     preview = body.content if body.message_type == "text" else f"[{body.message_type}]"
@@ -2880,7 +2926,15 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
 
     await db.conversations.update_one(
         {"id": conv["id"]},
-        {"$set": {"last_message": preview, "last_message_at": msg["created_at"]}},
+        {
+            "$set": {
+                "last_message": preview,
+                "last_message_at": msg["created_at"],
+                "last_message_sender_id": user["id"],
+                "last_message_type": body.message_type,
+                "last_message_read_by": msg.get("read_by", []),
+            }
+        },
     )
 
     await manager.broadcast_message(msg, conv)
@@ -3220,6 +3274,17 @@ async def mark_read(conv_id: str, user: dict = Depends(get_current_user)):
             {"id": m["id"], "sender_id": m.get("sender_id"), "conversation_id": conv_id},
             "seen",
             user["id"],
+        )
+
+    latest = await db.messages.find_one(
+        {"conversation_id": conv_id},
+        {"_id": 0, "read_by": 1},
+        sort=[("created_at", -1)],
+    )
+    if latest:
+        await db.conversations.update_one(
+            {"id": conv_id},
+            {"$set": {"last_message_read_by": latest.get("read_by", [])}},
         )
 
     for pid in conv["participants"]:

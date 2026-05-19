@@ -1006,6 +1006,12 @@ export default function AdminDashboard() {
   const topbarTitle = "ChatFlow";
 
   const handlePreferenceChange = useCallback(async (convId, patch) => {
+    setListSelection(null);
+    setMyConvs((prev) => {
+      const conv = prev.find((c) => c.id === convId);
+      if (!conv) return prev;
+      return patchConversationPrefs(prev, convId, { ...conv, ...patch });
+    });
     try {
       const data = await updateConversationPreferences(convId, patch);
       setMyConvs((prev) => patchConversationPrefs(prev, convId, data));
@@ -1013,14 +1019,10 @@ export default function AdminDashboard() {
         setSelected(null);
         setMobileChatStep("list");
       }
-      if (patch.is_archived && listSelection?.id === convId) {
-        setListSelection(null);
-      }
-      setListSelection((prev) => (prev?.id === convId ? { ...prev, ...data } : prev));
     } catch (err) {
       toast.error(formatApiError(err));
     }
-  }, [listSelection?.id]);
+  }, []);
 
   const openUserProfile = useCallback((profileUser, conv) => {
     if (!profileUser?.id) return;

@@ -21,7 +21,7 @@ export default function VideoLightbox({ open, src, onClose }) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/95"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95"
       role="dialog"
       aria-modal="true"
       onClick={onClose}

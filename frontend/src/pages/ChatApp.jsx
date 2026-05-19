@@ -66,6 +66,7 @@ import {
   chatOpenTarget,
   getChatConversationId,
 } from "@/lib/chatMobileNav";
+import { lastMessageFieldsFromMsg } from "@/lib/chatListPreview";
 import { saveChatListScroll } from "@/lib/chatListScroll";
 import {
   patchConversationPrefs,
@@ -183,16 +184,18 @@ export default function ChatApp() {
   }, [navigate]);
 
   const handlePreferenceChange = useCallback(async (convId, patch) => {
+    setListSelection(null);
+    setConversations((prev) => {
+      const conv = prev.find((c) => c.id === convId);
+      if (!conv) return prev;
+      return patchConversationPrefs(prev, convId, { ...conv, ...patch });
+    });
     try {
       const data = await updateConversationPreferences(convId, patch);
       setConversations((prev) => patchConversationPrefs(prev, convId, data));
       if (patch.is_archived && selectedIdRef.current === convId) {
         setSelected(null);
       }
-      if (patch.is_archived && listSelection?.id === convId) {
-        setListSelection(null);
-      }
-      setListSelection((prev) => (prev?.id === convId ? { ...prev, ...data } : prev));
     } catch (err) {
       toast.error(formatApiError(err));
     }
@@ -448,23 +451,20 @@ export default function ChatApp() {
     });
     setConversations((prev) => {
       const exists = prev.find((c) => c.id === msg.conversation_id);
-      const preview = msg.content || `[${msg.message_type}]`;
-      const previewText = msg.conversation_type === "group"
-        ? `${msg.sender_name}: ${preview}` : preview;
       if (!exists) { loadConversations(); return prev; }
       const shouldIncrementUnread = (
         (!activeId || msg.conversation_id !== activeId) &&
         Array.isArray(msg.recipient_ids) &&
         msg.recipient_ids.includes(user.id)
       );
-      const updated = prev.map((c) => c.id === msg.conversation_id
-        ? {
+      const updated = prev.map((c) => {
+        if (c.id !== msg.conversation_id) return c;
+        return {
           ...c,
-          last_message: previewText,
-          last_message_at: msg.created_at,
+          ...lastMessageFieldsFromMsg(msg, c, user.id),
           unread_count: shouldIncrementUnread ? (Number(c.unread_count || 0) + 1) : Number(c.unread_count || 0),
-        } : c
-      );
+        };
+      });
       updated.sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || ""));
       return updated;
     });
@@ -514,6 +514,14 @@ export default function ChatApp() {
           return m;
         });
         if (user?.id) setCachedMessages(user.id, activeId, next);
+        const latestMine = [...next].reverse().find((m) => m.sender_id === user.id);
+        if (latestMine) {
+          setConversations((convs) => convs.map((c) => (
+            c.id === activeId
+              ? { ...c, last_message_read_by: latestMine.read_by || [] }
+              : c
+          )));
+        }
         return next;
       });
     }
@@ -582,22 +590,48 @@ export default function ChatApp() {
 
   // When the user clicks a notification, the SW asks us to focus the right
   // conversation. The SW also focused the tab/opened a new one.
+  const openConversationById = useCallback((convId) => {
+    if (!convId) return;
+    setConversations((prev) => {
+      const target = prev.find((c) => c.id === convId);
+      if (target) {
+        setListSelection(null);
+        setSelected(target);
+        setActiveConversationId(target.id);
+        setMobileSection("chats");
+        navigate(chatOpenTarget(target.id), { replace: false });
+      }
+      return prev;
+    });
+  }, [navigate, setActiveConversationId]);
+
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
     const onMessage = (event) => {
       const payload = event?.data;
-      if (!payload || payload.type !== "chatflow:notification-click") return;
+      if (!payload) return;
+      if (payload.type === "OPEN_CONVERSATION" && payload.conversationId) {
+        openConversationById(payload.conversationId);
+        return;
+      }
+      if (payload.type !== "chatflow:notification-click") return;
       const convId = payload.data?.conversation_id;
-      if (!convId) return;
-      setConversations((prev) => {
-        const target = prev.find((c) => c.id === convId);
-        if (target) setSelected(target);
-        return prev;
-      });
+      if (convId) openConversationById(convId);
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
     return () => navigator.serviceWorker.removeEventListener("message", onMessage);
-  }, []);
+  }, [openConversationById]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const convId = params.get("open_conversation");
+    if (!convId || conversations.length === 0) return;
+    openConversationById(convId);
+    const next = new URLSearchParams(window.location.search);
+    next.delete("open_conversation");
+    const qs = next.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+  }, [conversations.length, openConversationById]);
 
   const sendTyping = useCallback((conversationId, isTyping) => {
     wsSendTyping(conversationId, isTyping);
