@@ -19,6 +19,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Set, Tuple, Any
 
 import boto3
+import httpx
 from botocore.exceptions import BotoCoreError, ClientError
 
 
@@ -554,16 +555,81 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(user_id: str, username: str, role: str, browser_id: str) -> str:
+def create_access_token(
+    user_id: str,
+    username: str,
+    role: str,
+    browser_id: str,
+    jti: Optional[str] = None,
+) -> str:
     bid = (browser_id or "").strip()[:128] or str(uuid.uuid4())
+    token_jti = (jti or "").strip() or str(uuid.uuid4())
     payload = {
         "sub": user_id,
         "username": username,
         "role": role,
         "exp": datetime.now(timezone.utc) + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS),
         "bid": bid,
+        "jti": token_jti,
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def parse_device_name(user_agent: str) -> str:
+    ua = (user_agent or "").lower()
+    if "capacitor" in ua or "chatflow" in ua:
+        return "Android App" if "android" in ua else "Mobile App"
+    browser = "Browser"
+    if "edg/" in ua or "edge/" in ua:
+        browser = "Edge"
+    elif "chrome/" in ua or "crios/" in ua:
+        browser = "Chrome"
+    elif "firefox/" in ua:
+        browser = "Firefox"
+    elif "safari/" in ua and "chrome" not in ua:
+        browser = "Safari"
+    os_name = "Unknown"
+    if "android" in ua:
+        os_name = "Android"
+    elif "iphone" in ua or "ipad" in ua:
+        os_name = "iOS"
+    elif "windows" in ua:
+        os_name = "Windows"
+    elif "mac os" in ua or "macintosh" in ua:
+        os_name = "macOS"
+    elif "linux" in ua:
+        os_name = "Linux"
+    return f"{browser} on {os_name}"
+
+
+async def get_location_from_ip(ip: Optional[str]) -> str:
+    if not ip or ip in ("127.0.0.1", "::1", "localhost"):
+        return "Local"
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            res = await client.get(f"http://ip-api.com/json/{ip}?fields=status,city,country")
+            data = res.json()
+            if data.get("status") == "success":
+                city = (data.get("city") or "").strip()
+                country = (data.get("country") or "").strip()
+                if city and country:
+                    return f"{city}, {country}"
+                return country or city or "Unknown"
+    except Exception:
+        logger.debug("IP geolocation lookup failed for %s", ip, exc_info=True)
+    return "Unknown"
+
+
+async def assert_active_session(jti: Optional[str]) -> None:
+    if not jti:
+        raise HTTPException(status_code=401, detail="Session expired. Please login again.")
+    session = await db.sessions.find_one({"token_jti": jti, "is_active": True}, {"_id": 1})
+    if not session:
+        raise HTTPException(status_code=401, detail="Session expired. Please login again.")
+    await db.sessions.update_one(
+        {"token_jti": jti},
+        {"$set": {"last_active": now_iso()}},
+    )
 
 
 def decode_token(token: str) -> dict:
@@ -650,6 +716,7 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Not authenticated")
     payload = decode_token(token)
     _assert_jwt_browser_binding(request, payload)
+    await assert_active_session(payload.get("jti"))
     user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
@@ -1218,12 +1285,39 @@ async def login(body: LoginBody, request: Request):
             detail="Your account is inactive. Please contact your administrator.",
         )
 
+    await db.sessions.update_many(
+        {"user_id": user["id"], "is_active": True},
+        {"$set": {"is_active": False}},
+    )
+
     browser_id = _browser_id_from_request(request) or str(uuid.uuid4())
+    jti = str(uuid.uuid4())
+    ua = request.headers.get("user-agent", "")
+    client_ip = _client_ip(request)
+    device_name = parse_device_name(ua)
+    location = await get_location_from_ip(client_ip)
+    created_at = now_iso()
+
+    await db.sessions.insert_one(
+        {
+            "id": str(uuid.uuid4()),
+            "user_id": user["id"],
+            "token_jti": jti,
+            "device_name": device_name,
+            "location": location,
+            "ip_address": client_ip or "",
+            "created_at": created_at,
+            "last_active": created_at,
+            "is_active": True,
+        }
+    )
+
     token = create_access_token(
         user["id"],
         user.get("username") or "",
         user["role"],
         browser_id,
+        jti=jti,
     )
     # Web SPA stores the JWT in sessionStorage (per tab). Do not set a shared
     # HttpOnly cookie here — last-writer cookie was overwriting other tabs.
@@ -1252,11 +1346,28 @@ async def logout(response: Response, request: Request):
         token = _extract_jwt_from_request(request)
         if token:
             payload = decode_token(token)
+            jti = payload.get("jti")
+            if jti:
+                await db.sessions.update_one(
+                    {"token_jti": jti},
+                    {"$set": {"is_active": False, "last_active": now_iso()}},
+                )
             await log_audit(actor_user_id=payload.get("sub"), action="auth.logout")
     except Exception:
         pass
     _clear_auth_cookie(response)
     return {"message": "Logged out"}
+
+
+@api_router.get("/auth/login-history")
+async def login_history(user: dict = Depends(get_current_user)):
+    """Recent sign-in sessions for the current account (newest first)."""
+    sessions = (
+        await db.sessions.find({"user_id": user["id"]}, {"_id": 0})
+        .sort("created_at", -1)
+        .to_list(50)
+    )
+    return {"sessions": sessions}
 
 
 @api_router.get("/auth/verify")
@@ -3342,6 +3453,12 @@ async def websocket_endpoint(
             _assert_jwt_browser_binding_ws(payload, browser_id)
         except HTTPException:
             logger.warning("WS reject: browser binding mismatch")
+            await websocket.close(code=4401)
+            return
+        try:
+            await assert_active_session(payload.get("jti"))
+        except HTTPException:
+            logger.warning("WS reject: inactive session jti=%s", payload.get("jti"))
             await websocket.close(code=4401)
             return
         user_id = payload.get("sub")

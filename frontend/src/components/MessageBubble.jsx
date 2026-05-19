@@ -1,10 +1,11 @@
-import React, { useRef, memo } from "react";
+import React, { useRef, memo, useState, useCallback } from "react";
 import { Check, CheckCheck, Clock, AlertCircle, Star } from "lucide-react";
 import { fileUrl } from "@/lib/api";
 import { NO_SELECT_STYLE } from "@/lib/noSelectStyles";
 import VoiceNotePlayer, { parseVoiceNoteDurationLabel } from "@/components/VoiceNotePlayer";
 import UploadProgressRing from "@/components/chat/UploadProgressRing";
 import DocumentMessageBlock from "@/components/chat/DocumentMessageBlock";
+import VideoLightbox from "@/components/chat/VideoLightbox";
 
 function formatTime(iso) {
   try {
@@ -13,6 +14,13 @@ function formatTime(iso) {
   } catch {
     return "";
   }
+}
+
+function formatVideoDuration(seconds) {
+  const s = Math.max(0, Math.floor(Number(seconds) || 0));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
 }
 
 function resolveMessageStatus(message, readByOthers, readByAll) {
@@ -40,6 +48,23 @@ function highlightText(text, query) {
   );
 }
 
+function ReceiptTicks({ mine, showReceipts, message, tickStatus }) {
+  if (!mine || !showReceipts) return null;
+  if (message.__pending) {
+    return <Clock className="h-3 w-3 text-gray-400 shrink-0" strokeWidth={2} aria-label="Sending" />;
+  }
+  if (message.__error) {
+    return <AlertCircle className="h-3 w-3 text-rose-500 shrink-0" strokeWidth={2} aria-label="Failed to send" />;
+  }
+  if (tickStatus === "seen") {
+    return <CheckCheck className="h-3 w-3 text-sky-500 shrink-0" strokeWidth={2} aria-label="Read" />;
+  }
+  if (tickStatus === "delivered") {
+    return <CheckCheck className="h-3 w-3 text-gray-400 shrink-0" strokeWidth={2} aria-label="Delivered" />;
+  }
+  return <Check className="h-3 w-3 text-gray-400 shrink-0" strokeWidth={2} aria-label="Sent" />;
+}
+
 function MessageBubble({
   message,
   mine,
@@ -59,6 +84,9 @@ function MessageBubble({
 }) {
   const longPressRef = useRef(null);
   const didLongPressRef = useRef(false);
+  const [videoLightboxOpen, setVideoLightboxOpen] = useState(false);
+  const [videoDurationLabel, setVideoDurationLabel] = useState("");
+
   const time = formatTime(message.created_at);
   const bubbleClass = mine ? "bubble-sent" : "bubble-received";
   const align = mine ? "items-end" : "items-start";
@@ -73,6 +101,12 @@ function MessageBubble({
 
   const wrapperClass = message.__error ? "opacity-90" : "";
   const messageId = message.id || message.__tempId;
+
+  const isImage = message.message_type === "image" && message.file_url;
+  const isVideo = message.message_type === "video" && message.file_url;
+  const isDocument = message.message_type === "file" && message.file_url;
+  const isAudio = message.message_type === "audio" && message.file_url;
+  const isMediaBubble = isImage || isVideo || isDocument;
 
   const handlePointerDown = () => {
     if (!messageId) return;
@@ -97,161 +131,250 @@ function MessageBubble({
 
   const clearPress = () => clearTimeout(longPressRef.current);
 
+  const onVideoMetadata = useCallback((e) => {
+    const d = e.currentTarget.duration;
+    if (Number.isFinite(d) && d > 0) {
+      setVideoDurationLabel(formatVideoDuration(d));
+    }
+  }, []);
+
+  const timestampRow = (
+    <div className="message-timestamp-row">
+      <span className="message-timestamp shrink-0">{time}</span>
+      <ReceiptTicks mine={mine} showReceipts={showReceipts} message={message} tickStatus={tickStatus} />
+    </div>
+  );
+
+  const overlayTimestamp = (
+    <div className="absolute bottom-1 right-2 z-[2] flex items-center gap-1 rounded-full bg-black/40 px-1.5 py-0.5">
+      <span className="text-[10px] text-white">{time}</span>
+      {mine && showReceipts ? (
+        <span className="text-white [&_svg]:text-white">
+          <ReceiptTicks mine={mine} showReceipts={showReceipts} message={message} tickStatus={tickStatus} />
+        </span>
+      ) : null}
+    </div>
+  );
+
+  const bubblePaddingClass = isMediaBubble ? "media-bubble p-0" : "";
+
   return (
-    <div
-      className={`flex flex-col ${align} animate-in-up ${wrapperClass} ${dimmed && !selected ? "opacity-45" : ""}`}
-      style={NO_SELECT_STYLE}
-      data-testid={`message-${message.id || message.__tempId}`}
-      data-status={message.__pending ? "pending" : message.__error ? "error" : tickStatus}
-      onPointerDown={handlePointerDown}
-      onPointerUp={clearPress}
-      onPointerLeave={clearPress}
-      onPointerCancel={clearPress}
-      onClick={handleClick}
-    >
+    <>
       <div
-        ref={bubbleRef}
-        className={`${bubbleClass} message-bubble relative px-3 py-2 shadow-sm w-fit`}
+        className={`flex flex-col ${align} animate-in-up ${wrapperClass} ${dimmed && !selected ? "opacity-45" : ""}`}
         style={NO_SELECT_STYLE}
+        data-testid={`message-${message.id || message.__tempId}`}
+        data-status={message.__pending ? "pending" : message.__error ? "error" : tickStatus}
+        onPointerDown={handlePointerDown}
+        onPointerUp={clearPress}
+        onPointerLeave={clearPress}
+        onPointerCancel={clearPress}
+        onClick={handleClick}
       >
-        {selected && (
-          <>
+        <div
+          ref={bubbleRef}
+          className={`${bubbleClass} message-bubble relative shadow-sm w-fit ${bubblePaddingClass} ${
+            isImage ? "image-bubble overflow-hidden rounded-[12px]" : ""
+          } ${isVideo ? "video-bubble overflow-hidden rounded-[12px]" : ""} ${
+            isDocument ? "document-bubble rounded-[12px]" : ""
+          }`}
+          style={
+            isImage || isVideo
+              ? { maxWidth: "260px", minWidth: "160px", ...NO_SELECT_STYLE }
+              : isDocument
+                ? { minWidth: "220px", maxWidth: "280px", ...NO_SELECT_STYLE }
+                : NO_SELECT_STYLE
+          }
+        >
+          {selected && (
+            <>
+              <div
+                className="pointer-events-none absolute inset-0 z-[1] rounded-[inherit] bg-emerald-500/15"
+                aria-hidden
+              />
+              <div
+                className="absolute -left-1 -top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm"
+                aria-hidden
+              >
+                <Check className="h-3 w-3" strokeWidth={3} />
+              </div>
+            </>
+          )}
+          {starred && (
+            <Star className="absolute -top-1 -right-1 h-3.5 w-3.5 text-amber-500 fill-amber-400 z-10" aria-hidden />
+          )}
+
+          {showSenderName && !mine && (
             <div
-              className="pointer-events-none absolute inset-0 z-[1] rounded-[inherit] bg-emerald-500/15"
-              aria-hidden
-            />
-            <div
-              className="absolute -left-1 -top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 text-white shadow-sm"
-              aria-hidden
+              className="message-sender-name px-3 pt-2 text-[11px] font-semibold text-emerald-800 dark:text-emerald-400"
+              data-testid={`sender-name-${message.id}`}
             >
-              <Check className="h-3 w-3" strokeWidth={3} />
+              {message.sender_name || "User"}
             </div>
-          </>
-        )}
-        {starred && (
-          <Star className="absolute -top-1 -right-1 h-3.5 w-3.5 text-amber-500 fill-amber-400 z-10" aria-hidden />
-        )}
+          )}
 
-        {showSenderName && !mine && (
-          <div
-            className="message-sender-name text-[11px] font-semibold text-emerald-800 dark:text-emerald-400 mb-0.5"
-            data-testid={`sender-name-${message.id}`}
-          >
-            {message.sender_name || "User"}
-          </div>
-        )}
+          {(message.is_forwarded || message.reply_to_id || message.reply_to_snippet) && (
+            <div className={`${isMediaBubble ? "px-3 pt-2" : ""}`}>
+              {message.is_forwarded && (
+                <p className="text-[10px] italic text-gray-500 dark:text-gray-400 mb-0.5" data-testid={`message-forwarded-${message.id}`}>
+                  ↪ Forwarded
+                </p>
+              )}
+              {(message.reply_to_id || message.reply_to_snippet) && (
+                <div
+                  className={`mb-1.5 rounded-lg border-l-[3px] px-2 py-1.5 text-xs ${
+                    mine
+                      ? "border-emerald-300/90 bg-emerald-950/20 text-emerald-50/90"
+                      : "border-sky-500/80 bg-gray-100/90 dark:bg-gray-800/80 text-gray-600 dark:text-gray-300"
+                  }`}
+                  data-testid={`message-reply-quote-${message.id}`}
+                >
+                  {message.reply_to_sender ? (
+                    <p className="font-semibold truncate opacity-90">{message.reply_to_sender}</p>
+                  ) : null}
+                  <p className="line-clamp-2 opacity-85">{message.reply_to_snippet || ""}</p>
+                </div>
+              )}
+            </div>
+          )}
 
-        {message.is_forwarded && (
-          <p className="text-[10px] italic text-gray-500 dark:text-gray-400 mb-0.5" data-testid={`message-forwarded-${message.id}`}>
-            ↪ Forwarded
-          </p>
-        )}
+          {isImage && (
+            <div className="relative">
+              <button
+                type="button"
+                className="block w-full border-0 bg-transparent p-0 cursor-pointer touch-manipulation"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!uploading) onImageClick?.(mediaSrc, message.file_name || "image");
+                }}
+                data-testid={`message-image-${message.id}`}
+              >
+                <img
+                  src={mediaSrc}
+                  alt={message.file_name || "image"}
+                  className="block h-auto w-full object-cover"
+                  style={{ maxHeight: "300px", borderRadius: "12px 12px 0 0" }}
+                />
+              </button>
+              {!uploading && overlayTimestamp}
+              <UploadProgressRing progress={uploadPct} visible={uploading || (message.__pending && uploadPct < 100)} />
+            </div>
+          )}
 
-        {(message.reply_to_id || message.reply_to_snippet) && (
-          <div
-            className={`mb-1.5 rounded-lg border-l-[3px] px-2 py-1.5 text-xs ${
-              mine
-                ? "border-emerald-300/90 bg-emerald-950/20 text-emerald-50/90"
-                : "border-sky-500/80 bg-gray-100/90 dark:bg-gray-800/80 text-gray-600 dark:text-gray-300"
-            }`}
-            data-testid={`message-reply-quote-${message.id}`}
-          >
-            {message.reply_to_sender ? (
-              <p className="font-semibold truncate opacity-90">{message.reply_to_sender}</p>
-            ) : null}
-            <p className="line-clamp-2 opacity-85">{message.reply_to_snippet || ""}</p>
-          </div>
-        )}
-
-        {message.message_type === "image" && message.file_url && (
-          <button
-            type="button"
-            className="relative block p-0 border-0 bg-transparent cursor-pointer rounded-xl overflow-hidden mb-1 max-w-full"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (!uploading) onImageClick?.(mediaSrc, message.file_name || "image");
-            }}
-            data-testid={`message-image-${message.id}`}
-          >
-            <img
-              src={mediaSrc}
-              alt={message.file_name || "image"}
-              className="rounded-xl max-h-80 max-w-full object-cover pointer-events-none"
-            />
-            <UploadProgressRing progress={uploadPct} visible={uploading || (message.__pending && uploadPct < 100)} />
-          </button>
-        )}
-
-        {message.message_type === "video" && message.file_url && (
-          <div className="relative mb-1 max-w-full">
-            <video src={mediaSrc} controls className="rounded-xl max-h-80 max-w-full" poster={message.__videoPoster || undefined} />
-            <UploadProgressRing progress={uploadPct} visible={uploading || (message.__pending && uploadPct < 100)} />
-          </div>
-        )}
-
-        {message.message_type === "audio" && message.file_url && (
-          <div className="mb-1" data-testid={`audio-player-${message.id}`}>
-            <VoiceNotePlayer
-              src={mediaSrc}
-              durationLabel={parseVoiceNoteDurationLabel(message.content)}
-              mine={mine}
-            />
-            <UploadProgressRing progress={uploadPct} visible={uploading} />
-          </div>
-        )}
-
-        {message.message_type === "file" && message.file_url && (
-          <div className="relative mb-1">
-            <DocumentMessageBlock
-              href={message.file_url}
-              fileName={message.file_name}
-              fileSize={message.file_size}
-              mimeType={message.__mimeType}
-              mine={mine}
-            />
-            <UploadProgressRing progress={uploadPct} visible={uploading} />
-          </div>
-        )}
-
-        {message.content && message.message_type !== "audio" ? (
-          <p className="message-text whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100 leading-relaxed">
-            {highlightText(message.content, searchQuery)}
-          </p>
-        ) : null}
-
-        <div className="flex items-center justify-end gap-1 mt-1">
-          {mine && message.__error && onRetry ? (
-            <button
-              type="button"
+          {isVideo && (
+            <div
+              className="relative cursor-pointer touch-manipulation"
               onClick={(e) => {
                 e.stopPropagation();
-                onRetry(message);
+                if (!uploading) setVideoLightboxOpen(true);
               }}
-              className="text-[10px] font-medium text-rose-600 dark:text-rose-400 mr-auto touch-manipulation"
-              data-testid={`message-retry-${message.id}`}
+              data-testid={`message-video-${message.id}`}
             >
-              ⚠ Retry
-            </button>
+              <video
+                src={mediaSrc}
+                className="block w-full"
+                style={{ maxHeight: "300px", borderRadius: "12px 12px 0 0", objectFit: "cover" }}
+                preload="metadata"
+                muted
+                playsInline
+                poster={message.__videoPoster || undefined}
+                onLoadedMetadata={onVideoMetadata}
+              />
+              {!uploading && (
+                <>
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[12px] bg-black/20">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-black/60">
+                      <svg viewBox="0 0 24 24" fill="white" className="ml-1 h-7 w-7" aria-hidden>
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    </div>
+                  </div>
+                  {videoDurationLabel ? (
+                    <div className="absolute bottom-2 left-2 rounded bg-black/50 px-1 text-[10px] text-white">
+                      {videoDurationLabel}
+                    </div>
+                  ) : null}
+                  {overlayTimestamp}
+                </>
+              )}
+              <UploadProgressRing progress={uploadPct} visible={uploading || (message.__pending && uploadPct < 100)} />
+            </div>
+          )}
+
+          {isAudio && (
+            <div className="px-3 py-2" data-testid={`audio-player-${message.id}`}>
+              <VoiceNotePlayer
+                src={mediaSrc}
+                durationLabel={parseVoiceNoteDurationLabel(message.content)}
+                mine={mine}
+              />
+              <UploadProgressRing progress={uploadPct} visible={uploading} />
+            </div>
+          )}
+
+          {isDocument && (
+            <div className="relative px-3 py-3">
+              <DocumentMessageBlock
+                href={message.file_url}
+                fileName={message.file_name}
+                fileSize={message.file_size}
+                mimeType={message.__mimeType}
+                timestampRow={timestampRow}
+              />
+              <UploadProgressRing progress={uploadPct} visible={uploading} />
+            </div>
+          )}
+
+          {message.content && !isAudio ? (
+            <p
+              className={`message-text whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100 leading-relaxed ${
+                isImage || isVideo ? "px-3 py-1.5" : ""
+              }`}
+            >
+              {highlightText(message.content, searchQuery)}
+            </p>
           ) : null}
-          <span className="message-timestamp text-[10px] text-gray-500 dark:text-gray-400 shrink-0">{time}</span>
-          {mine && showReceipts && (() => {
-            if (message.__pending) {
-              return <Clock className="h-3.5 w-3.5 text-gray-400 shrink-0" strokeWidth={2} aria-label="Sending" />;
-            }
-            if (message.__error) {
-              return <AlertCircle className="h-3.5 w-3.5 text-rose-500 shrink-0" strokeWidth={2} aria-label="Failed to send" />;
-            }
-            if (tickStatus === "seen") {
-              return <CheckCheck className="h-3.5 w-3.5 text-sky-500 shrink-0" strokeWidth={2} aria-label="Read" />;
-            }
-            if (tickStatus === "delivered") {
-              return <CheckCheck className="h-3.5 w-3.5 text-gray-400 shrink-0" strokeWidth={2} aria-label="Delivered" />;
-            }
-            return <Check className="h-3.5 w-3.5 text-gray-400 shrink-0" strokeWidth={2} aria-label="Sent" />;
-          })()}
+
+          {!isMediaBubble && !isAudio ? (
+            <div>
+              {mine && message.__error && onRetry ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRetry(message);
+                  }}
+                  className="mb-1 text-[10px] font-medium text-rose-600 dark:text-rose-400 touch-manipulation"
+                  data-testid={`message-retry-${message.id}`}
+                >
+                  ⚠ Retry
+                </button>
+              ) : null}
+              {timestampRow}
+            </div>
+          ) : isAudio ? (
+            <div className="px-3 pb-2">
+              {mine && message.__error && onRetry ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRetry(message);
+                  }}
+                  className="mb-1 text-[10px] font-medium text-rose-600 dark:text-rose-400 touch-manipulation"
+                  data-testid={`message-retry-${message.id}`}
+                >
+                  ⚠ Retry
+                </button>
+              ) : null}
+              {timestampRow}
+            </div>
+          ) : null}
         </div>
       </div>
-    </div>
+
+      <VideoLightbox open={videoLightboxOpen} src={mediaSrc} onClose={() => setVideoLightboxOpen(false)} />
+    </>
   );
 }
 

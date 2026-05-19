@@ -1,24 +1,72 @@
 import React from "react";
-import { FileText, Download } from "lucide-react";
+import { Download, FileText } from "lucide-react";
 import { openDocumentExternally } from "@/lib/openDocument";
 
-export default function DocumentMessageBlock({ href, fileName, fileSize, mimeType }) {
-  const handleOpen = (e) => {
+function fileIconColor(mimeType, fileName) {
+  const mime = (mimeType || "").toLowerCase();
+  const ext = (fileName || "").split(".").pop()?.toLowerCase() || "";
+  if (mime.includes("pdf") || ext === "pdf") return "#e11d48";
+  if (mime.includes("sheet") || mime.includes("excel") || ["xls", "xlsx", "csv"].includes(ext)) return "#16a34a";
+  if (mime.includes("word") || mime.includes("document") || ["doc", "docx"].includes(ext)) return "#2563eb";
+  if (mime.startsWith("image/")) return "#7c3aed";
+  return "#64748b";
+}
+
+function formatFileSize(bytes) {
+  const n = Number(bytes);
+  if (!n || Number.isNaN(n)) return "";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileExtLabel(fileName) {
+  const ext = (fileName || "").split(".").pop();
+  return ext ? ext.toUpperCase() : "FILE";
+}
+
+export default function DocumentMessageBlock({
+  href,
+  fileName,
+  fileSize,
+  mimeType,
+  timestampRow,
+}) {
+  const color = fileIconColor(mimeType, fileName);
+
+  const handleDownload = (e) => {
     e.preventDefault();
     e.stopPropagation();
     void openDocumentExternally(href, fileName, mimeType);
   };
 
   return (
-    <button
-      type="button"
-      onClick={handleOpen}
-      className="flex w-full items-center gap-2 px-3 py-2 bg-white/60 dark:bg-gray-800/60 rounded-lg border border-gray-100 dark:border-gray-700 hover:bg-white dark:hover:bg-gray-800 text-left touch-manipulation"
-      data-testid="document-message-block"
-    >
-      <FileText className="h-5 w-5 text-emerald-800 dark:text-emerald-400 shrink-0" strokeWidth={1.5} />
-      <span className="text-sm truncate max-w-[200px] text-gray-900 dark:text-gray-100">{fileName || "file"}</span>
-      <Download className="h-4 w-4 text-gray-500 ml-auto shrink-0" strokeWidth={1.5} />
-    </button>
+    <div className="document-bubble-inner w-full min-w-0">
+      <div className="flex items-center gap-3">
+        <div
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+          style={{ backgroundColor: color }}
+        >
+          <FileText className="h-5 w-5 text-white" strokeWidth={1.75} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{fileName || "Document"}</p>
+          <p className="text-[11px] text-gray-400">
+            {formatFileSize(fileSize)}
+            {formatFileSize(fileSize) ? " · " : ""}
+            {fileExtLabel(fileName)}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleDownload}
+          className="shrink-0 rounded-full p-1.5 hover:bg-black/10 dark:hover:bg-white/10 touch-manipulation"
+          aria-label="Download file"
+        >
+          <Download className="h-4 w-4 text-gray-500" strokeWidth={1.75} />
+        </button>
+      </div>
+      {timestampRow ? <div className="message-timestamp-row mt-0.5">{timestampRow}</div> : null}
+    </div>
   );
 }

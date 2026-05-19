@@ -107,6 +107,7 @@ export default function ImageLightbox({ open, src, alt = "Image", onClose }) {
       </div>
       <div
         className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden touch-none"
+        style={{ touchAction: "manipulation" }}
         onClick={(e) => e.stopPropagation()}
         onWheel={onWheel}
         onTouchStart={onTouchStart}

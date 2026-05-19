@@ -146,13 +146,13 @@ select,
 }
 .bubble-sent {
     background: #d9fdd3;
-    border-radius: 16px 16px 4px 16px;
+    border-radius: 18px 4px 18px 18px;
     box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.08);
 }
 .bubble-received {
     background: #ffffff;
     border: 1px solid #e5e7eb;
-    border-radius: 16px 16px 16px 4px;
+    border-radius: 4px 18px 18px 18px;
     box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.06);
 }
 html.dark .bubble-sent {
@@ -172,9 +172,28 @@ html.dark .bubble-received {
 
 .message-bubble {
     width: fit-content;
+    min-width: 72px;
     max-width: 100%;
+    padding: 8px 12px;
     word-break: break-word;
     overflow-wrap: break-word;
+}
+.message-bubble.media-bubble,
+.message-bubble.image-bubble,
+.message-bubble.video-bubble,
+.message-bubble.document-bubble {
+    padding: 0;
+}
+.message-timestamp-row {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+}
+.message-timestamp-row .message-timestamp {
+    font-size: 10px;
+    color: #9ca3af;
 }
 .message-bubble .message-text {
     white-space: pre-wrap;
