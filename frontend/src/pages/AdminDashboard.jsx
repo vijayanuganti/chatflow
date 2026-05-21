@@ -28,7 +28,7 @@ import {
   MessageCircle, Eye, Plus, Layers, UserPlus, ShieldCheck,
   KeyRound, ShieldAlert, UserCheck, UserX, PowerOff, Power, Stethoscope,
   ArrowRightLeft, FolderPlus, Inbox, CheckCircle2, Clock, RotateCcw, Loader2,
-  HardDrive, Trash2, Settings, Folder, FileBarChart, UserPlus,
+  HardDrive, Trash2, Settings, Folder, FileBarChart,
 } from "lucide-react";
 import AdminReportsPane from "@/components/admin/AdminReportsPane";
 import AdminReferralsPane from "@/components/admin/AdminReferralsPane";
