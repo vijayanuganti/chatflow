@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigateBack } from "@/hooks/useNavigateBack";
 
-export default function DietPlanPage() {
+export default function DietPlanPage({ panelLayout = false }) {
   const { clientId: chatClientId, userId: adminClientId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -62,6 +62,7 @@ export default function DietPlanPage() {
 
   return (
     <MobilePageShell
+      embedded={panelLayout}
       title={client ? `Diet plan | ${client.full_name}` : "Diet plan"}
       description={description}
       onBack={handleBack}

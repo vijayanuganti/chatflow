@@ -50,7 +50,7 @@ const CHAT_THEME_SWATCH = {
   dots: "from-gray-200 to-slate-300",
 };
 
-export default function ProfileSettingsPage() {
+export default function ProfileSettingsPage({ panelLayout = false }) {
   const navigate = useNavigate();
   const { user, setUser } = useAuth();
   const { theme, setTheme, chatTheme, setChatTheme } = useTheme();
@@ -179,6 +179,7 @@ export default function ProfileSettingsPage() {
 
   return (
     <MobilePageShell
+      embedded={panelLayout}
       title="Profile & Settings"
       description="Manage your identity on ChatFlow."
       onBack={handleBack}

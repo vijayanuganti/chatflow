@@ -37,8 +37,7 @@ export default function FolderDetailPage() {
 
   return (
     <div
-      className="flex min-h-0 flex-col bg-gray-50 dark:bg-gray-950"
-      style={{ height: "var(--visual-vh, 100dvh)", minHeight: "100dvh" }}
+      className="flex min-h-0 flex-1 flex-col bg-gray-50 dark:bg-gray-950"
       data-testid="folder-detail-page"
     >
       <TopBar
@@ -46,7 +45,7 @@ export default function FolderDetailPage() {
         onOpenSettings={() => navigate(profilePath(user?.role), { state: { backTo: location.pathname } })}
         onBack={() => navigate(backTo)}
       />
-      <div className="flex-1 overflow-y-auto p-4 pb-[calc(4rem+env(safe-area-inset-bottom))]">
+      <div className="flex-1 overflow-y-auto p-4 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-4">
         {loading && <p className="text-sm text-gray-500">Loading...</p>}
         {!loading && folder && (
           <FolderDetailPanel folder={folder} isAdmin={false} onRefresh={load} />

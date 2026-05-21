@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams, useOutletContext } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import {
@@ -55,11 +55,9 @@ import {
   mergeMessageStatus,
 } from "@/lib/messageSeen";
 import { toast } from "sonner";
-import { MessageSquare, UtensilsCrossed, Settings, Layers, Folder } from "lucide-react";
 import ComposeIcon from "@/components/icons/ComposeIcon";
-import PanelBottomNav from "@/components/layout/PanelBottomNav";
 import ProfileQuickView from "@/components/ProfileQuickView";
-import { dietPlanPath, profilePath, userProfilePath } from "@/lib/appRoutes";
+import { profilePath, userProfilePath } from "@/lib/appRoutes";
 import {
   chatListTarget,
   chatOpenTarget,
@@ -80,6 +78,8 @@ export default function ChatApp() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const panelCtx = useOutletContext() || {};
+  const inPanelLayout = !!panelCtx.panelLayout;
   const chatConvIdFromUrl = getChatConversationId(searchParams);
   const [conversations, setConversations] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -99,7 +99,6 @@ export default function ChatApp() {
   }, [user?.id]);
   const [selectedBatchId, setSelectedBatchId] = useState(null);
   const [batches, setBatches] = useState([]);
-  const [mobileSection, setMobileSection] = useState("chats"); // chats | diet | batches | settings
   const [listSelection, setListSelection] = useState(null);
   const [quickView, setQuickView] = useState(null);
   const listScrollRef = useRef(null);
@@ -149,7 +148,6 @@ export default function ChatApp() {
       setListSelection(null);
       setSelected(conv);
       setActiveConversationId(conv.id);
-      setMobileSection("chats");
       navigate(chatOpenTarget(conv.id), { push: true });
     },
     [navigate, setActiveConversationId],
@@ -593,7 +591,6 @@ export default function ChatApp() {
         setListSelection(null);
         setSelected(target);
         setActiveConversationId(target.id);
-        setMobileSection("chats");
         navigate(chatOpenTarget(target.id), { replace: false });
       }
       return prev;
@@ -683,6 +680,12 @@ export default function ChatApp() {
     document.title = unreadTotal > 0 ? `(${unreadTotal}) ChatFlow` : "ChatFlow";
   }, [unreadTotal]);
 
+  useEffect(() => {
+    if (typeof panelCtx.setUnreadTotal === "function") {
+      panelCtx.setUnreadTotal(unreadTotal);
+    }
+  }, [unreadTotal, panelCtx]);
+
   const handlePanelBack = useCallback(() => {
     if (listSelection) {
       setListSelection(null);
@@ -721,14 +724,14 @@ export default function ChatApp() {
     setQuickView({ conv, user: profileUser });
   }, []);
 
-  const showMobileFooter = !selected && !chatConvIdFromUrl;
-  const isClient = user?.role === "client";
-  const isEmployee = user?.role === "employee";
+  const showMobileFooter = inPanelLayout && !selected && !chatConvIdFromUrl;
 
   return (
     <div
-      className="flex w-full min-h-0 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950"
-      style={{ height: "var(--visual-vh, 100dvh)" }}
+      className={`flex w-full min-h-0 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950 ${
+        inPanelLayout ? "flex-1" : ""
+      }`}
+      style={inPanelLayout ? undefined : { height: "var(--visual-vh, 100dvh)" }}
       data-testid="chat-app"
     >
       <div className="shrink-0">
@@ -789,8 +792,8 @@ export default function ChatApp() {
           data-testid="new-chat-fab"
           title="New chat"
           aria-label="New chat"
-          className={`fixed z-30 h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white shadow-lg flex items-center justify-center right-[max(1rem,calc(1rem+env(safe-area-inset-right,0px)))] sm:right-[max(1.5rem,calc(1.5rem+env(safe-area-inset-right,0px)))] ${
-            showMobileFooter && (isClient || isEmployee)
+          className={`fixed z-30 h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white shadow-lg flex items-center justify-center right-[max(1rem,calc(1rem+env(safe-area-inset-right,0px)))] sm:right-[max(1.5rem,calc(1.5rem+env(safe-area-inset-bottom,0px)))] ${
+            showMobileFooter
               ? "bottom-[calc(3.5rem+env(safe-area-inset-bottom)+1rem)] md:bottom-[max(1rem,calc(1rem+env(safe-area-inset-bottom,0px)))]"
               : "bottom-[max(1rem,calc(1rem+env(safe-area-inset-bottom,0px)))] sm:bottom-[max(1.5rem,calc(1.5rem+env(safe-area-inset-bottom,0px)))]"
           }`}
@@ -798,119 +801,6 @@ export default function ChatApp() {
         >
           <ComposeIcon width={22} height={22} className="sm:w-6 sm:h-6" />
         </button>
-      )}
-
-      {isClient && (
-        <PanelBottomNav
-          hidden={!showMobileFooter}
-          testId="client-bottom-nav"
-          items={[
-            {
-              id: "chats",
-              label: "Chats",
-              icon: MessageSquare,
-              active: mobileSection === "chats",
-              badge: unreadTotal,
-              testId: "client-nav-chats",
-              onClick: () => {
-                setListSelection(null);
-                setMobileSection("chats");
-                navigate(chatListTarget(), { replace: true });
-              },
-            },
-            {
-              id: "diet",
-              label: "My Diet",
-              icon: UtensilsCrossed,
-              active: mobileSection === "diet",
-              testId: "client-nav-diet",
-              onClick: () => {
-                if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
-                navigate(dietPlanPath("client"), {
-                  push: true,
-                  state: { backTo: "/chat", startFromDayOne: true },
-                });
-              },
-            },
-            {
-              id: "folders",
-              label: "Folders",
-              icon: Folder,
-              active: mobileSection === "folders",
-              testId: "client-nav-folders",
-              onClick: () => {
-                if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
-                navigate("/chat/folders", { push: true });
-              },
-            },
-            {
-              id: "settings",
-              label: "Settings",
-              icon: Settings,
-              active: mobileSection === "settings",
-              testId: "client-nav-settings",
-              onClick: () => {
-                if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
-                navigate(profilePath("client"), { push: true });
-              },
-            },
-          ]}
-        />
-      )}
-
-      {isEmployee && (
-        <PanelBottomNav
-          hidden={!showMobileFooter}
-          testId="employee-bottom-nav"
-          items={[
-            {
-              id: "chats",
-              label: "Chats",
-              icon: MessageSquare,
-              active: mobileSection === "chats",
-              badge: unreadTotal,
-              testId: "employee-nav-chats",
-              onClick: () => {
-                setListSelection(null);
-                setMobileSection("chats");
-                navigate(chatListTarget(), { replace: true });
-              },
-            },
-            {
-              id: "batches",
-              label: "Batches",
-              icon: Layers,
-              active: mobileSection === "batches",
-              testId: "employee-nav-batches",
-              onClick: () => {
-                setMobileSection("batches");
-                document.querySelector("[data-testid='batch-boards']")?.scrollIntoView({ behavior: "smooth" });
-              },
-            },
-            {
-              id: "folders",
-              label: "Folders",
-              icon: Folder,
-              active: mobileSection === "folders",
-              testId: "employee-nav-folders",
-              onClick: () => {
-                if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
-                navigate("/chat/folders", { push: true });
-              },
-            },
-            {
-              id: "settings",
-              label: "Settings",
-              icon: Settings,
-              active: mobileSection === "settings",
-              testId: "employee-nav-settings",
-              onClick: () => {
-                if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
-                navigate(profilePath("employee"), { push: true });
-              },
-            },
-          ]}
-        />
       )}
 
       <ProfileQuickView

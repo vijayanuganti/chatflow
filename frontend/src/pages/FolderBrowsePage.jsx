@@ -34,8 +34,7 @@ export default function FolderBrowsePage() {
 
   return (
     <div
-      className="flex min-h-0 flex-col bg-gray-50 dark:bg-gray-950"
-      style={{ height: "var(--visual-vh, 100dvh)", minHeight: "100dvh" }}
+      className="flex min-h-0 flex-1 flex-col bg-gray-50 dark:bg-gray-950"
       data-testid="folders-browse-page"
     >
       <TopBar
@@ -43,7 +42,7 @@ export default function FolderBrowsePage() {
         onOpenSettings={() => navigate(profilePath(user?.role), { state: { backTo } })}
         onBack={() => navigate("/chat")}
       />
-      <div className="flex-1 overflow-y-auto p-4 pb-[calc(4rem+env(safe-area-inset-bottom))] space-y-3">
+      <div className="flex-1 overflow-y-auto p-4 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-4 space-y-3">
         {loading && <p className="text-sm text-gray-500">Loading...</p>}
         {!loading && folders.length === 0 && (
           <div className="py-16 text-center text-sm text-gray-500 rounded-2xl border border-dashed border-gray-300 dark:border-gray-700">

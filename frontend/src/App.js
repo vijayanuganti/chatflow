@@ -7,6 +7,7 @@ import { ChatProvider } from "@/context/ChatContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import LoginPage from "@/pages/Login";
 import ChatApp from "@/pages/ChatApp";
+import ChatPortalEntry from "@/components/layout/ChatPortalEntry";
 import AdminDashboard from "@/pages/AdminDashboard";
 import ProfileSettingsPage from "@/pages/ProfileSettingsPage";
 import CreateAccountPage from "@/pages/CreateAccountPage";
@@ -105,20 +106,31 @@ function App() {
               path="/chat"
               element={
                 <Protected roles={["employee", "client", "admin"]}>
-                  <PanelErrorBoundary fallbackPath="/login">
-                    <ChatApp />
-                  </PanelErrorBoundary>
+                  <ChatPortalEntry />
                 </Protected>
               }
-            />
-            <Route
-              path="/chat/profile"
-              element={
-                <Protected roles={["employee", "client", "admin"]}>
-                  <ProfileSettingsPage />
-                </Protected>
-              }
-            />
+            >
+              <Route index element={<ChatApp />} />
+              <Route path="profile" element={<ProfileSettingsPage panelLayout />} />
+              <Route path="diet-plan" element={<DietPlanPage panelLayout />} />
+              <Route path="diet-plan/:clientId" element={<DietPlanPage panelLayout />} />
+              <Route
+                path="folders"
+                element={
+                  <Protected roles={["employee", "client"]}>
+                    <FolderBrowsePage />
+                  </Protected>
+                }
+              />
+              <Route
+                path="folders/:folderId"
+                element={
+                  <Protected roles={["employee", "client"]}>
+                    <FolderDetailPage />
+                  </Protected>
+                }
+              />
+            </Route>
             <Route
               path="/chat/create-account"
               element={
@@ -156,38 +168,6 @@ function App() {
               element={
                 <Protected roles={["client"]}>
                   <RaiseComplaintPage />
-                </Protected>
-              }
-            />
-            <Route
-              path="/chat/diet-plan"
-              element={
-                <Protected roles={["employee", "client", "admin"]}>
-                  <DietPlanPage />
-                </Protected>
-              }
-            />
-            <Route
-              path="/chat/diet-plan/:clientId"
-              element={
-                <Protected roles={["employee", "client", "admin"]}>
-                  <DietPlanPage />
-                </Protected>
-              }
-            />
-            <Route
-              path="/chat/folders"
-              element={
-                <Protected roles={["employee", "client"]}>
-                  <FolderBrowsePage />
-                </Protected>
-              }
-            />
-            <Route
-              path="/chat/folders/:folderId"
-              element={
-                <Protected roles={["employee", "client"]}>
-                  <FolderDetailPage />
                 </Protected>
               }
             />
