@@ -149,9 +149,9 @@ function StorageMeter({ title, usedBytes, quotaBytes, freeBytes, percentUsed, su
   );
 }
 
-function StatCard({ icon: Icon, label, value, testId, accent }) {
-  return (
-    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-5 flex items-center gap-4 shadow-sm hover:shadow-md transition-shadow" data-testid={testId}>
+function StatCard({ icon: Icon, label, value, testId, accent, onClick }) {
+  const inner = (
+    <>
       <div className={`h-12 w-12 rounded-xl flex items-center justify-center ${accent || "bg-emerald-50 text-emerald-900"}`}>
         <Icon className="h-6 w-6" strokeWidth={1.5} />
       </div>
@@ -159,6 +159,25 @@ function StatCard({ icon: Icon, label, value, testId, accent }) {
         <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{label}</div>
         <div className="font-display text-2xl font-semibold dark:text-gray-100">{value}</div>
       </div>
+    </>
+  );
+  const className =
+    "bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-5 flex items-center gap-4 shadow-sm transition-shadow";
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${className} w-full text-left hover:shadow-md active:scale-[0.99] touch-manipulation`}
+        data-testid={testId}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div className={`${className} hover:shadow-md`} data-testid={testId}>
+      {inner}
     </div>
   );
 }
@@ -278,8 +297,10 @@ export default function AdminDashboard() {
       selectedConv,
       mobileBatchesStep: batchesStep,
       mobileChatStep: chatStep,
+      usersFilter,
       historyMode = "auto",
     } = opts;
+    if (usersFilter != null) setUsersRoleFilter(usersFilter);
     if (batchesStep != null) setMobileBatchesStep(batchesStep);
     if (chatStep != null) setMobileChatStep(chatStep);
     if (selectedConv !== undefined) setSelected(selectedConv);
@@ -352,6 +373,11 @@ export default function AdminDashboard() {
       navigate(adminTabNavigateTarget(toolTab), { push: true });
     },
     [tab, goToTab, navigate],
+  );
+
+  const goToUsersFilter = useCallback(
+    (filterId) => goToTab("users", { usersFilter: filterId, historyMode: "push" }),
+    [goToTab],
   );
 
   const loadOverview = useCallback(async () => {
@@ -1188,26 +1214,53 @@ export default function AdminDashboard() {
               <p className="text-gray-500 dark:text-gray-400 mt-1">Monitor conversations and chat with anyone on the platform.</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-              <StatCard icon={Users} label="Total users" value={formatStatValue(stats?.total_users)} testId="stat-total-users" />
-              <StatCard icon={Briefcase} label="Employees" value={formatStatValue(stats?.employees)} testId="stat-employees" accent="bg-amber-50 text-amber-900" />
-              <StatCard icon={UserCircle2} label="Clients" value={formatStatValue(stats?.clients)} testId="stat-clients" accent="bg-sky-50 text-sky-900" />
-              <StatCard icon={UserCheck} label="Active clients" value={formatStatValue(stats?.active_clients)} testId="stat-active-clients" accent="bg-emerald-50 text-emerald-900" />
-              <button
-                type="button"
-                onClick={() => goToSettingsTool("inactive")}
-                className="text-left"
-                data-testid="stat-inactive-clients-btn"
-              >
-                <StatCard icon={UserX} label="Inactive clients" value={formatStatValue(stats?.inactive_clients)} testId="stat-inactive-clients" accent="bg-rose-50 text-rose-900" />
-              </button>
-              <button
-                type="button"
-                onClick={() => goToSettingsTool("complaints")}
-                className="text-left"
-                data-testid="stat-complaints-btn"
-              >
-                <StatCard icon={Inbox} label="Open complaints" value={formatStatValue(stats?.complaints_pending)} testId="stat-complaints-open" accent="bg-rose-50 text-rose-900" />
-              </button>
+              <StatCard
+                icon={Users}
+                label="Total users"
+                value={formatStatValue(stats?.total_users)}
+                testId="stat-total-users"
+                onClick={() => goToUsersFilter("all")}
+              />
+              <StatCard
+                icon={UserCheck}
+                label="Active employees"
+                value={formatStatValue(stats?.active_employees)}
+                testId="stat-active-employees"
+                accent="bg-emerald-50 text-emerald-900"
+                onClick={() => goToUsersFilter("active_employees")}
+              />
+              <StatCard
+                icon={UserX}
+                label="Inactive employees"
+                value={formatStatValue(stats?.inactive_employees)}
+                testId="stat-inactive-employees"
+                accent="bg-amber-50 text-amber-900"
+                onClick={() => goToUsersFilter("inactive_employees")}
+              />
+              <StatCard
+                icon={UserCheck}
+                label="Active clients"
+                value={formatStatValue(stats?.active_clients)}
+                testId="stat-active-clients"
+                accent="bg-sky-50 text-sky-900"
+                onClick={() => goToUsersFilter("active_clients")}
+              />
+              <StatCard
+                icon={UserX}
+                label="Inactive clients"
+                value={formatStatValue(stats?.inactive_clients)}
+                testId="stat-inactive-clients"
+                accent="bg-rose-50 text-rose-900"
+                onClick={() => goToUsersFilter("inactive_clients")}
+              />
+              <StatCard
+                icon={PowerOff}
+                label="Dropped"
+                value={formatStatValue(stats?.dropped_clients)}
+                testId="stat-dropped-clients"
+                accent="bg-violet-50 text-violet-900"
+                onClick={() => goToUsersFilter("dropped_clients")}
+              />
             </div>
           </div>
         )}

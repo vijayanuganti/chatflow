@@ -27,7 +27,7 @@ export function filterUserForTab(user, tabId) {
   if (!user) return false;
   switch (tabId) {
     case "all":
-      return user.role === "employee" || user.role === "client";
+      return true;
     case "active_employees":
       return isActiveEmployee(user);
     case "inactive_employees":
