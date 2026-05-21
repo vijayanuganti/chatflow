@@ -1,9 +1,10 @@
 """
-Corporate PDF layouts for Admin Employee / Client reports (ReportLab).
+Minimal professional PDF layouts for Admin Employee / Client reports (ReportLab).
 """
 from __future__ import annotations
 
 import io
+import os
 import re
 import uuid
 from datetime import datetime, timezone
@@ -13,7 +14,7 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import inch, mm
+from reportlab.lib.units import inch
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas as pdfcanvas
@@ -28,30 +29,34 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-# ChatFlow UI brand (emerald) + spec accent for highlights
-PRIMARY = colors.HexColor("#064e3b")
-PRIMARY_DARK = colors.HexColor("#022c22")
-ACCENT = colors.HexColor("#E94560")
-BG_LIGHT = colors.HexColor("#F5F7FA")
-WHITE = colors.white
-MUTED = colors.HexColor("#6B7280")
+# ChatFlow brand primary (HSL 162 87% 17% → #064e3b)
+COMPANY = colors.HexColor("#064e3b")
+TEXT_PRIMARY = colors.HexColor("#1A1A2E")
+TEXT_MUTED = colors.HexColor("#6B7280")
 BORDER = colors.HexColor("#E5E7EB")
-TEXT_DARK = colors.HexColor("#111827")
+ROW_ALT = colors.HexColor("#F9FAFB")
+TABLE_HEADER_BG = colors.HexColor("#F3F4F6")
+WHITE = colors.white
 
-STATUS_COLORS = {
-    "active": (colors.HexColor("#DCFCE7"), colors.HexColor("#166534")),
-    "inactive": (colors.HexColor("#F3F4F6"), colors.HexColor("#4B5563")),
-    "dropped": (colors.HexColor("#FEE2E2"), colors.HexColor("#991B1B")),
+DOT_ACTIVE = "#16A34A"
+DOT_INACTIVE = "#9CA3AF"
+DOT_DROPPED = "#4B5563"
+
+STATUS_VALUE_COLORS = {
+    "active": colors.HexColor(DOT_ACTIVE),
+    "inactive": TEXT_MUTED,
+    "dropped": colors.HexColor(DOT_DROPPED),
 }
 
 PAGE_W, PAGE_H = A4
-MARGIN_L = 45 * 0.75  # ~34pt
+MARGIN_L = 45 * 0.75
 MARGIN_R = 45 * 0.75
 MARGIN_T = 40 * 0.75
-MARGIN_B = 50 * 0.75  # room for footer
+MARGIN_B = 50 * 0.75
 CONTENT_W = PAGE_W - MARGIN_L - MARGIN_R
-FOOTER_H = 28
-BANNER_H = 82
+FOOTER_H = 30
+SECTION_GAP = 22
+BANNER_H = 68
 
 
 def _escape_xml(text: Any) -> str:
@@ -96,143 +101,217 @@ def _fmt_time(iso: Optional[str]) -> str:
         return str(iso)
 
 
-def _register_fonts() -> Tuple[str, str, str, str]:
-    """Prefer DejaVu (bundled with many Linux distros) else Helvetica."""
-    regular, bold, semi, light = "Helvetica", "Helvetica-Bold", "Helvetica-Bold", "Helvetica"
-    for path, name in [
-        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "DejaVu"),
-        ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "DejaVu-Bold"),
-    ]:
-        try:
-            import os
-            if os.path.isfile(path):
-                pdfmetrics.registerFont(TTFont("DejaVu", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"))
-                pdfmetrics.registerFont(
-                    TTFont("DejaVu-Bold", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
-                )
-                return "DejaVu", "DejaVu-Bold", "DejaVu-Bold", "DejaVu"
-        except Exception:
-            pass
-    return regular, bold, semi, light
+def _register_fonts() -> Tuple[str, str, str]:
+    """Prefer Inter/Poppins if bundled, else DejaVu, else Helvetica."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        (os.path.join(base, "fonts", "Inter-Regular.ttf"), "Inter", False),
+        (os.path.join(base, "fonts", "Inter-Bold.ttf"), "Inter-Bold", True),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "DejaVu", False),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "DejaVu-Bold", True),
+    ]
+    registered: Dict[str, str] = {}
+    for path, name, _ in candidates:
+        if os.path.isfile(path) and name not in registered:
+            try:
+                pdfmetrics.registerFont(TTFont(name, path))
+                registered[name] = path
+            except Exception:
+                pass
+    if "Inter" in registered:
+        bold = "Inter-Bold" if "Inter-Bold" in registered else "Inter"
+        return "Inter", bold, "Inter"
+    if "DejaVu" in registered:
+        bold = "DejaVu-Bold" if "DejaVu-Bold" in registered else "DejaVu"
+        return "DejaVu", bold, "DejaVu"
+    return "Helvetica", "Helvetica-Bold", "Helvetica"
 
 
-FONT, FONT_BOLD, FONT_SEMI, FONT_LIGHT = _register_fonts()
+FONT, FONT_BOLD, FONT_REG = _register_fonts()
+
+
+def _status_dot_html(status: str) -> str:
+    st = (status or "active").lower()
+    dot = {"active": DOT_ACTIVE, "inactive": DOT_INACTIVE, "dropped": DOT_DROPPED}.get(st, DOT_ACTIVE)
+    label = status.title() if status else "—"
+    return f'<font color="{dot}">●</font> <font color="#1A1A2E">{_escape_xml(label)}</font>'
 
 
 def _styles() -> Dict[str, ParagraphStyle]:
     return {
+        "banner_title": ParagraphStyle(
+            "banner_title",
+            fontName=FONT_BOLD,
+            fontSize=22,
+            textColor=WHITE,
+            leading=26,
+        ),
         "banner_meta": ParagraphStyle(
             "banner_meta",
-            fontName=FONT_LIGHT,
-            fontSize=8,
+            fontName=FONT_REG,
+            fontSize=9,
             textColor=WHITE,
             alignment=TA_RIGHT,
-            leading=10,
+            leading=12,
+        ),
+        "banner_meta_fade": ParagraphStyle(
+            "banner_meta_fade",
+            fontName=FONT_REG,
+            fontSize=8,
+            textColor=colors.Color(1, 1, 1, alpha=0.7),
+            alignment=TA_RIGHT,
+            leading=11,
         ),
         "name": ParagraphStyle(
             "name",
             fontName=FONT_BOLD,
-            fontSize=20,
-            textColor=TEXT_DARK,
-            leading=24,
+            fontSize=18,
+            textColor=TEXT_PRIMARY,
+            leading=22,
         ),
         "stat_num": ParagraphStyle(
             "stat_num",
             fontName=FONT_BOLD,
-            fontSize=18,
-            textColor=TEXT_DARK,
+            fontSize=16,
+            textColor=COMPANY,
             alignment=TA_CENTER,
-            leading=20,
+            leading=18,
         ),
         "stat_lbl": ParagraphStyle(
             "stat_lbl",
-            fontName=FONT_LIGHT,
+            fontName=FONT_REG,
             fontSize=8,
-            textColor=MUTED,
+            textColor=TEXT_MUTED,
             alignment=TA_CENTER,
             leading=10,
         ),
+        "section": ParagraphStyle(
+            "section",
+            fontName=FONT_BOLD,
+            fontSize=11,
+            textColor=COMPANY,
+            leading=14,
+            spaceAfter=4,
+        ),
         "body": ParagraphStyle(
             "body",
-            fontName=FONT,
+            fontName=FONT_REG,
             fontSize=10,
-            textColor=TEXT_DARK,
+            textColor=TEXT_PRIMARY,
+            leading=13,
+        ),
+        "body_semibold": ParagraphStyle(
+            "body_semibold",
+            fontName=FONT_BOLD,
+            fontSize=10,
+            textColor=TEXT_PRIMARY,
             leading=13,
         ),
         "muted": ParagraphStyle(
             "muted",
-            fontName=FONT_LIGHT,
+            fontName=FONT_REG,
             fontSize=9,
-            textColor=MUTED,
+            textColor=TEXT_MUTED,
             leading=11,
         ),
         "italic_muted": ParagraphStyle(
             "italic_muted",
-            fontName=FONT_LIGHT,
+            fontName=FONT_REG,
             fontSize=9,
-            textColor=MUTED,
+            textColor=TEXT_MUTED,
             fontStyle="italic",
             leading=11,
+        ),
+        "day_title": ParagraphStyle(
+            "day_title",
+            fontName=FONT_BOLD,
+            fontSize=11,
+            textColor=COMPANY,
+            leading=14,
         ),
     }
 
 
-class AccentLine(Flowable):
-    def __init__(self, width: float, thickness: float = 3):
+class Page1Banner(Flowable):
+    """Full-width header banner (page 1 content only)."""
+
+    def __init__(self, meta: dict, styles: dict, width: float = CONTENT_W):
+        self.meta = meta
+        self.styles = styles
         self.width = width
-        self.thickness = thickness
-        self.height = thickness + 4
+        self.height = BANNER_H
 
     def wrap(self, aW, aH):
-        return (aW, self.height)
-
-    def draw(self):
-        self.canv.setFillColor(ACCENT)
-        self.canv.rect(0, 2, self.width, self.thickness, fill=1, stroke=0)
-
-
-class SectionBar(Flowable):
-    def __init__(self, title: str, icon: str = "", width: float = CONTENT_W):
-        self.title = title
-        self.icon = icon
-        self.width = width
-        self.height = 26
-
-    def wrap(self, aW, aH):
-        return (aW, self.height)
+        return (self.width, self.height)
 
     def draw(self):
         c = self.canv
-        c.setFillColor(PRIMARY)
-        c.roundRect(0, 0, self.width, self.height, 4, fill=1, stroke=0)
-        c.setFillColor(ACCENT)
-        c.rect(0, 0, 5, self.height, fill=1, stroke=0)
+        c.setFillColor(COMPANY)
+        c.rect(0, 0, self.width, self.height, fill=1, stroke=0)
+
         c.setFillColor(WHITE)
-        c.setFont(FONT_BOLD, 11)
-        label = f"  {self.title.upper()}"
-        c.drawString(12, 8, label)
-        if self.icon:
-            c.setFont(FONT, 10)
-            c.drawRightString(self.width - 10, 8, self.icon)
+        c.setFont(FONT_BOLD, 22)
+        c.drawString(0, self.height - 36, "ChatFlow")
+
+        gen = _fmt_datetime(self.meta.get("generated_at"))
+        rid = self.meta.get("report_id") or str(uuid.uuid4())[:8].upper()
+        c.setFont(FONT_REG, 9)
+        c.drawRightString(self.width, self.height - 28, f"Generated: {gen}")
+        c.setFillColor(colors.Color(1, 1, 1, alpha=0.7))
+        c.setFont(FONT_REG, 8)
+        c.drawRightString(self.width, self.height - 42, f"Report ID: #{rid}")
+
+        c.setStrokeColor(colors.Color(1, 1, 1, alpha=0.2))
+        c.setLineWidth(1)
+        c.line(0, 0, self.width, 0)
 
 
-def _initials_avatar(name: str, size: float = 60) -> Table:
+class HRule(Flowable):
+    def __init__(self, width: float, color=BORDER, thickness: float = 1):
+        self.width = width
+        self.color = color
+        self.thickness = thickness
+        self.height = thickness + 2
+
+    def wrap(self, aW, aH):
+        return (aW, self.height)
+
+    def draw(self):
+        self.canv.setStrokeColor(self.color)
+        self.canv.setLineWidth(self.thickness)
+        self.canv.line(0, 1, self.width, 1)
+
+
+def _section(title: str, styles: dict) -> List[Any]:
+    return [
+        Paragraph(_escape_xml(title.upper()), styles["section"]),
+        HRule(CONTENT_W),
+        Spacer(1, 10),
+    ]
+
+
+def _initials_avatar(name: str, size: float = 55) -> Table:
     initials = "".join(p[0].upper() for p in (name or "U").split()[:2])[:2] or "U"
-    t = Table([[Paragraph(
-        f'<para align="center"><font size="18" color="#E94560"><b>{_escape_xml(initials)}</b></font></para>',
-        ParagraphStyle("av", fontName=FONT_BOLD, fontSize=16, alignment=TA_CENTER, textColor=ACCENT),
-    )]], colWidths=[size], rowHeights=[size])
+    t = Table(
+        [[Paragraph(
+            f'<para align="center"><font color="white" size="14"><b>{_escape_xml(initials)}</b></font></para>',
+            ParagraphStyle("av", fontName=FONT_BOLD, fontSize=14, alignment=TA_CENTER, textColor=WHITE),
+        )]],
+        colWidths=[size],
+        rowHeights=[size],
+    )
     t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), WHITE),
-        ("BOX", (0, 0), (-1, -1), 2, ACCENT),
+        ("BACKGROUND", (0, 0), (-1, -1), COMPANY),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("ROUNDEDCORNERS", [8, 8, 8, 8]),
+        ("ROUNDEDCORNERS", [28, 28, 28, 28]),
     ]))
     return t
 
 
-def _profile_photo_flowable(avatar_url: Optional[str], load_image: Callable, name: str, size: float = 60) -> Any:
+def _profile_photo_flowable(
+    avatar_url: Optional[str], load_image: Callable, name: str, size: float = 55
+) -> Any:
     data = None
     if avatar_url and callable(load_image):
         try:
@@ -249,54 +328,37 @@ def _profile_photo_flowable(avatar_url: Optional[str], load_image: Callable, nam
         return _initials_avatar(name, size)
 
 
-def _role_badge(role: str) -> Paragraph:
+def _role_badge(role: str) -> Table:
     label = "Employee" if role == "employee" else "Client"
-    return Paragraph(
-        f'<font color="white" size="9"><b>{label}</b></font>',
-        ParagraphStyle(
-            "badge",
-            fontName=FONT_BOLD,
-            fontSize=9,
-            textColor=WHITE,
-            backColor=ACCENT,
-            borderPadding=4,
-            leading=11,
-        ),
-    )
+    t = Table([[Paragraph(
+        f'<font color="white" size="8"><b>{label}</b></font>',
+        ParagraphStyle("badge", fontName=FONT_BOLD, fontSize=8, textColor=WHITE, alignment=TA_CENTER),
+    )]])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), COMPANY),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("ROUNDEDCORNERS", [10, 10, 10, 10]),
+    ]))
+    return t
 
 
 def _stat_box(label: str, value: str, styles: dict) -> Table:
     t = Table([
         [Paragraph(_escape_xml(str(value)), styles["stat_num"])],
         [Paragraph(_escape_xml(label), styles["stat_lbl"])],
-    ], colWidths=[1.55 * inch])
+    ], colWidths=[1.5 * inch])
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), WHITE),
-        ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
+        ("BOX", (0, 0), (-1, -1), 1, BORDER),
         ("ROUNDEDCORNERS", [6, 6, 6, 6]),
         ("TOPPADDING", (0, 0), (-1, -1), 10),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]))
-    return t
-
-
-def _banner_table(meta: dict, styles: dict) -> Table:
-    report_id = meta.get("report_id") or str(uuid.uuid4())[:8].upper()
-    gen = _fmt_datetime(meta.get("generated_at"))
-    right = Paragraph(
-        f"Generated on:<br/>{_escape_xml(gen)}<br/>Report ID: #{_escape_xml(report_id)}",
-        styles["banner_meta"],
-    )
-    left = Paragraph('<font color="white" size="22"><b>ChatFlow</b></font>', styles["banner_meta"])
-    t = Table([[left, right]], colWidths=[CONTENT_W * 0.55, CONTENT_W * 0.45])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), PRIMARY),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), 16),
         ("RIGHTPADDING", (0, 0), (-1, -1), 16),
-        ("TOPPADDING", (0, 0), (-1, -1), 18),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 18),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
     return t
 
@@ -309,75 +371,74 @@ def _profile_block(
     avatar_flowable: Any,
     styles: dict,
 ) -> Table:
-    id_para = Paragraph(f'<font color="#6B7280" size="9">ID: {_escape_xml(user_id)}</font>', styles["muted"])
+    id_para = Paragraph(f"ID: {_escape_xml(user_id)}", styles["muted"])
     info = Table([
         [Paragraph(_escape_xml(name), styles["name"])],
         [_role_badge(role)],
         [id_para],
     ])
     info.setStyle(TableStyle([
-        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("LEFTPADDING", (0, 0), (-1, -1), 12),
         ("BOTTOMPADDING", (0, 1), (-1, 1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
     ]))
-    stat_cells = [[_stat_box(lbl, val, styles)] for lbl, val in stats]
+    stat_cells = [[_stat_box(lbl, val, styles)] for lbl, val in stats[:3]]
     while len(stat_cells) < 3:
         stat_cells.append([Spacer(1, 1)])
-    stats_row = Table([stat_cells[:3]], colWidths=[1.7 * inch] * 3)
+    stats_row = Table([stat_cells], colWidths=[1.65 * inch] * 3)
     stats_row.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-    row = Table([[avatar_flowable, info, stats_row]], colWidths=[0.85 * inch, 2.4 * inch, 3.6 * inch])
+    row = Table([[avatar_flowable, info, stats_row]], colWidths=[0.8 * inch, 2.35 * inch, 3.55 * inch])
     row.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), BG_LIGHT),
+        ("BACKGROUND", (0, 0), (-1, -1), WHITE),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 14),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 14),
-        ("TOPPADDING", (0, 0), (-1, -1), 16),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 16),
-        ("ROUNDEDCORNERS", [8, 8, 8, 8]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 20),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 20),
+        ("TOPPADDING", (0, 0), (-1, -1), 20),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 20),
+        ("LINEBELOW", (0, 0), (-1, -1), 1, BORDER),
     ]))
     return row
 
 
-def _kv_grid(rows: List[Tuple[str, str]], styles: dict) -> Table:
+def _kv_grid(rows: List[Tuple[str, str]], styles: dict, status_keys: Optional[set] = None) -> Table:
+    status_keys = status_keys or set()
     data = []
-    for i, (label, value) in enumerate(rows):
+    for label, value in rows:
+        if label.lower() == "status" or label in status_keys:
+            val_para = Paragraph(_status_dot_html(str(value).replace("● ", "")), styles["body"])
+        else:
+            val_para = Paragraph(f"<b>{_escape_xml(value)}</b>", styles["body"])
         data.append([
-            Paragraph(f'<font color="#6B7280" size="9">{_escape_xml(label.upper())}</font>', styles["muted"]),
-            Paragraph(f'<b>{_escape_xml(value)}</b>', styles["body"]),
+            Paragraph(_escape_xml(label.upper()), styles["muted"]),
+            val_para,
         ])
     if not data:
         data = [[Paragraph("—", styles["muted"]), Paragraph("—", styles["body"])]]
-    t = Table(data, colWidths=[2.2 * inch, CONTENT_W - 2.2 * inch])
+    t = Table(data, colWidths=[2.1 * inch, CONTENT_W - 2.1 * inch], rowHeights=[28] * len(data))
     style_cmds = [
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), 12),
         ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-        ("TOPPADDING", (0, 0), (-1, -1), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-        ("LINEBELOW", (0, 0), (-1, -1), 0.5, BORDER),
+        ("LINEBELOW", (0, 0), (-1, -1), 1, BORDER),
     ]
     for i in range(len(data)):
-        bg = WHITE if i % 2 == 0 else BG_LIGHT
+        bg = WHITE if i % 2 == 0 else ROW_ALT
         style_cmds.append(("BACKGROUND", (0, i), (-1, i), bg))
     t.setStyle(TableStyle(style_cmds))
     return t
 
 
 def _clients_table(clients: List[dict], styles: dict) -> Table:
-    header = ["NAME", "ID", "PHONE", "STATUS", "BATCH", "JOINED"]
-    data = [[Paragraph(f"<b>{h}</b>", ParagraphStyle("th", fontName=FONT_BOLD, fontSize=9, textColor=WHITE)) for h in header]]
+    header = ["NAME", "ID", "PHONE", "STATUS", "BATCH", "DATE JOINED"]
+    th_style = ParagraphStyle("th", fontName=FONT_BOLD, fontSize=9, textColor=TEXT_MUTED)
+    data = [[Paragraph(h, th_style) for h in header]]
     for c in clients:
         st = (c.get("client_status") or "active").lower()
-        bg, fg = STATUS_COLORS.get(st, STATUS_COLORS["active"])
-        status_cell = Paragraph(
-            f'<para align="center" backColor="{bg.hexval()}" borderPadding="3">'
-            f'<font color="{fg.hexval()}" size="8"><b>{st.title()}</b></font></para>',
-            styles["body"],
-        )
         data.append([
             Paragraph(_escape_xml(c.get("full_name") or ""), styles["body"]),
             Paragraph(_escape_xml(c.get("id") or ""), styles["muted"]),
             Paragraph(_escape_xml(c.get("phone_number") or "—"), styles["body"]),
-            status_cell,
+            Paragraph(_status_dot_html(st), styles["body"]),
             Paragraph(_escape_xml(c.get("batch_name") or "—"), styles["body"]),
             Paragraph(_escape_xml(c.get("join_date") or "—"), styles["muted"]),
         ])
@@ -386,19 +447,21 @@ def _clients_table(clients: List[dict], styles: dict) -> Table:
             Paragraph("No clients assigned.", styles["italic_muted"]),
             "", "", "", "", "",
         ])
-    cw = [1.35 * inch, 1.1 * inch, 1.0 * inch, 0.75 * inch, 1.0 * inch, 0.85 * inch]
+    cw = [1.35 * inch, 1.05 * inch, 1.0 * inch, 0.9 * inch, 1.0 * inch, 0.9 * inch]
     t = Table(data, colWidths=cw, repeatRows=1)
     cmds = [
-        ("BACKGROUND", (0, 0), (-1, 0), PRIMARY),
-        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), 0.25, BORDER),
+        ("BACKGROUND", (0, 0), (-1, 0), TABLE_HEADER_BG),
+        ("TEXTCOLOR", (0, 0), (-1, 0), TEXT_MUTED),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("GRID", (0, 0), (-1, -1), 1, BORDER),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 9),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
+        ("LEFTPADDING", (0, 0), (-1, -1), 12),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
     ]
     for i in range(1, len(data)):
-        bg = WHITE if i % 2 == 1 else BG_LIGHT
+        bg = WHITE if i % 2 == 1 else ROW_ALT
         cmds.append(("BACKGROUND", (0, i), (-1, i), bg))
     t.setStyle(TableStyle(cmds))
     return t
@@ -408,67 +471,69 @@ def _batch_cards(batch: Optional[dict], styles: dict) -> Any:
     if not batch:
         return Paragraph("No batch assigned.", styles["italic_muted"])
     status = (batch.get("status") or "active").lower()
-    bg, _ = STATUS_COLORS.get(status, STATUS_COLORS["active"])
+    status_color = STATUS_VALUE_COLORS.get(status, TEXT_PRIMARY)
     boxes = [
-        ("Start Date", _fmt_date(batch.get("start_date"))),
-        ("End Date", _fmt_date(batch.get("end_date"))),
-        ("Status", status.upper()),
-        ("Days Left", f"{batch.get('days_remaining') if batch.get('days_remaining') is not None else '—'} Days"),
+        ("Start Date", _fmt_date(batch.get("start_date")), TEXT_PRIMARY),
+        ("End Date", _fmt_date(batch.get("end_date")), TEXT_PRIMARY),
+        ("Status", status.upper(), status_color),
+        (
+            "Days Left",
+            f"{batch.get('days_remaining') if batch.get('days_remaining') is not None else '—'}",
+            TEXT_PRIMARY,
+        ),
     ]
     cells = []
-    for title, val in boxes:
-        cell_bg = bg if title == "Status" else WHITE
-        cells.append(Table([
-            [Paragraph(f'<font size="8" color="#6B7280">{title}</font>', styles["stat_lbl"])],
-            [Paragraph(f"<b>{_escape_xml(val)}</b>", styles["stat_num"])],
-        ], colWidths=[1.55 * inch]))
+    for title, val, val_color in boxes:
+        val_style = ParagraphStyle(
+            "bv",
+            parent=styles["body"],
+            fontName=FONT_BOLD,
+            fontSize=14,
+            textColor=val_color,
+            alignment=TA_CENTER,
+        )
+        lbl = Paragraph(f'<font color="#6B7280" size="8">{_escape_xml(title.upper())}</font>', styles["stat_lbl"])
+        cells.append(Table([[lbl], [Paragraph(f"<b>{_escape_xml(val)}</b>", val_style)]], colWidths=[1.55 * inch]))
         cells[-1].setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), cell_bg),
-            ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
-            ("ROUNDEDCORNERS", [6, 6, 6, 6]),
-            ("TOPPADDING", (0, 0), (-1, -1), 10),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+            ("BACKGROUND", (0, 0), (-1, -1), WHITE),
+            ("BOX", (0, 0), (-1, -1), 1, BORDER),
+            ("ROUNDEDCORNERS", [8, 8, 8, 8]),
+            ("TOPPADDING", (0, 0), (-1, -1), 12),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+            ("LEFTPADDING", (0, 0), (-1, -1), 16),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 16),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ]))
-    row = Table([cells], colWidths=[1.65 * inch] * 4)
-    return row
+    return Table([cells], colWidths=[1.65 * inch] * 4)
 
 
 def _diet_day_block(day: dict, load_image: Callable, styles: dict) -> List[Any]:
     flow: List[Any] = []
-    title = f"DAY {day.get('day_number')}"
+    day_num = day.get("day_number") or ""
     date_s = _fmt_date(day.get("entry_date"))
-    bar = Table([
+    header = Table([
         [
-            Paragraph(f'<font color="white" size="11"><b>{_escape_xml(title)}</b></font>', styles["body"]),
+            Paragraph(f"<b>Day {day_num}</b>", styles["day_title"]),
             Paragraph(
-                f'<para align="right"><font color="white" size="10">{_escape_xml(date_s)}</font></para>',
-                styles["body"],
+                f'<para align="right">{_escape_xml(date_s)}</para>',
+                styles["muted"],
             ),
         ]
     ], colWidths=[CONTENT_W * 0.5, CONTENT_W * 0.5])
-    bar.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), PRIMARY),
-        ("TOPPADDING", (0, 0), (-1, -1), 8),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-        ("LEFTPADDING", (0, 0), (-1, -1), 12),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+    header.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
-    flow.append(bar)
+    flow.append(header)
+    flow.append(HRule(CONTENT_W))
+    flow.append(Spacer(1, 8))
+
     photos = day.get("photos") or []
     if not photos:
-        inner = Table([[Paragraph("No entries for this day.", styles["italic_muted"])]], colWidths=[CONTENT_W - 24])
-        inner.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), WHITE),
-            ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
-            ("TOPPADDING", (0, 0), (-1, -1), 12),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
-            ("LEFTPADDING", (0, 0), (-1, -1), 12),
-        ]))
-        flow.append(inner)
+        flow.append(Paragraph("No entries for this day.", styles["italic_muted"]))
     else:
         for ph in photos:
-            thumb = Spacer(80, 80)
+            thumb: Any = Spacer(80, 80)
             path = ph.get("photo_path") or ""
             try:
                 data = load_image(path) if callable(load_image) else None
@@ -478,54 +543,48 @@ def _diet_day_block(day: dict, load_image: Callable, styles: dict) -> List[Any]:
                 try:
                     thumb = RLImage(io.BytesIO(data), width=80, height=80)
                 except Exception:
-                    thumb = Paragraph("[img]", styles["muted"])
+                    thumb = Paragraph("[image]", styles["muted"])
             ts = _fmt_time(ph.get("captured_at") or ph.get("uploaded_at"))
-            row = Table(
-                [[thumb, Paragraph(f"Uploaded at {_escape_xml(ts)}", styles["muted"])]],
-                colWidths=[90, CONTENT_W - 114],
-            )
+            row = Table([[thumb, Paragraph(_escape_xml(ts), styles["muted"])]], colWidths=[90, CONTENT_W - 100])
             row.setStyle(TableStyle([
-                ("BACKGROUND", (0, 0), (-1, -1), WHITE),
-                ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LEFTPADDING", (0, 0), (0, 0), 0),
+                ("LEFTPADDING", (1, 0), (1, 0), 8),
             ]))
             flow.append(row)
-    flow.append(Spacer(1, 6))
-    flow.append(AccentLine(CONTENT_W, 2))
+
+    flow.append(Spacer(1, 12))
+    flow.append(HRule(CONTENT_W))
     return flow
 
 
-def _folder_rows(folders: List[dict], styles: dict) -> Table:
-    rows = []
-    for f in folders or []:
+def _folder_list(folders: List[dict], styles: dict) -> List[Any]:
+    flow: List[Any] = []
+    for i, f in enumerate(folders or []):
         counts = f.get("item_counts") or {}
-        pills = []
+        parts = []
         for key, label in [("links", "Links"), ("videos", "Videos"), ("photos", "Photos"), ("documents", "Docs")]:
             n = counts.get(key, 0)
             if n:
-                pills.append(f"[{label} {n}]")
-        pill_text = " ".join(pills) if pills else "Empty"
-        rows.append([
-            Paragraph(f"<b>📁 {_escape_xml(f.get('name') or 'Folder')}</b>", styles["body"]),
-            Paragraph(f'<font size="8" color="#6B7280">{_escape_xml(pill_text)}</font>', styles["muted"]),
-        ])
-    if not rows:
-        rows = [[Paragraph("None", styles["italic_muted"]), Paragraph("", styles["body"])]]
-    t = Table(rows, colWidths=[2.5 * inch, CONTENT_W - 2.5 * inch])
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-        ("LINEBELOW", (0, 0), (-1, -1), 0.5, BORDER),
-    ]))
-    return t
+                parts.append(f"{label}: {n}")
+        summary = "  ·  ".join(parts) if parts else "No content"
+        flow.append(Paragraph(
+            f"📁 <b>{_escape_xml(f.get('name') or 'Folder')}</b>",
+            styles["body_semibold"],
+        ))
+        flow.append(Paragraph(_escape_xml(summary), styles["muted"]))
+        if i < len(folders) - 1:
+            flow.append(Spacer(1, 6))
+            flow.append(HRule(CONTENT_W))
+            flow.append(Spacer(1, 6))
+    if not folders:
+        flow.append(Paragraph("None", styles["italic_muted"]))
+    return flow
 
 
 class _NumberedCanvas(pdfcanvas.Canvas):
-    """Two-pass canvas so footers can show Page X of Y."""
-
     def __init__(self, *args, **kwargs):
         pdfcanvas.Canvas.__init__(self, *args, **kwargs)
         self._saved_page_states: List[dict] = []
@@ -538,49 +597,32 @@ class _NumberedCanvas(pdfcanvas.Canvas):
         total = len(self._saved_page_states)
         for state in self._saved_page_states:
             self.__dict__.update(state)
-            _draw_page_chrome(self, total)
+            _draw_footer(self, total)
             pdfcanvas.Canvas.showPage(self)
         pdfcanvas.Canvas.save(self)
 
 
-def _draw_page_chrome(c: pdfcanvas.Canvas, page_count: int) -> None:
-    page_num = c.getPageNumber()
-    if page_num > 1:
-        c.saveState()
-        c.setFillColor(PRIMARY)
-        c.rect(0, PAGE_H - 32, PAGE_W, 32, fill=1, stroke=0)
-        c.setFillColor(WHITE)
-        c.setFont(FONT_BOLD, 10)
-        c.drawString(MARGIN_L, PAGE_H - 22, "ChatFlow")
-        c.setStrokeColor(ACCENT)
-        c.setLineWidth(3)
-        c.line(0, PAGE_H - 35, PAGE_W, PAGE_H - 35)
-        c.restoreState()
-
+def _draw_footer(c: pdfcanvas.Canvas, page_count: int) -> None:
     c.saveState()
-    c.setStrokeColor(ACCENT)
-    c.setLineWidth(3)
-    c.line(MARGIN_L, FOOTER_H + 6, PAGE_W - MARGIN_R, FOOTER_H + 6)
-    c.setFillColor(PRIMARY)
+    c.setFillColor(COMPANY)
     c.rect(0, 0, PAGE_W, FOOTER_H, fill=1, stroke=0)
+    c.setFillColor(colors.Color(1, 1, 1, alpha=0.8))
+    c.setFont(FONT_REG, 8)
+    c.drawString(MARGIN_L, 11, "ChatFlow")
     c.setFillColor(WHITE)
-    c.setFont(FONT_LIGHT, 8)
-    c.drawString(MARGIN_L, 10, "ChatFlow — Internal Reports")
-    c.drawCentredString(PAGE_W / 2, 10, "CONFIDENTIAL — FOR INTERNAL USE ONLY")
-    c.drawRightString(PAGE_W - MARGIN_R, 10, f"Page {page_num} of {page_count}")
+    c.drawCentredString(PAGE_W / 2, 11, "CONFIDENTIAL — FOR INTERNAL USE ONLY")
+    c.drawRightString(PAGE_W - MARGIN_R, 11, f"Page {c.getPageNumber()} of {page_count}")
     c.restoreState()
 
 
 class ReportDocTemplate(SimpleDocTemplate):
-    def __init__(self, filename, report_title: str = "ChatFlow", **kwargs):
-        self.report_title = report_title
+    def __init__(self, filename, **kwargs):
         super().__init__(filename, **kwargs)
 
 
-def _build_doc(buffer: io.BytesIO, story: List[Any], title: str = "ChatFlow") -> bytes:
+def _build_doc(buffer: io.BytesIO, story: List[Any]) -> bytes:
     doc = ReportDocTemplate(
         buffer,
-        report_title=title,
         pagesize=A4,
         leftMargin=MARGIN_L,
         rightMargin=MARGIN_R,
@@ -597,53 +639,45 @@ def build_employee_pdf(report: dict, load_image: Callable[[str], Optional[bytes]
     clients = report.get("clients") or []
     active = sum(1 for c in clients if (c.get("client_status") or "").lower() == "active")
     inactive = sum(1 for c in clients if (c.get("client_status") or "").lower() == "inactive")
-    dropped = sum(1 for c in clients if (c.get("client_status") or "").lower() == "dropped")
 
     def sync_load(url):
-        if not url:
-            return None
-        try:
-            return load_image(url)
-        except TypeError:
-            import asyncio
-            return None
+        return load_image(url) if url else None
 
-    avatar = _profile_photo_flowable(p.get("avatar_url"), sync_load, p.get("full_name") or "Employee", 60)
+    avatar = _profile_photo_flowable(
+        p.get("avatar_url"), sync_load, p.get("full_name") or "Employee", 55
+    )
+    emp_status = (p.get("status") or "active").lower()
 
     story: List[Any] = [
-        _banner_table({"generated_at": report.get("generated_at"), "report_id": p.get("id", "")[:8]}, styles),
-        AccentLine(CONTENT_W),
-        Spacer(1, 10),
+        Page1Banner({"generated_at": report.get("generated_at"), "report_id": p.get("id", "")[:8]}, styles),
         _profile_block(
             p.get("full_name") or "Employee",
             p.get("id") or "",
             "employee",
             [
                 ("Total Clients", str(len(clients))),
-                ("Active Clients", str(active)),
-                ("Inactive Clients", str(inactive + dropped)),
+                ("Active", str(active)),
+                ("Inactive", str(inactive)),
             ],
             avatar,
             styles,
         ),
-        Spacer(1, 16),
-        SectionBar("Personal Information", "👤", CONTENT_W),
-        Spacer(1, 8),
-        _kv_grid([
-            ("Full Name", p.get("full_name") or "—"),
-            ("Phone Number", p.get("phone_number") or "—"),
-            ("Email", p.get("email") or "—"),
-            ("Status", f"● {p.get('status') or '—'}"),
-            ("Join Date", p.get("join_date") or "—"),
-        ], styles),
-        Spacer(1, 14),
-        PageBreak(),
-        SectionBar("Clients Under This Employee", "📋", CONTENT_W),
-        Spacer(1, 8),
-        _clients_table(clients, styles),
+        Spacer(1, SECTION_GAP),
     ]
-    buf = io.BytesIO()
-    return _build_doc(buf, story)
+    story.extend(_section("Personal Information", styles))
+    story.append(_kv_grid([
+        ("Full Name", p.get("full_name") or "—"),
+        ("Phone Number", p.get("phone_number") or "—"),
+        ("Email", p.get("email") or "—"),
+        ("Status", emp_status),
+        ("Join Date", p.get("join_date") or "—"),
+    ], styles, status_keys={"Status"}))
+    story.append(Spacer(1, SECTION_GAP))
+    story.append(PageBreak())
+    story.extend(_section("Clients Under This Employee", styles))
+    story.append(_clients_table(clients, styles))
+
+    return _build_doc(io.BytesIO(), story)
 
 
 def build_client_pdf(report: dict, load_image: Callable[[str], Optional[bytes]]) -> bytes:
@@ -655,27 +689,23 @@ def build_client_pdf(report: dict, load_image: Callable[[str], Optional[bytes]])
     folders = report.get("folders") or {}
 
     def sync_load(path):
-        if not path:
-            return None
-        try:
-            return load_image(path)
-        except TypeError:
-            return None
+        return load_image(path) if path else None
 
     batch_status = (batch.get("status") or "—").upper() if batch else "—"
     days_prog = str(batch.get("days_completed") if batch and batch.get("days_completed") is not None else "—")
     days_left = str(batch.get("days_remaining") if batch and batch.get("days_remaining") is not None else "—")
 
     story: List[Any] = [
-        _banner_table({"generated_at": report.get("generated_at"), "report_id": personal.get("id", "")[:8]}, styles),
-        AccentLine(CONTENT_W),
-        Spacer(1, 10),
+        Page1Banner(
+            {"generated_at": report.get("generated_at"), "report_id": personal.get("id", "")[:8]},
+            styles,
+        ),
         _profile_block(
             personal.get("full_name") or "Client",
             personal.get("id") or "",
             "client",
             [
-                ("Days in Program", days_prog),
+                ("Day in Program", days_prog),
                 ("Days Remaining", days_left),
                 ("Batch Status", batch_status),
             ],
@@ -683,70 +713,58 @@ def build_client_pdf(report: dict, load_image: Callable[[str], Optional[bytes]])
                 personal.get("avatar_url"),
                 sync_load,
                 personal.get("full_name") or "Client",
-                60,
+                55,
             ),
             styles,
         ),
-        Spacer(1, 14),
-        SectionBar("Personal Information", "👤", CONTENT_W),
-        Spacer(1, 8),
-        _kv_grid([
-            ("Full Name", personal.get("full_name") or "—"),
-            ("Phone Number", personal.get("phone_number") or "—"),
-            ("Client ID", personal.get("id") or "—"),
-        ], styles),
-        Spacer(1, 12),
-        SectionBar("Medical Information", "🩺", CONTENT_W),
-        Spacer(1, 8),
-        _kv_grid([
-            ("Age", str(mp.get("age") or report.get("medical", {}).get("age") or "—")),
-            ("Weight", f"{mp.get('weight_kg') or report.get('medical', {}).get('weight_kg') or '—'} kg"),
-            ("Height", f"{mp.get('height_cm') or report.get('medical', {}).get('height_cm') or '—'} cm"),
-            ("Conditions", mp.get("medical_conditions") or "—"),
-            ("Allergies", mp.get("allergies") or "—"),
-            ("Medications", mp.get("current_medications") or "—"),
-            ("Notes", mp.get("remarks") or "—"),
-        ], styles),
-        Spacer(1, 12),
-        SectionBar("Assigned Employee", "👤", CONTENT_W),
-        Spacer(1, 8),
-        _kv_grid([
-            ("Name", emp.get("full_name") if emp else "Not assigned"),
-            ("ID", emp.get("id") if emp else "—"),
-            ("Phone", emp.get("phone_number") if emp else "—"),
-        ], styles),
-        Spacer(1, 12),
-        SectionBar("Batch Information", "📅", CONTENT_W),
-        Spacer(1, 8),
-        _batch_cards(batch, styles),
-        Spacer(1, 14),
-        PageBreak(),
-        SectionBar("Diet Log", "🍽️", CONTENT_W),
-        Spacer(1, 8),
+        Spacer(1, SECTION_GAP),
     ]
+
+    story.extend(_section("Personal Information", styles))
+    story.append(_kv_grid([
+        ("Full Name", personal.get("full_name") or "—"),
+        ("Phone Number", personal.get("phone_number") or "—"),
+        ("Client ID", personal.get("id") or "—"),
+    ], styles))
+    story.append(Spacer(1, SECTION_GAP))
+
+    story.extend(_section("Medical Information", styles))
+    story.append(_kv_grid([
+        ("Age", str(mp.get("age") or report.get("medical", {}).get("age") or "—")),
+        ("Weight", f"{mp.get('weight_kg') or report.get('medical', {}).get('weight_kg') or '—'} kg"),
+        ("Height", f"{mp.get('height_cm') or report.get('medical', {}).get('height_cm') or '—'} cm"),
+        ("Conditions", mp.get("medical_conditions") or "—"),
+        ("Allergies", mp.get("allergies") or "—"),
+        ("Medications", mp.get("current_medications") or "—"),
+        ("Notes", mp.get("remarks") or "—"),
+    ], styles))
+    story.append(Spacer(1, SECTION_GAP))
+
+    story.extend(_section("Assigned Employee", styles))
+    story.append(_kv_grid([
+        ("Name", emp.get("full_name") if emp else "Not assigned"),
+        ("ID", emp.get("id") if emp else "—"),
+        ("Phone", emp.get("phone_number") if emp else "—"),
+    ], styles))
+    story.append(Spacer(1, SECTION_GAP))
+
+    story.extend(_section("Batch Information", styles))
+    story.append(_batch_cards(batch, styles))
+    story.append(Spacer(1, SECTION_GAP))
+
+    story.append(PageBreak())
+    story.extend(_section("Diet Log", styles))
     for day in report.get("diet_days") or []:
         story.extend(_diet_day_block(day, sync_load, styles))
-    story.append(Spacer(1, 10))
-    story.append(SectionBar("Folder Access", "📁", CONTENT_W))
-    story.append(Spacer(1, 8))
-    half = CONTENT_W / 2 - 6
-    folder_split = Table([
-        [
-            Table([
-                [Paragraph("<b>Admin Folders</b>", styles["body"])],
-                [_folder_rows(folders.get("admin_folders"), styles)],
-            ], colWidths=[half]),
-            Table([
-                [Paragraph("<b>Employee Folders</b>", styles["body"])],
-                [_folder_rows(folders.get("employee_folders"), styles)],
-            ], colWidths=[half]),
-        ]
-    ], colWidths=[half, half])
-    folder_split.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-    story.append(folder_split)
 
-    buf = io.BytesIO()
-    return _build_doc(buf, story)
+    story.append(PageBreak())
+    story.extend(_section("Admin Folders", styles))
+    story.extend(_folder_list(folders.get("admin_folders"), styles))
+    story.append(Spacer(1, SECTION_GAP))
+    story.extend(_section("Employee Folders", styles))
+    story.extend(_folder_list(folders.get("employee_folders"), styles))
+
+    return _build_doc(io.BytesIO(), story)
 
 
 def pdf_filename(report_type: str, full_name: str, generated_at: Optional[str] = None) -> str:
