@@ -329,6 +329,9 @@ api.interceptors.request.use((config) => {
 });
 
 export function formatApiError(err) {
+  if (err?.response?.status === 413) {
+    return "File is too large for the server upload limit. Try a smaller video or contact your administrator.";
+  }
   const detail = err?.response?.data?.detail;
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) {

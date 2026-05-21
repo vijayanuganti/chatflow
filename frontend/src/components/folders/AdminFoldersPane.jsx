@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -166,6 +167,7 @@ export default function AdminFoldersPane() {
           <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit folder</DialogTitle>
+              <DialogDescription>Rename the folder or change who can view it.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div>
@@ -260,6 +262,7 @@ export default function AdminFoldersPane() {
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Create folder</DialogTitle>
+            <DialogDescription>Set a name and choose which employees or clients can access this folder.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>

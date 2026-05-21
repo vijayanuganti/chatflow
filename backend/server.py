@@ -4038,19 +4038,28 @@ app.add_middleware(
 
 
 async def _folder_upload_fileobj(fileobj, key: str, content_type: str, filename: str):
-    from io import BytesIO
-
     mime = (content_type or "").lower()
-    data = fileobj.read()
-    size = len(data)
-    bio = BytesIO(data)
     file_id = key.split("/")[-1]
+    size: Optional[int] = None
+    try:
+        fileobj.seek(0, os.SEEK_END)
+        size = fileobj.tell()
+        fileobj.seek(0)
+    except (OSError, AttributeError):
+        size = None
+
     if S3_BUCKET:
-        file_url = _upload_to_s3(bio, key, mime)
+        await asyncio.to_thread(_upload_to_s3, fileobj, key, mime)
+        file_url = _infer_public_url(S3_BUCKET, S3_REGION, key)
     else:
         dest = UPLOAD_DIR / file_id
         with dest.open("wb") as f:
-            f.write(data)
+            shutil.copyfileobj(fileobj, f)
+        if size is None:
+            try:
+                size = dest.stat().st_size
+            except OSError:
+                size = None
         file_url = f"/api/files/{file_id}"
     return file_url, size
 

@@ -127,14 +127,29 @@ def user_can_access_folder(folder: dict, user: dict) -> bool:
     return any(user_matches_access_rule(user, r) for r in rules)
 
 
-def _mime_for_category(category: str, mime: str) -> None:
+_VIDEO_EXTS = frozenset({".mp4", ".mov", ".webm", ".m4v", ".avi", ".mkv", ".mpeg", ".mpg"})
+_IMAGE_EXTS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".heif"})
+
+
+def _mime_for_category(category: str, mime: str, filename: str = "") -> None:
     m = (mime or "").lower()
-    if category == "photos" and not m.startswith("image/"):
+    ext = os.path.splitext(filename or "")[1].lower()
+    if category == "photos":
+        if m.startswith("image/") or ext in _IMAGE_EXTS:
+            return
         raise HTTPException(status_code=400, detail="Photos category requires an image file")
-    if category == "videos" and not m.startswith("video/"):
+    if category == "videos":
+        if m.startswith("video/") or ext in _VIDEO_EXTS:
+            return
         raise HTTPException(status_code=400, detail="Videos category requires a video file")
-    if category == "documents" and (m.startswith("image/") or m.startswith("video/") or m.startswith("audio/")):
-        raise HTTPException(status_code=400, detail="Documents category does not accept image/video/audio")
+    if category == "documents":
+        if m.startswith("image/") or m.startswith("video/") or m.startswith("audio/"):
+            if ext not in (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".csv"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Documents category does not accept image/video/audio",
+                )
+        return
 
 
 def _access_summary(rules: List[dict], users_by_id: Dict[str, dict]) -> str:
@@ -356,7 +371,7 @@ def register_folder_routes(
             raise HTTPException(status_code=404, detail="Folder not found")
         ext = os.path.splitext(file.filename or "")[1].lower()
         mime = (file.content_type or "").lower()
-        _mime_for_category(cat, mime)
+        _mime_for_category(cat, mime, file.filename or "")
         file_id = f"{uuid.uuid4().hex}{ext}"
         key = f"uploads/folders/{folder_id}/{file_id}"
         try:
