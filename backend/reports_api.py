@@ -22,22 +22,14 @@ from folders_api import (
 )
 
 try:
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-    from reportlab.lib.units import inch
-    from reportlab.platypus import (
-        Image as RLImage,
-        Paragraph,
-        SimpleDocTemplate,
-        Spacer,
-        Table,
-        TableStyle,
-    )
+    from report_pdf import build_client_pdf, build_employee_pdf, pdf_filename
 
     HAS_REPORTLAB = True
 except ImportError:
     HAS_REPORTLAB = False
+    build_client_pdf = None  # type: ignore
+    build_employee_pdf = None  # type: ignore
+    pdf_filename = None  # type: ignore
 
 
 def _now_iso() -> str:
@@ -317,155 +309,63 @@ def register_reports_routes(
     async def view_client_report(user_id: str, _: dict = Depends(require_admin)):
         return await _build_client_report(user_id)
 
-    def _pdf_employee(report: dict) -> bytes:
-        if not HAS_REPORTLAB:
-            raise HTTPException(status_code=503, detail="PDF library not installed on server")
-        buf = io.BytesIO()
-        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=0.6 * inch, bottomMargin=0.6 * inch)
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle("Title", parent=styles["Heading1"], fontSize=16, spaceAfter=12)
-        h2 = ParagraphStyle("H2", parent=styles["Heading2"], fontSize=12, spaceBefore=14, spaceAfter=6)
-        body = styles["Normal"]
-        story = []
-        p = report["personal"]
-        story.append(Paragraph("ChatFlow", title_style))
-        story.append(Paragraph(f"Employee Report — {p.get('full_name') or ''} ({p.get('id')})", h2))
-        story.append(Paragraph(f"Generated: {_fmt_datetime(report.get('generated_at'))}", body))
-        story.append(Spacer(1, 12))
-        story.append(Paragraph("Personal Info", h2))
-        for line in [
-            f"Name: {p.get('full_name')}",
-            f"ID: {p.get('id')}",
-            f"Phone: {p.get('phone_number') or '—'}",
-            f"Email: {p.get('email') or '—'}",
-            f"Status: {p.get('status')}",
-            f"Join date: {p.get('join_date')}",
-        ]:
-            story.append(Paragraph(line, body))
-        story.append(Spacer(1, 12))
-        story.append(Paragraph("Clients Under This Employee", h2))
-        rows = [["Name", "ID", "Phone", "Status", "Batch", "Joined"]]
-        for c in report.get("clients") or []:
-            rows.append([
-                c.get("full_name") or "",
-                c.get("id") or "",
-                c.get("phone_number") or "",
-                c.get("client_status") or "",
-                c.get("batch_name") or "—",
-                c.get("join_date") or "",
-            ])
-        tbl = Table(rows, repeatRows=1)
-        tbl.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#064e3b")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
-        ]))
-        story.append(tbl)
-        doc.build(story)
-        return buf.getvalue()
-
-    async def _pdf_client(report: dict) -> bytes:
-        if not HAS_REPORTLAB:
-            raise HTTPException(status_code=503, detail="PDF library not installed on server")
-        buf = io.BytesIO()
-        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=0.5 * inch, bottomMargin=0.5 * inch)
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle("Title", parent=styles["Heading1"], fontSize=16, spaceAfter=10)
-        h2 = ParagraphStyle("H2", parent=styles["Heading2"], fontSize=12, spaceBefore=12, spaceAfter=6)
-        body = styles["Normal"]
-        story = []
-        story.append(Paragraph("ChatFlow", title_style))
-        story.append(Paragraph(
-            f"Client Report — {report.get('personal', {}).get('full_name', '')} "
-            f"({report.get('personal', {}).get('id', '')})",
-            h2,
-        ))
-        story.append(Paragraph(f"Generated: {_fmt_datetime(report.get('generated_at'))}", body))
-        story.append(Spacer(1, 10))
-        story.append(Paragraph("Medical Info", h2))
-        mp = report.get("medical", {}).get("profile") or {}
-        for k, label in [
-            ("medical_conditions", "Conditions"),
-            ("allergies", "Allergies"),
-            ("current_medications", "Medications"),
-            ("remarks", "Notes"),
-        ]:
-            if mp.get(k):
-                story.append(Paragraph(f"{label}: {mp[k]}", body))
-        story.append(Paragraph(
-            f"Age: {mp.get('age') or '—'} | Weight: {mp.get('weight_kg') or '—'} kg | Height: {mp.get('height_cm') or '—'} cm",
-            body,
-        ))
-        emp = report.get("assigned_employee")
-        story.append(Paragraph("Assigned Employee", h2))
-        if emp:
-            story.append(Paragraph(
-                f"{emp.get('full_name')} | {emp.get('id')} | {emp.get('phone_number') or '—'}",
-                body,
-            ))
-        else:
-            story.append(Paragraph("Not assigned", body))
-        batch = report.get("batch")
-        story.append(Paragraph("Batch Info", h2))
-        if batch:
-            story.append(Paragraph(
-                f"{batch.get('name')} | {batch.get('status')} | Start: {batch.get('start_date')} | "
-                f"End: {batch.get('end_date')} | Completed: {batch.get('days_completed')} days | "
-                f"Remaining: {batch.get('days_remaining')} days",
-                body,
-            ))
-        else:
-            story.append(Paragraph("No batch", body))
-        story.append(Paragraph("Diet Log", h2))
+    async def _preload_images(report: dict) -> Dict[str, Optional[bytes]]:
+        paths: List[str] = []
+        p = report.get("personal") or {}
+        if p.get("avatar_url"):
+            paths.append(p["avatar_url"])
         for day in report.get("diet_days") or []:
-            story.append(Paragraph(
-                f"Day {day.get('day_number')} — {_fmt_date(day.get('entry_date'))}",
-                h2,
-            ))
-            for photo in day.get("photos") or []:
-                story.append(Paragraph(
-                    f"  {_fmt_datetime(photo.get('captured_at') or photo.get('uploaded_at'))}",
-                    body,
-                ))
-                data = await _load_image_bytes(photo.get("photo_path") or "")
-                if data:
-                    try:
-                        img = RLImage(io.BytesIO(data), width=2.8 * inch, height=2.1 * inch)
-                        story.append(img)
-                    except Exception:
-                        story.append(Paragraph("  [image unavailable]", body))
-                story.append(Spacer(1, 6))
-        story.append(Paragraph("Folder Access — Admin", h2))
-        for f in (report.get("folders") or {}).get("admin_folders") or []:
-            story.append(Paragraph(f"{f.get('name')} — {f.get('categories_summary')}", body))
-        story.append(Paragraph("Folder Access — Employee", h2))
-        for f in (report.get("folders") or {}).get("employee_folders") or []:
-            story.append(Paragraph(
-                f"{f.get('name')} ({f.get('creator_name', '')}) — {f.get('categories_summary')}",
-                body,
-            ))
-        doc.build(story)
-        return buf.getvalue()
+            for ph in day.get("photos") or []:
+                path = ph.get("photo_path")
+                if path:
+                    paths.append(path)
+        cache: Dict[str, Optional[bytes]] = {}
+        for path in set(paths):
+            cache[path] = await _load_image_bytes(path)
+        return cache
+
+    def _pdf_employee(report: dict, image_cache: Dict[str, Optional[bytes]]) -> bytes:
+        if not HAS_REPORTLAB or not build_employee_pdf:
+            raise HTTPException(status_code=503, detail="PDF library not installed on server")
+
+        def sync_load(path: Optional[str]) -> Optional[bytes]:
+            if not path:
+                return None
+            return image_cache.get(path)
+
+        return build_employee_pdf(report, sync_load)
+
+    def _pdf_client(report: dict, image_cache: Dict[str, Optional[bytes]]) -> bytes:
+        if not HAS_REPORTLAB or not build_client_pdf:
+            raise HTTPException(status_code=503, detail="PDF library not installed on server")
+
+        def sync_load(path: Optional[str]) -> Optional[bytes]:
+            if not path:
+                return None
+            return image_cache.get(path)
+
+        return build_client_pdf(report, sync_load)
 
     @router.get("/admin/reports/employee/{user_id}/pdf")
     async def download_employee_pdf(user_id: str, _: dict = Depends(require_admin)):
         report = await _build_employee_report(user_id)
-        pdf = _pdf_employee(report)
-        name = (report["personal"].get("full_name") or "employee").replace(" ", "_")
+        cache = await _preload_images(report)
+        pdf = _pdf_employee(report, cache)
+        fname = pdf_filename("employee", report["personal"].get("full_name") or "employee", report.get("generated_at"))
         return Response(
             content=pdf,
             media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="report_{name}_{user_id}.pdf"'},
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
 
     @router.get("/admin/reports/client/{user_id}/pdf")
     async def download_client_pdf(user_id: str, _: dict = Depends(require_admin)):
         report = await _build_client_report(user_id)
-        pdf = await _pdf_client(report)
-        name = (report["personal"].get("full_name") or "client").replace(" ", "_")
+        cache = await _preload_images(report)
+        pdf = _pdf_client(report, cache)
+        fname = pdf_filename("client", report["personal"].get("full_name") or "client", report.get("generated_at"))
         return Response(
             content=pdf,
             media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="report_{name}_{user_id}.pdf"'},
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
