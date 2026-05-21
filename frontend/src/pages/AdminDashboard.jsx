@@ -1351,36 +1351,6 @@ export default function AdminDashboard() {
                 <StatCard icon={Inbox} label="Open complaints" value={formatStatValue(stats?.complaints_pending)} testId="stat-complaints-open" accent="bg-rose-50 text-rose-900" />
               </button>
             </div>
-            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 sm:p-6 min-w-0 max-w-3xl">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="font-display text-lg sm:text-xl font-semibold dark:text-gray-100">Latest activity</h2>
-                  <Button variant="ghost" className="text-xs sm:text-sm px-2 sm:px-3" onClick={() => goToTab("chats")} data-testid="overview-view-all-chats">View all -></Button>
-                </div>
-                <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {allConvs.slice(0, 6).map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => goToTab("chats", { selectedConv: c, mobileChatStep: "chat" })}
-                      data-testid={`overview-conv-${c.id}`}
-                      className="w-full py-3 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-800/60 rounded-xl px-2 text-left"
-                    >
-                      <div className="flex -space-x-2 shrink-0">
-                        {(c.participants_info || []).slice(0, 2).map((p) => (
-                          <Avatar key={p.id} name={p.full_name} avatarUrl={p.avatar_url} online={onlineUsers[p.id]} size={32} />
-                        ))}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-sm truncate dark:text-gray-100">
-                          {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(", ")}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{c.last_message || "No messages"}</div>
-                      </div>
-                      {c.type === "group" && <span className="hidden sm:inline text-[10px] bg-emerald-100 text-emerald-900 dark:bg-emerald-500/20 dark:text-emerald-200 px-2 py-0.5 rounded-full">Group</span>}
-                    </button>
-                  ))}
-                  {allConvs.length === 0 && <div className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">No activity yet.</div>}
-                </div>
-              </div>
           </div>
         )}
 
