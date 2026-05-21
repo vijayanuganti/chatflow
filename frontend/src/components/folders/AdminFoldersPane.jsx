@@ -157,6 +157,11 @@ export default function AdminFoldersPane() {
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto min-h-0">
+          {selectedFolder.view_only && (
+            <span className="inline-flex items-center gap-1 text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-500/15 px-2 py-1 rounded-full mb-2">
+              View only (employee-owned)
+            </span>
+          )}
           <FolderDetailPanel
             folder={selectedFolder}
             isAdmin
@@ -227,7 +232,7 @@ export default function AdminFoldersPane() {
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold truncate dark:text-gray-100">{f.name}</div>
                   <div className="text-xs text-gray-500 mt-1 line-clamp-2">{formatFolderCounts(f.item_counts)}</div>
-                  <div className="text-[10px] text-gray-400 mt-1 truncate">{f.access_summary}</div>
+                  <div className="text-[10px] text-gray-400 mt-1 truncate">{f.creator_label || f.access_summary}</div>
                 </div>
               </div>
               <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">

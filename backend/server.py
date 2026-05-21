@@ -3876,8 +3876,11 @@ async def on_startup():
         await db.complaints.create_index("client_id")
         await db.complaints.create_index("employee_id")
         await db.folders.create_index([("created_at", -1)])
+        await db.folders.create_index("created_by_type")
+        await db.folders.create_index("created_by_id")
         await db.folder_items.create_index("folder_id")
         await db.folder_items.create_index([("folder_id", 1), ("category", 1)])
+        await migrate_folders_schema(db)
 
         if _init_firebase():
             logger.info("Firebase Admin ready — background push (FCM) enabled")
@@ -4082,7 +4085,7 @@ async def _folder_delete_storage_urls(urls: List[Optional[str]]) -> None:
                 pass
 
 
-from folders_api import register_folder_routes
+from folders_api import migrate_folders_schema, register_folder_routes
 
 register_folder_routes(
     api_router,

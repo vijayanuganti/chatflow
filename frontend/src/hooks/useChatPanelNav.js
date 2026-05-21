@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { MessageSquare, UtensilsCrossed, Settings, Layers, Folder, MessageCircle } from "lucide-react";
+import { MessageSquare, UtensilsCrossed, Settings, Folder, MessageCircle } from "lucide-react";
 import { dietPlanPath, profilePath } from "@/lib/appRoutes";
 import { chatListTarget } from "@/lib/chatMobileNav";
 import { saveChatListScroll } from "@/lib/chatListScroll";
@@ -20,7 +20,6 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
     if (id === "diet") return pathname.startsWith("/chat/diet-plan");
     if (id === "folders") return pathname.startsWith("/chat/folders");
     if (id === "settings") return pathname === "/chat/profile";
-    if (id === "batches") return pathname === "/chat";
     return false;
   };
 
@@ -79,19 +78,6 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
         badge: unreadTotal,
         testId: "employee-nav-chats",
         onClick: () => navigate(chatListTarget(), { replace: true }),
-      },
-      {
-        id: "batches",
-        label: "Batches",
-        icon: Layers,
-        active: isActive("batches"),
-        testId: "employee-nav-batches",
-        onClick: () => {
-          navigate(chatListTarget(), { replace: true });
-          requestAnimationFrame(() => {
-            document.querySelector("[data-testid='batch-boards']")?.scrollIntoView({ behavior: "smooth" });
-          });
-        },
       },
       {
         id: "folders",

@@ -13,6 +13,7 @@ import { FOLDER_CATEGORIES } from "@/lib/folderAccess";
 import {
   addFolderLink,
   deleteFolderItem,
+  folderMutationScope,
   uploadFolderFile,
 } from "@/lib/foldersApi";
 import { toast } from "sonner";
@@ -47,6 +48,8 @@ export default function FolderDetailPanel({
   isAdmin = false,
   onRefresh,
 }) {
+  const mutationScope = folderMutationScope(folder, { isAdmin });
+  const canEdit = !!mutationScope;
   const [activeTab, setActiveTab] = useState("links");
   const [linkTitle, setLinkTitle] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
@@ -65,7 +68,7 @@ export default function FolderDetailPanel({
     }
     setBusy(true);
     try {
-      await addFolderLink(folder.id, { title: linkTitle, url: linkUrl });
+      await addFolderLink(folder.id, { title: linkTitle, url: linkUrl }, mutationScope);
       setLinkTitle("");
       setLinkUrl("");
       toast.success("Link added");
@@ -85,6 +88,7 @@ export default function FolderDetailPanel({
     try {
       await uploadFolderFile(folder.id, category, file, {
         onProgress: (p) => setUploadPct(p),
+        scope: mutationScope,
       });
       toast.success("Uploaded");
       onRefresh?.();
@@ -100,7 +104,7 @@ export default function FolderDetailPanel({
     if (!window.confirm(`Remove "${item.title}"?`)) return;
     setBusy(true);
     try {
-      await deleteFolderItem(folder.id, item.id);
+      await deleteFolderItem(folder.id, item.id, mutationScope);
       toast.success("Removed");
       onRefresh?.();
     } catch (err) {
@@ -131,7 +135,7 @@ export default function FolderDetailPanel({
     const items = itemsByCategory.links || [];
     return (
       <div className="space-y-4">
-        {isAdmin && (
+        {canEdit && (
           <form onSubmit={handleAddLink} className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
             <div className="text-sm font-medium dark:text-gray-100">Add link</div>
             <div>
@@ -169,7 +173,7 @@ export default function FolderDetailPanel({
                   <ExternalLink className="h-4 w-4" />
                 </a>
               </Button>
-              {isAdmin && (
+              {canEdit && (
                 <Button size="icon" variant="ghost" className="shrink-0 rounded-full text-rose-600" onClick={() => handleDeleteItem(item)}>
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -187,7 +191,7 @@ export default function FolderDetailPanel({
     const accept = isVideo ? "video/*" : isPhoto ? "image/*" : "*/*";
     return (
       <div className="space-y-4">
-        {isAdmin && (
+        {canEdit && (
           <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-700 p-4 flex flex-col items-center gap-2">
             <label className="cursor-pointer flex flex-col items-center gap-2 touch-manipulation">
               <Upload className="h-8 w-8 text-gray-400" />
@@ -260,7 +264,7 @@ export default function FolderDetailPanel({
                     <Button size="sm" variant="outline" className="rounded-full" onClick={() => openDownload(item)} title="Download">
                       <Download className="h-3.5 w-3.5" />
                     </Button>
-                    {isAdmin && (
+                    {canEdit && (
                       <Button size="sm" variant="ghost" className="rounded-full text-rose-600" onClick={() => handleDeleteItem(item)}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
