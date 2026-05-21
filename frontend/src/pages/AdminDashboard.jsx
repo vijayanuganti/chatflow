@@ -28,7 +28,6 @@ import {
   MessageCircle, Eye, Plus, Layers, UserPlus, ShieldCheck,
   KeyRound, ShieldAlert, UserCheck, UserX, PowerOff, Power, Stethoscope,
   ArrowRightLeft, FolderPlus, Inbox, CheckCircle2, Clock, RotateCcw, Loader2,
-  Contact, BadgeCheck, DoorClosed, Handshake, Snowflake, OctagonX, Flag,
   HardDrive, Trash2, Settings,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
@@ -1216,15 +1215,14 @@ export default function AdminDashboard() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
               <StatCard
-                icon={Contact}
+                icon={Users}
                 label="Total users"
                 value={formatStatValue(stats?.total_users)}
                 testId="stat-total-users"
-                accent="bg-slate-50 text-slate-900"
                 onClick={() => goToUsersFilter("all")}
               />
               <StatCard
-                icon={BadgeCheck}
+                icon={UserCheck}
                 label="Active employees"
                 value={formatStatValue(stats?.active_employees)}
                 testId="stat-active-employees"
@@ -1232,7 +1230,7 @@ export default function AdminDashboard() {
                 onClick={() => goToUsersFilter("active_employees")}
               />
               <StatCard
-                icon={DoorClosed}
+                icon={UserX}
                 label="Inactive employees"
                 value={formatStatValue(stats?.inactive_employees)}
                 testId="stat-inactive-employees"
@@ -1240,7 +1238,7 @@ export default function AdminDashboard() {
                 onClick={() => goToUsersFilter("inactive_employees")}
               />
               <StatCard
-                icon={Handshake}
+                icon={UserCheck}
                 label="Active clients"
                 value={formatStatValue(stats?.active_clients)}
                 testId="stat-active-clients"
@@ -1248,15 +1246,15 @@ export default function AdminDashboard() {
                 onClick={() => goToUsersFilter("active_clients")}
               />
               <StatCard
-                icon={Snowflake}
+                icon={UserX}
                 label="Inactive clients"
                 value={formatStatValue(stats?.inactive_clients)}
                 testId="stat-inactive-clients"
-                accent="bg-cyan-50 text-cyan-900"
+                accent="bg-rose-50 text-rose-900"
                 onClick={() => goToUsersFilter("inactive_clients")}
               />
               <StatCard
-                icon={OctagonX}
+                icon={PowerOff}
                 label="Dropped"
                 value={formatStatValue(stats?.dropped_clients)}
                 testId="stat-dropped-clients"
@@ -1264,11 +1262,11 @@ export default function AdminDashboard() {
                 onClick={() => goToUsersFilter("dropped_clients")}
               />
               <StatCard
-                icon={Flag}
+                icon={Inbox}
                 label="Open complaints"
                 value={formatStatValue(stats?.complaints_pending)}
                 testId="stat-complaints-open"
-                accent="bg-orange-50 text-orange-900"
+                accent="bg-rose-50 text-rose-900"
                 onClick={() => goToTab("complaints", { historyMode: "push" })}
               />
             </div>
