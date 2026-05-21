@@ -96,6 +96,14 @@ export function userAccountPath(userId) {
   return `/admin/users/${userId}`;
 }
 
+export function employeeDetailPath(userId) {
+  return `/admin/users/${userId}/employee`;
+}
+
+export function employeeBatchClientsPath(userId, batchId) {
+  return `/admin/users/${userId}/employee/batches/${batchId}`;
+}
+
 export function newConversationPath() {
   return "/chat/new-conversation";
 }

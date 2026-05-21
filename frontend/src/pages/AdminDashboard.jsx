@@ -36,6 +36,7 @@ import { useChat } from "@/context/ChatContext";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import Avatar from "@/components/Avatar";
+import PresenceLabel from "@/components/admin/PresenceLabel";
 import {
   adminChatTabBackTo,
   adminTabPath,
@@ -47,6 +48,7 @@ import {
   profilePath,
   resetPasswordPath,
   userAccountPath,
+  employeeDetailPath,
   userProfilePath,
 } from "@/lib/appRoutes";
 import ProfileQuickView from "@/components/ProfileQuickView";
@@ -790,8 +792,8 @@ export default function AdminDashboard() {
   }, []);
 
   const openUserDetail = useCallback((u) => {
-    navigate(userAccountPath(u.id), {
-      push: true,
+    const path = u.role === "employee" ? employeeDetailPath(u.id) : userAccountPath(u.id);
+    navigate(path, {
       state: { backTo: location.pathname },
     });
   }, [navigate, location.pathname]);
@@ -2009,10 +2011,7 @@ export default function AdminDashboard() {
                     }`}>{u.role}</span>
                   </div>
                   <div className="mt-3 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 gap-2 flex-wrap">
-                    <span className="inline-flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${onlineUsers[u.id] ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600"}`} />
-                      {onlineUsers[u.id] ? "Online" : "Offline"}  |  {u.status || "available"}
-                    </span>
+                    <PresenceLabel online={!!onlineUsers[u.id]} />
                     {u.role === "employee" && (
                       <span
                         className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${
@@ -2104,16 +2103,6 @@ export default function AdminDashboard() {
                         Reactivate
                       </Button>
                     )}
-                    {u.role !== "admin" && (
-                      <Button size="sm" variant="outline" className="rounded-full" onClick={() => navigate(resetPasswordPath(u.id))} data-testid={`users-reset-mobile-${u.id}`}>
-                        Reset
-                      </Button>
-                    )}
-                    {u.id !== user.id && (
-                      <Button size="sm" variant="outline" className="rounded-full" onClick={() => handleStartDirect(u)} data-testid={`users-chat-mobile-${u.id}`}>
-                        Chat
-                      </Button>
-                    )}
                     {u.id !== user.id && (u.role !== "admin" || adminCount > 1) && (
                       <Button
                         size="sm"
@@ -2138,7 +2127,7 @@ export default function AdminDashboard() {
                     <th className="text-left px-4 py-3">User</th>
                     <th className="text-left px-4 py-3">Phone</th>
                     <th className="text-left px-4 py-3">Role</th>
-                    <th className="text-left px-4 py-3">Active</th>
+                    <th className="text-left px-4 py-3">Status</th>
                     <th className="text-left px-4 py-3">Presence</th>
                     <th className="text-left px-4 py-3">Created by</th>
                     <th className="text-left px-4 py-3">Joined</th>
@@ -2193,10 +2182,7 @@ export default function AdminDashboard() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-2 text-xs">
-                          <span className={`h-2 w-2 rounded-full ${onlineUsers[u.id] ? "bg-emerald-500" : "bg-gray-300"}`} />
-                          {onlineUsers[u.id] ? "Online" : "Offline"}  |  {u.status || "available"}
-                        </span>
+                        <PresenceLabel online={!!onlineUsers[u.id]} />
                       </td>
                       <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">
                         {u.created_by
@@ -2281,29 +2267,6 @@ export default function AdminDashboard() {
                               data-testid={`users-reactivate-dropped-${u.id}`}
                             >
                               Reactivate
-                            </Button>
-                          )}
-                          {u.role === "client" && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="rounded-full"
-                              onClick={() => navigate(medicalPath("admin", u.id))}
-                              data-testid={`users-medical-${u.id}`}
-                            >
-                              <Stethoscope className="h-3.5 w-3.5 mr-1" />
-                              Medical
-                            </Button>
-                          )}
-                          {u.role !== "admin" && (
-                            <Button size="sm" variant="outline" className="rounded-full" onClick={() => navigate(resetPasswordPath(u.id))} data-testid={`users-reset-${u.id}`}>
-                              <KeyRound className="h-3.5 w-3.5 mr-1" />
-                              Reset
-                            </Button>
-                          )}
-                          {u.id !== user.id && (
-                            <Button size="sm" variant="outline" className="rounded-full" onClick={() => handleStartDirect(u)} data-testid={`users-chat-${u.id}`}>
-                              Chat
                             </Button>
                           )}
                           {u.id !== user.id && (u.role !== "admin" || adminCount > 1) && (

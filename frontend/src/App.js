@@ -14,6 +14,8 @@ import CreateAccountPage from "@/pages/CreateAccountPage";
 import MedicalProfilePage from "@/pages/MedicalProfilePage";
 import ResetPasswordPage from "@/pages/ResetPasswordPage";
 import UserAccountDetailPage from "@/pages/UserAccountDetailPage";
+import EmployeeDetailPage from "@/pages/EmployeeDetailPage";
+import EmployeeBatchClientsPage from "@/pages/EmployeeBatchClientsPage";
 import NewConversationPage from "@/pages/NewConversationPage";
 import DietPlanPage from "@/pages/DietPlanPage";
 import UserProfilePage from "@/pages/UserProfilePage";
@@ -216,6 +218,22 @@ function App() {
               element={
                 <Protected roles={["admin"]}>
                   <DietPlanPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/admin/users/:userId/employee/batches/:batchId"
+              element={
+                <Protected roles={["admin"]}>
+                  <EmployeeBatchClientsPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/admin/users/:userId/employee"
+              element={
+                <Protected roles={["admin"]}>
+                  <EmployeeDetailPage />
                 </Protected>
               }
             />

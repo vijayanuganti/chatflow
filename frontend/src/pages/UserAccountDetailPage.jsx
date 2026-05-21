@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import Avatar from "@/components/Avatar";
 import MobilePageShell from "@/components/layout/MobilePageShell";
-import { dietPlanPath, medicalPath, resetPasswordPath, resolveBackTo } from "@/lib/appRoutes";
+import { dietPlanPath, employeeDetailPath, medicalPath, resetPasswordPath, resolveBackTo } from "@/lib/appRoutes";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
@@ -47,6 +47,12 @@ export default function UserAccountDetailPage() {
   }, [load]);
 
   const user = data?.user;
+
+  useEffect(() => {
+    if (user?.role === "employee") {
+      navigate(employeeDetailPath(userId), { replace: true, state: location.state });
+    }
+  }, [user?.role, userId, navigate, location.state]);
   const clientStatus = user ? getClientStatus(user) : null;
 
   const setEmployeeActive = async (target, nextActive) => {
