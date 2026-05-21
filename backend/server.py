@@ -107,8 +107,16 @@ def _parse_optional_bytes_env(name: str) -> Optional[int]:
         return None
 
 
-MONGO_STORAGE_QUOTA_BYTES = _parse_optional_bytes_env("MONGO_STORAGE_QUOTA_BYTES")
-S3_STORAGE_QUOTA_BYTES = _parse_optional_bytes_env("S3_STORAGE_QUOTA_BYTES")
+# Atlas M0 / free tier and planned S3 Standard caps (override via env).
+_DEFAULT_MONGO_QUOTA_BYTES = 512 * 1024 * 1024  # 512 MB
+_DEFAULT_S3_QUOTA_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB
+
+MONGO_STORAGE_QUOTA_BYTES = (
+    _parse_optional_bytes_env("MONGO_STORAGE_QUOTA_BYTES") or _DEFAULT_MONGO_QUOTA_BYTES
+)
+S3_STORAGE_QUOTA_BYTES = (
+    _parse_optional_bytes_env("S3_STORAGE_QUOTA_BYTES") or _DEFAULT_S3_QUOTA_BYTES
+)
 
 
 def _public_url_to_s3_key(url: Optional[str]) -> Optional[str]:
@@ -2087,6 +2095,8 @@ async def admin_storage_overview(_: dict = Depends(require_admin)):
         "database": {
             **mongo_detail,
             **_pack_storage_used_free(mongo_used, MONGO_STORAGE_QUOTA_BYTES),
+            "provider": "MongoDB Atlas",
+            "capacity_label": "512 MB",
         },
         "object_storage": {
             "configured": bool(S3_BUCKET),
@@ -2096,11 +2106,10 @@ async def admin_storage_overview(_: dict = Depends(require_admin)):
             "used_bytes": float(s3_used_int) if s3_used_int is not None else None,
             **({"error": s3_error} if s3_error else {}),
             **s3_pack,
+            "provider": "Amazon Web Services (AWS) S3",
+            "capacity_label": "5 GB",
+            "storage_class": "S3 Standard",
         },
-        "quota_hint": (
-            "Set MONGO_STORAGE_QUOTA_BYTES and/or S3_STORAGE_QUOTA_BYTES (bytes) to show free space, "
-            "e.g. Atlas 512MB → 536870912."
-        ),
     }
 
 

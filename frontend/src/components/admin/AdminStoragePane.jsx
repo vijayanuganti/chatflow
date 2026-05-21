@@ -66,8 +66,7 @@ export default function AdminStoragePane({
           Storage & cleanup
         </h1>
         <p className="text-gray-500 dark:text-gray-400 mt-1 max-w-2xl text-sm">
-          MongoDB database footprint and S3 uploads bucket usage. Set quota env vars on the server to
-          show total capacity and free space.
+          MongoDB Atlas (512 MB) and AWS S3 Standard (5 GB) capacity versus current usage.
         </p>
       </div>
 
@@ -81,7 +80,9 @@ export default function AdminStoragePane({
       {storage && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl">
           <StorageRingCard
-            title="MongoDB Storage"
+            title={storage.database?.provider || "MongoDB Atlas"}
+            subtitle={storage.database?.capacity_label || "512 MB"}
+            totalLabel={storage.database?.capacity_label || "512 MB"}
             icon={Database}
             usedBytes={storage.database?.used_bytes}
             quotaBytes={storage.database?.quota_bytes}
@@ -95,7 +96,13 @@ export default function AdminStoragePane({
             testId="storage-ring-mongodb"
           />
           <StorageRingCard
-            title="S3 Storage"
+            title={storage.object_storage?.provider || "Amazon Web Services (AWS) S3"}
+            subtitle={
+              storage.object_storage?.storage_class
+                ? `${storage.object_storage.storage_class} · ${storage.object_storage?.capacity_label || "5 GB"}`
+                : storage.object_storage?.capacity_label || "5 GB"
+            }
+            totalLabel={storage.object_storage?.capacity_label || "5 GB"}
             icon={Cloud}
             usedBytes={storage.object_storage?.used_bytes}
             quotaBytes={storage.object_storage?.quota_bytes}

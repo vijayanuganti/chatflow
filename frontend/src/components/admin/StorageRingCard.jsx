@@ -10,9 +10,16 @@ export function formatStorageBytes(n) {
   if (n == null || Number.isNaN(Number(n))) return "—";
   const v = Number(n);
   if (v < 1024) return `${Math.round(v)} B`;
-  if (v < 1024 ** 2) return `${(v / 1024).toFixed(1)} KB`;
-  if (v < 1024 ** 3) return `${(v / 1024 ** 2).toFixed(2)} MB`;
-  return `${(v / 1024 ** 3).toFixed(2)} GB`;
+  if (v < 1024 ** 2) {
+    const kb = v / 1024;
+    return Number.isInteger(kb) ? `${kb} KB` : `${kb.toFixed(1)} KB`;
+  }
+  if (v < 1024 ** 3) {
+    const mb = v / 1024 ** 2;
+    return Math.abs(mb - Math.round(mb)) < 0.05 ? `${Math.round(mb)} MB` : `${mb.toFixed(2)} MB`;
+  }
+  const gb = v / 1024 ** 3;
+  return Math.abs(gb - Math.round(gb)) < 0.05 ? `${Math.round(gb)} GB` : `${gb.toFixed(2)} GB`;
 }
 
 function formatUpdatedTime(iso) {
@@ -114,9 +121,11 @@ function DetailRow({ label, value, dotColor }) {
 
 export default function StorageRingCard({
   title,
+  subtitle,
   icon: Icon,
   usedBytes,
   quotaBytes,
+  totalLabel,
   freeBytes,
   percentUsed,
   error,
@@ -168,7 +177,14 @@ export default function StorageRingCard({
           {Icon ? (
             <Icon className="h-5 w-5 shrink-0 text-[#064e3b] dark:text-emerald-400" strokeWidth={2} />
           ) : null}
-          <span className="font-semibold text-[13px] text-[#1A1A2E] dark:text-gray-100 truncate">{title}</span>
+          <div className="min-w-0">
+            <span className="font-semibold text-[13px] text-[#1A1A2E] dark:text-gray-100 truncate block">{title}</span>
+            {subtitle ? (
+              <span className="text-[10px] text-[#6B7280] dark:text-gray-400 truncate block">
+                Storage capacity: {subtitle}
+              </span>
+            ) : null}
+          </div>
         </div>
         <button
           type="button"
@@ -228,7 +244,13 @@ export default function StorageRingCard({
         )}
 
         <div className="w-full mt-4 max-w-[240px]">
-          <DetailRow label="Total" value={quotaBytes != null ? formatStorageBytes(quotaBytes) : "—"} />
+          <DetailRow
+            label="Total"
+            value={
+              totalLabel
+              || (quotaBytes != null ? formatStorageBytes(quotaBytes) : "—")
+            }
+          />
           <DetailRow
             label="Used"
             value={formatStorageBytes(usedBytes)}
