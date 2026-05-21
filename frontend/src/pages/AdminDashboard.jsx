@@ -1894,11 +1894,11 @@ export default function AdminDashboard() {
 
         {tab === "users" && (
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto" data-testid="admin-users-pane">
-            <div className="mb-4 sm:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="mb-4 sm:mb-6 flex flex-col gap-3">
               <div className="flex items-center justify-between gap-3">
                 <h1 className="font-display text-2xl sm:text-3xl font-semibold dark:text-gray-100">Users</h1>
                 <Button
-                  className="rounded-full bg-emerald-900 hover:bg-emerald-950 sm:hidden"
+                  className="rounded-full bg-emerald-900 hover:bg-emerald-950 md:hidden"
                   onClick={() =>
                   navigate(createAccountPath("admin"), {
                     push: true,
@@ -1910,18 +1910,38 @@ export default function AdminDashboard() {
                 >
                   <UserPlus className="h-4 w-4 mr-1" /> New
                 </Button>
+                <Button
+                  className="rounded-full bg-emerald-900 hover:bg-emerald-950 hidden md:inline-flex"
+                  onClick={() =>
+                  navigate(createAccountPath("admin"), {
+                    push: true,
+                    state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/users" },
+                  })
+                }
+                  data-testid="users-create-account-btn"
+                >
+                  <UserPlus className="h-4 w-4 mr-1.5" />
+                  New account
+                </Button>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex flex-wrap gap-1.5 w-full" data-testid="users-role-filter">
+              {/* Mobile: WhatsApp-style horizontal filter chips */}
+              <div
+                className="md:hidden sticky top-0 z-10 -mx-4 bg-gray-50/95 px-4 pb-2 pt-0 backdrop-blur dark:bg-gray-950/95"
+                data-testid="users-role-filter-mobile-scroll"
+              >
+                <div
+                  className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  data-testid="users-role-filter"
+                >
                   {USERS_LIST_TABS.map((opt) => (
                     <button
                       key={opt.id}
                       type="button"
                       onClick={() => setUsersRoleFilter(opt.id)}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs whitespace-nowrap touch-manipulation ${
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-2 text-xs whitespace-nowrap touch-manipulation ${
                         usersRoleFilter === opt.id
-                          ? "border-emerald-800 bg-emerald-900 text-white"
-                          : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                          ? "border-emerald-800 bg-emerald-900 text-white shadow-sm"
+                          : "border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
                       }`}
                       data-testid={`users-role-filter-${opt.id}`}
                     >
@@ -1934,19 +1954,29 @@ export default function AdminDashboard() {
                     </button>
                   ))}
                 </div>
-                <Button
-                  className="rounded-full bg-emerald-900 hover:bg-emerald-950 hidden sm:inline-flex"
-                  onClick={() =>
-                  navigate(createAccountPath("admin"), {
-                    push: true,
-                    state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/users" },
-                  })
-                }
-                  data-testid="users-create-account-btn"
-                >
-                  <UserPlus className="h-4 w-4 mr-1.5" />
-                  New account
-                </Button>
+              </div>
+              {/* Desktop: wrapped filter chips */}
+              <div className="hidden md:flex flex-wrap gap-1.5" data-testid="users-role-filter-desktop">
+                {USERS_LIST_TABS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setUsersRoleFilter(opt.id)}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs whitespace-nowrap touch-manipulation ${
+                      usersRoleFilter === opt.id
+                        ? "border-emerald-800 bg-emerald-900 text-white"
+                        : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+                    }`}
+                    data-testid={`users-role-filter-desktop-${opt.id}`}
+                  >
+                    {opt.label}
+                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
+                      usersRoleFilter === opt.id ? "bg-white/20" : "bg-gray-100 dark:bg-gray-800"
+                    }`}>
+                      {usersTabCounts[opt.id] ?? 0}
+                    </span>
+                  </button>
+                ))}
               </div>
             </div>
             <div className="md:hidden space-y-3">
