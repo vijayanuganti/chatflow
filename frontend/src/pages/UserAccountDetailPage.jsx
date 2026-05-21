@@ -17,6 +17,7 @@ import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 import SharedMediaSection from "@/components/SharedMediaSection";
+import { getClientStatus } from "@/lib/accountStatus";
 
 export default function UserAccountDetailPage() {
   const { userId } = useParams();
@@ -46,15 +47,38 @@ export default function UserAccountDetailPage() {
   }, [load]);
 
   const user = data?.user;
+  const clientStatus = user ? getClientStatus(user) : null;
 
-  const toggleActive = async (target, nextActive) => {
-    if (!target || target.role === "admin") return;
+  const setEmployeeActive = async (target, nextActive) => {
+    if (!target || target.role !== "employee") return;
+    if (!window.confirm(
+      nextActive
+        ? `Activate ${target.full_name}?`
+        : `Deactivate ${target.full_name}? They will lose login access.`,
+    )) return;
     setToggleBusy(true);
     try {
       await api.post(`/admin/users/${target.id}/active`, { is_active: nextActive });
-      toast.success(
-        nextActive ? `${target.full_name} reactivated` : `${target.full_name} marked inactive`,
-      );
+      toast.success(nextActive ? `${target.full_name} activated` : `${target.full_name} deactivated`);
+      await load();
+    } catch (err) {
+      toast.error(formatApiError(err));
+    } finally {
+      setToggleBusy(false);
+    }
+  };
+
+  const setClientLifecycle = async (target, status) => {
+    if (!target || target.role !== "client") return;
+    const verb = status === "dropped" ? "drop" : status === "active" ? "reactivate" : "mark inactive";
+    if (!window.confirm(`${verb} ${target.full_name}?`)) return;
+    setToggleBusy(true);
+    try {
+      await api.post(`/admin/users/${target.id}/active`, {
+        client_status: status,
+        is_active: status === "active",
+      });
+      toast.success(`${target.full_name} updated`);
       await load();
     } catch (err) {
       toast.error(formatApiError(err));
@@ -84,6 +108,7 @@ export default function UserAccountDetailPage() {
               <div className="font-display font-semibold text-lg truncate">{user.full_name}</div>
               <div className="text-xs text-gray-500 truncate">
                 @{user.username} · <span className="capitalize">{user.role}</span>
+                {user.role === "client" && clientStatus ? ` · ${clientStatus}` : ""}
               </div>
             </div>
           </div>
@@ -137,14 +162,13 @@ export default function UserAccountDetailPage() {
                 )
               }
             />
-            {user.role !== "admin" && (
+            {user.role === "employee" && (
               <DetailCard
-                label="Active status"
+                label="Employee status"
                 value={
                   user.is_active === false ? (
                     <span className="inline-flex items-center gap-1 text-rose-700">
-                      <PowerOff className="h-4 w-4" /> Inactive{" "}
-                      {user.inactive_at ? `· ${new Date(user.inactive_at).toLocaleDateString()}` : ""}
+                      <PowerOff className="h-4 w-4" /> Inactive
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-emerald-800">
@@ -152,6 +176,12 @@ export default function UserAccountDetailPage() {
                     </span>
                   )
                 }
+              />
+            )}
+            {user.role === "client" && (
+              <DetailCard
+                label="Client status"
+                value={<span className="capitalize">{clientStatus}</span>}
               />
             )}
           </div>
@@ -202,36 +232,70 @@ export default function UserAccountDetailPage() {
               >
                 <KeyRound className="h-4 w-4 mr-1.5" /> Reset password
               </Button>
-              {user.role === "client" &&
+              {user.role === "employee" &&
                 (user.is_active === false ? (
                   <Button
-                    onClick={() => toggleActive(user, true)}
+                    onClick={() => setEmployeeActive(user, true)}
                     disabled={toggleBusy}
                     variant="outline"
-                    className="w-full rounded-full h-11 text-emerald-800 border-emerald-200 hover:bg-emerald-50"
-                    data-testid="user-detail-activate"
+                    className="w-full rounded-full h-11 text-emerald-800 border-emerald-200"
+                    data-testid="user-detail-activate-employee"
                   >
-                    <Power className="h-4 w-4 mr-1.5" /> Reactivate client
+                    <Power className="h-4 w-4 mr-1.5" /> Activate employee
                   </Button>
                 ) : (
                   <Button
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Mark ${user.full_name} as inactive? They will lose login access but their chat history is preserved.`,
-                        )
-                      ) {
-                        toggleActive(user, false);
-                      }
-                    }}
+                    onClick={() => setEmployeeActive(user, false)}
                     disabled={toggleBusy}
                     variant="outline"
-                    className="w-full rounded-full h-11 text-rose-700 border-rose-200 hover:bg-rose-50"
-                    data-testid="user-detail-deactivate"
+                    className="w-full rounded-full h-11 text-rose-700 border-rose-200"
+                    data-testid="user-detail-deactivate-employee"
                   >
-                    <PowerOff className="h-4 w-4 mr-1.5" /> Deactivate client
+                    <PowerOff className="h-4 w-4 mr-1.5" /> Deactivate employee
                   </Button>
                 ))}
+              {user.role === "client" && clientStatus === "active" && (
+                <Button
+                  onClick={() => setClientLifecycle(user, "dropped")}
+                  disabled={toggleBusy}
+                  variant="outline"
+                  className="w-full rounded-full h-11 text-rose-700 border-rose-200 sm:col-span-2"
+                  data-testid="user-detail-drop-client"
+                >
+                  Drop client
+                </Button>
+              )}
+              {user.role === "client" && clientStatus === "inactive" && (
+                <>
+                  <Button
+                    onClick={() => setClientLifecycle(user, "active")}
+                    disabled={toggleBusy}
+                    className="w-full rounded-full h-11 bg-emerald-900 hover:bg-emerald-950"
+                    data-testid="user-detail-activate"
+                  >
+                    Reactivate client
+                  </Button>
+                  <Button
+                    onClick={() => setClientLifecycle(user, "dropped")}
+                    disabled={toggleBusy}
+                    variant="outline"
+                    className="w-full rounded-full h-11 text-rose-700 border-rose-200"
+                    data-testid="user-detail-drop-client"
+                  >
+                    Drop client
+                  </Button>
+                </>
+              )}
+              {user.role === "client" && clientStatus === "dropped" && (
+                <Button
+                  onClick={() => setClientLifecycle(user, "active")}
+                  disabled={toggleBusy}
+                  className="w-full rounded-full h-11 bg-emerald-900 hover:bg-emerald-950 sm:col-span-2"
+                  data-testid="user-detail-reactivate-dropped"
+                >
+                  Reactivate client
+                </Button>
+              )}
             </div>
           )}
         </div>

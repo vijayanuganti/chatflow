@@ -654,7 +654,11 @@ export default function ChatApp() {
       // If the other party is a client and they've been deactivated, hide
       // the conversation. Their messages are still in the DB; an admin can
       // re-activate them anytime to make the thread reappear.
-      if (c.other_user?.role === "client" && c.other_user?.is_active === false) {
+      if (c.other_user?.role === "client") {
+        const cs = c.other_user?.client_status || (c.other_user?.is_active === false ? "inactive" : "active");
+        if (cs !== "active") return false;
+      }
+      if (c.other_user?.role === "employee" && c.other_user?.is_active === false) {
         return false;
       }
       return true;

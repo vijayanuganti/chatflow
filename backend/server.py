@@ -15,7 +15,7 @@ import shutil
 import asyncio
 import bcrypt
 import jwt
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from typing import List, Optional, Dict, Set, Tuple, Any
 
 import boto3
@@ -56,6 +56,9 @@ JWT_SECRET = _get_env("JWT_SECRET")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24 * 7
 MIN_PASSWORD_LENGTH = int(os.environ.get("MIN_PASSWORD_LENGTH", "6"))
+CLIENT_STATUSES = ("active", "inactive", "dropped")
+BATCH_STATUSES = ("active", "inactive", "dropped")
+BATCH_PERIOD_DAYS = 90
 
 
 # ---------- Browser binding (SPA sends per-profile id; JWT may include `bid`) ----------
@@ -680,6 +683,58 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def today_date_str() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def batch_end_date_from_start(start_date: str) -> str:
+    try:
+        start = date.fromisoformat(str(start_date)[:10])
+    except ValueError:
+        start = datetime.now(timezone.utc).date()
+    return (start + timedelta(days=BATCH_PERIOD_DAYS)).isoformat()
+
+
+def normalize_client_status(user: dict) -> str:
+    if user.get("role") != "client":
+        return "active"
+    cs = (user.get("client_status") or "").strip().lower()
+    if cs in CLIENT_STATUSES:
+        return cs
+    if user.get("is_active") is False:
+        return "inactive"
+    return "active"
+
+
+def account_can_sign_in(user: dict) -> bool:
+    if user.get("role") == "client":
+        return normalize_client_status(user) == "active" and user.get("is_active") is not False
+    if user.get("is_active") is False:
+        return False
+    return True
+
+
+def enrich_batch_doc(batch: dict) -> dict:
+    b = dict(batch)
+    status = (b.get("status") or "active").strip().lower()
+    if status not in BATCH_STATUSES:
+        status = "active"
+    b["status"] = status
+    start = (b.get("start_date") or (b.get("created_at") or "")[:10] or today_date_str())[:10]
+    b["start_date"] = start
+    end = (b.get("end_date") or batch_end_date_from_start(start))[:10]
+    b["end_date"] = end
+    days_remaining = None
+    if status == "active":
+        try:
+            end_d = date.fromisoformat(end)
+            days_remaining = max(0, (end_d - datetime.now(timezone.utc).date()).days)
+        except ValueError:
+            days_remaining = None
+    b["days_remaining"] = days_remaining
+    return b
+
+
 def direct_conv_id(user_a: str, user_b: str) -> str:
     pair = sorted([user_a, user_b])
     return f"direct_{pair[0]}_{pair[1]}"
@@ -689,6 +744,8 @@ def clean_user(u: dict) -> dict:
     u = dict(u)
     u.pop("_id", None)
     u.pop("password_hash", None)
+    if u.get("role") == "client":
+        u["client_status"] = normalize_client_status(u)
     return u
 
 
@@ -906,7 +963,26 @@ class PermissionUpdateBody(BaseModel):
 
 
 class ActiveStatusBody(BaseModel):
-    is_active: bool
+    is_active: Optional[bool] = None
+    client_status: Optional[str] = None
+
+    @validator("client_status")
+    def valid_client_status(cls, v):
+        if v is None:
+            return v
+        if v not in CLIENT_STATUSES:
+            raise ValueError(f"client_status must be one of {CLIENT_STATUSES}")
+        return v
+
+
+class BatchStatusBody(BaseModel):
+    status: str
+
+    @validator("status")
+    def valid_batch_status(cls, v):
+        if v not in BATCH_STATUSES:
+            raise ValueError(f"status must be one of {BATCH_STATUSES}")
+        return v
 
 
 class ProfileBody(BaseModel):
@@ -1156,6 +1232,7 @@ async def _create_user_internal(
             raise HTTPException(status_code=400, detail="Selected batch is full")
 
         doc["employee_id"] = employee_id
+        doc["client_status"] = "active"
         doc["batch_id"] = batch_id
 
         # Medical profile is captured for clients only. Admins (or permitted
@@ -1275,8 +1352,8 @@ async def login(body: LoginBody, request: Request):
         )
         raise HTTPException(status_code=401, detail="Invalid phone/username or password")
 
-    # Inactive accounts can't sign in (admin keeps their data but they lose access).
-    if user.get("is_active") is False:
+    # Inactive / dropped accounts can't sign in (admin keeps their data but they lose access).
+    if not account_can_sign_in(user):
         await log_audit(
             actor_user_id=user["id"],
             action="auth.login_blocked_inactive",
@@ -1764,55 +1841,87 @@ async def admin_set_active_status(
     body: ActiveStatusBody,
     actor: dict = Depends(require_admin),
 ):
-    """Activate / deactivate a client (or any non-admin user).
-
-    Deactivated users cannot sign in, but their data (messages, batch
-    membership) is preserved so an admin can review or re-activate later.
-    """
+    """Activate / deactivate employees, or set client lifecycle (active / inactive / dropped)."""
     target = await db.users.find_one({"id": user_id})
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
     if target.get("role") == "admin":
         raise HTTPException(status_code=400, detail="Admin accounts cannot be deactivated this way")
 
-    is_active = bool(body.is_active)
-    update_fields: Dict[str, object] = {"is_active": is_active}
-    if is_active:
+    if body.is_active is None and body.client_status is None:
+        raise HTTPException(status_code=400, detail="Provide is_active and/or client_status")
+
+    update_fields: Dict[str, object] = {}
+    role = target.get("role")
+
+    if role == "client":
+        if body.client_status is not None:
+            cs = body.client_status
+            update_fields["client_status"] = cs
+            is_active = cs == "active"
+        elif body.is_active is not None:
+            is_active = bool(body.is_active)
+            update_fields["client_status"] = "active" if is_active else "inactive"
+        else:
+            raise HTTPException(status_code=400, detail="Invalid status update")
+        update_fields["is_active"] = is_active
+    else:
+        if body.is_active is None:
+            raise HTTPException(status_code=400, detail="is_active is required for employees")
+        is_active = bool(body.is_active)
+        update_fields["is_active"] = is_active
+
+    if update_fields.get("is_active"):
         update_fields["inactive_at"] = None
         update_fields["inactive_by"] = None
         update_fields["reactivated_at"] = now_iso()
         update_fields["reactivated_by"] = actor["id"]
+        if role == "client" and "client_status" not in update_fields:
+            update_fields["client_status"] = "active"
     else:
         update_fields["inactive_at"] = now_iso()
         update_fields["inactive_by"] = actor["id"]
 
     await db.users.update_one({"id": user_id}, {"$set": update_fields})
 
+    action = "account.activate" if update_fields.get("is_active") else "account.deactivate"
+    if role == "client" and update_fields.get("client_status") == "dropped":
+        action = "account.drop"
     await log_audit(
         actor_user_id=actor["id"],
-        action="account.activate" if is_active else "account.deactivate",
+        action=action,
         target_user_id=user_id,
         metadata={
-            "role": target.get("role"),
+            "role": role,
             "username": target.get("username"),
+            "client_status": update_fields.get("client_status"),
         },
     )
-    return {"message": "Account activated" if is_active else "Account deactivated"}
+    msg = "Account activated" if update_fields.get("is_active") else "Account updated"
+    if role == "client" and update_fields.get("client_status") == "dropped":
+        msg = "Client dropped"
+    elif role == "client" and update_fields.get("client_status") == "inactive":
+        msg = "Client marked inactive"
+    elif not update_fields.get("is_active"):
+        msg = "Account deactivated"
+    return {"message": msg, "client_status": update_fields.get("client_status"), "is_active": update_fields.get("is_active")}
 
 
 @api_router.get("/admin/clients")
 async def admin_clients(
     _: dict = Depends(require_admin),
-    status_filter: Optional[str] = Query(None, alias="status", pattern="^(active|inactive)$"),
+    status_filter: Optional[str] = Query(
+        None,
+        alias="status",
+        pattern="^(active|inactive|dropped)$",
+    ),
 ):
-    """List clients, optionally filtered to only active or only inactive."""
+    """List clients, optionally filtered by client_status."""
     query: Dict[str, object] = {"role": "client"}
-    if status_filter == "active":
-        query["is_active"] = {"$ne": False}
-    elif status_filter == "inactive":
-        query["is_active"] = False
+    if status_filter in CLIENT_STATUSES:
+        query["client_status"] = status_filter
     clients = await db.users.find(query, {"_id": 0, "password_hash": 0}).sort("created_at", -1).to_list(2000)
-    return clients
+    return [clean_user(c) for c in clients]
 
 
 @api_router.get("/admin/audit-logs")
@@ -1851,10 +1960,19 @@ async def admin_stats(user: dict = Depends(require_admin)):
         "employees": await db.users.count_documents({"role": "employee"}),
         "clients": await db.users.count_documents({"role": "client"}),
         "active_clients": await db.users.count_documents(
-            {"role": "client", "is_active": {"$ne": False}}
+            {"role": "client", "client_status": "active"}
         ),
         "inactive_clients": await db.users.count_documents(
-            {"role": "client", "is_active": False}
+            {"role": "client", "client_status": "inactive"}
+        ),
+        "dropped_clients": await db.users.count_documents(
+            {"role": "client", "client_status": "dropped"}
+        ),
+        "active_employees": await db.users.count_documents(
+            {"role": "employee", "is_active": {"$ne": False}}
+        ),
+        "inactive_employees": await db.users.count_documents(
+            {"role": "employee", "is_active": False}
         ),
         "admins": await db.users.count_documents({"role": "admin"}),
         "conversations": await db.conversations.count_documents({}),
@@ -2146,13 +2264,37 @@ async def admin_employee_batches(employee_id: str, user: dict = Depends(require_
             })
 
         out_batches.append({
-            **b,
+            **enrich_batch_doc(b),
             "client_count": len(b.get("client_ids") or []),
             "max_clients": max_clients,
             "clients": client_list,
         })
 
     return {"employee": clean_user(employee), "batches": out_batches}
+
+
+@api_router.patch("/admin/batches/{batch_id}/status")
+async def admin_update_batch_status(
+    batch_id: str,
+    body: BatchStatusBody,
+    actor: dict = Depends(require_admin),
+):
+    """Mark a batch active, inactive, or dropped (admin only)."""
+    batch = await db.batches.find_one({"id": batch_id}, {"_id": 0})
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    status = body.status
+    await db.batches.update_one(
+        {"id": batch_id},
+        {"$set": {"status": status, "status_updated_at": now_iso(), "status_updated_by": actor["id"]}},
+    )
+    await log_audit(
+        actor_user_id=actor["id"],
+        action="batch.status_update",
+        metadata={"batch_id": batch_id, "status": status, "employee_id": batch.get("employee_id")},
+    )
+    updated = await db.batches.find_one({"id": batch_id}, {"_id": 0})
+    return enrich_batch_doc(updated or {})
 
 
 # ---------- Batches ----------
@@ -2186,12 +2328,16 @@ async def create_batch(body: CreateBatchBody, actor: dict = Depends(require_admi
     if max_clients < 1 or max_clients > 500:
         raise HTTPException(status_code=400, detail="max_clients must be between 1 and 500")
 
+    start_date = today_date_str()
     batch = {
         "id": f"batch_{uuid.uuid4().hex}",
         "name": name[:80],
         "employee_id": employee_id,
         "client_ids": [],
         "max_clients": max_clients,
+        "start_date": start_date,
+        "end_date": batch_end_date_from_start(start_date),
+        "status": "active",
         "created_at": now_iso(),
         "created_by": actor["id"],
     }
@@ -3645,6 +3791,20 @@ async def _migrate_user_documents() -> None:
         {"is_active": {"$exists": False}},
         {"$set": {"is_active": True, "inactive_at": None, "inactive_by": None}},
     )
+    async for u in db.users.find({"role": "client", "client_status": {"$exists": False}}, {"id": 1, "is_active": 1}):
+        cs = "inactive" if u.get("is_active") is False else "active"
+        await db.users.update_one({"id": u["id"]}, {"$set": {"client_status": cs}})
+    async for b in db.batches.find({}, {"id": 1, "created_at": 1, "start_date": 1, "status": 1, "end_date": 1}):
+        patch: Dict[str, object] = {}
+        if not b.get("status"):
+            patch["status"] = "active"
+        start = (b.get("start_date") or (b.get("created_at") or "")[:10] or today_date_str())[:10]
+        if not b.get("start_date"):
+            patch["start_date"] = start
+        if not b.get("end_date"):
+            patch["end_date"] = batch_end_date_from_start(start)
+        if patch:
+            await db.batches.update_one({"id": b["id"]}, {"$set": patch})
     # Medical profile defaults for existing client accounts (admin can populate later).
     await db.users.update_many(
         {"role": "client", "medical_profile": {"$exists": False}},

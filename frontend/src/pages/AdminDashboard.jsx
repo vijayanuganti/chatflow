@@ -82,6 +82,14 @@ import {
 } from "@/lib/adminMobileNav";
 import { useOptimisticMessageSend } from "@/hooks/useOptimisticMessageSend";
 import {
+  USERS_LIST_TABS,
+  BATCH_LIST_TABS,
+  filterUserForTab,
+  countUsersForTab,
+  filterBatchForTab,
+  getClientStatus,
+} from "@/lib/accountStatus";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -235,7 +243,9 @@ export default function AdminDashboard() {
   const [activityData, setActivityData] = useState(null);
   const [permissionSavingId, setPermissionSavingId] = useState(null);
   const [activeSavingId, setActiveSavingId] = useState(null);
-  const [usersRoleFilter, setUsersRoleFilter] = useState("all"); // all | employees | clients | inactive_clients
+  const [usersRoleFilter, setUsersRoleFilter] = useState("all");
+  const [batchStatusTab, setBatchStatusTab] = useState("active");
+  const [batchStatusSavingId, setBatchStatusSavingId] = useState(null);
   const [listSelection, setListSelection] = useState(null);
   const [quickView, setQuickView] = useState(null);
   const listScrollRef = useRef(null);
@@ -728,33 +738,80 @@ export default function AdminDashboard() {
     });
   }, [navigate, tab]);
 
-  const toggleActive = useCallback(async (target, nextActive) => {
-    if (!target || target.role === "admin") return;
+  const refreshStats = useCallback(() => {
+    api.get("/admin/stats").then((r) => setStats(r.data)).catch(() => {});
+  }, []);
+
+  const setEmployeeActive = useCallback(async (target, nextActive) => {
+    if (!target || target.role !== "employee") return;
+    if (!window.confirm(
+      nextActive
+        ? `Activate ${target.full_name}? They will be able to sign in again.`
+        : `Deactivate ${target.full_name}? They will lose login access but their data is preserved.`,
+    )) return;
     setActiveSavingId(target.id);
     try {
       await api.post(`/admin/users/${target.id}/active`, { is_active: nextActive });
       setUsers((prev) => prev.map((u) => (
         u.id === target.id
-          ? {
-              ...u,
-              is_active: nextActive,
-              inactive_at: nextActive ? null : new Date().toISOString(),
-            }
+          ? { ...u, is_active: nextActive, inactive_at: nextActive ? null : new Date().toISOString() }
           : u
       )));
-      // refresh overview stats so the active/inactive counters stay accurate
-      api.get("/admin/stats").then((r) => setStats(r.data)).catch(() => {});
-      toast.success(
-        nextActive
-          ? `${target.full_name} reactivated`
-          : `${target.full_name} marked inactive`,
-      );
+      setEmployees((prev) => prev.map((u) => (
+        u.id === target.id ? { ...u, is_active: nextActive } : u
+      )));
+      refreshStats();
+      toast.success(nextActive ? `${target.full_name} activated` : `${target.full_name} deactivated`);
     } catch (err) {
       toast.error(formatApiError(err));
     } finally {
       setActiveSavingId(null);
     }
-  }, []);
+  }, [refreshStats]);
+
+  const setClientStatus = useCallback(async (target, clientStatus) => {
+    if (!target || target.role !== "client") return;
+    const labels = { active: "reactivate", inactive: "mark inactive", dropped: "drop" };
+    if (!window.confirm(`${labels[clientStatus] || "Update"} ${target.full_name}?`)) return;
+    setActiveSavingId(target.id);
+    try {
+      await api.post(`/admin/users/${target.id}/active`, {
+        client_status: clientStatus,
+        is_active: clientStatus === "active",
+      });
+      setUsers((prev) => prev.map((u) => (
+        u.id === target.id
+          ? {
+              ...u,
+              client_status: clientStatus,
+              is_active: clientStatus === "active",
+              inactive_at: clientStatus === "active" ? null : new Date().toISOString(),
+            }
+          : u
+      )));
+      refreshStats();
+      const msg = clientStatus === "dropped" ? "dropped" : clientStatus === "active" ? "reactivated" : "marked inactive";
+      toast.success(`${target.full_name} ${msg}`);
+    } catch (err) {
+      toast.error(formatApiError(err));
+    } finally {
+      setActiveSavingId(null);
+    }
+  }, [refreshStats]);
+
+  const markBatchInactive = useCallback(async (batchId) => {
+    if (!window.confirm("Mark this batch as inactive? It will move to the Inactive Batches tab.")) return;
+    setBatchStatusSavingId(batchId);
+    try {
+      await api.patch(`/admin/batches/${batchId}/status`, { status: "inactive" });
+      if (selectedEmployee?.id) await loadEmployeeBatches(selectedEmployee.id);
+      toast.success("Batch marked inactive");
+    } catch (err) {
+      toast.error(formatApiError(err));
+    } finally {
+      setBatchStatusSavingId(null);
+    }
+  }, [selectedEmployee?.id, loadEmployeeBatches]);
 
   const togglePermission = useCallback(async (employee, nextValue) => {
     setPermissionSavingId(employee.id);
@@ -1055,13 +1112,31 @@ export default function AdminDashboard() {
     if (user?.id) loadCacheFromStorage(user.id);
   }, [loadOverview, tab, user?.id]);
 
-  const filterUsersForTab = useCallback((u) => {
-    if (usersRoleFilter === "all") return true;
-    if (usersRoleFilter === "employees") return u.role === "employee";
-    if (usersRoleFilter === "clients") return u.role === "client" && u.is_active !== false;
-    if (usersRoleFilter === "inactive_clients") return u.role === "client" && u.is_active === false;
-    return true;
-  }, [usersRoleFilter]);
+  const filterUsersForTab = useCallback(
+    (u) => filterUserForTab(u, usersRoleFilter),
+    [usersRoleFilter],
+  );
+
+  const usersTabCounts = useMemo(() => {
+    const counts = {};
+    USERS_LIST_TABS.forEach((t) => {
+      counts[t.id] = countUsersForTab(users, t.id);
+    });
+    return counts;
+  }, [users]);
+
+  const filteredEmployeeBatches = useMemo(
+    () => (employeeBatches || []).filter((b) => filterBatchForTab(b, batchStatusTab)),
+    [employeeBatches, batchStatusTab],
+  );
+
+  const batchTabCounts = useMemo(() => {
+    const counts = {};
+    BATCH_LIST_TABS.forEach((t) => {
+      counts[t.id] = (employeeBatches || []).filter((b) => filterBatchForTab(b, t.id)).length;
+    });
+    return counts;
+  }, [employeeBatches]);
 
   const usersById = useMemo(() => {
     const m = {};
@@ -1375,7 +1450,12 @@ export default function AdminDashboard() {
                     <Avatar name={e.full_name} avatarUrl={e.avatar_url} online={onlineUsers[e.id]} status={e.status} size={38} />
                     <div className="flex-1 min-w-0">
                       <div className="font-medium text-sm truncate dark:text-gray-100">{e.full_name}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">@{e.username}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        @{e.username}
+                        {e.is_active === false ? (
+                          <span className="ml-1 text-rose-600 dark:text-rose-400">· Inactive</span>
+                        ) : null}
+                      </div>
                     </div>
                   </button>
                 ))}
@@ -1405,17 +1485,63 @@ export default function AdminDashboard() {
                   New batch
                 </Button>
               </div>
+              {selectedEmployee ? (
+                <div className="flex flex-wrap gap-1.5 border-b border-gray-100 dark:border-gray-800 px-3 py-2" data-testid="batch-status-tabs">
+                  {BATCH_LIST_TABS.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setBatchStatusTab(t.id)}
+                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] ${
+                        batchStatusTab === t.id
+                          ? "border-emerald-800 bg-emerald-900 text-white"
+                          : "border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-400"
+                      }`}
+                      data-testid={`batch-tab-${t.id}`}
+                    >
+                      {t.label}
+                      <span className="tabular-nums opacity-80">{batchTabCounts[t.id] ?? 0}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {!selectedEmployee ? (
                   <div className="p-6 text-sm text-gray-400 dark:text-gray-500">Choose an employee to see batches.</div>
-                ) : employeeBatches.length === 0 ? (
-                  <div className="p-6 text-sm text-gray-400 dark:text-gray-500">No batches for this employee.</div>
+                ) : filteredEmployeeBatches.length === 0 ? (
+                  <div className="p-6 text-sm text-gray-400 dark:text-gray-500">No batches in this tab.</div>
                 ) : (
-                  employeeBatches.map((b) => (
+                  filteredEmployeeBatches.map((b) => (
                     <div key={b.id} className="border-b border-gray-100 dark:border-gray-800/60">
-                      <div className="px-4 py-3">
-                        <div className="font-medium dark:text-gray-100">{b.name}</div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400">{b.client_count || 0}/{b.max_clients || 20} clients</div>
+                      <div className="px-4 py-3 flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-medium dark:text-gray-100">{b.name}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">
+                            {b.client_count || 0}/{b.max_clients || 20} clients
+                            {b.status === "active" && b.days_remaining != null ? (
+                              <span className="ml-1">· {b.days_remaining} days left</span>
+                            ) : null}
+                          </div>
+                          {b.end_date ? (
+                            <div className="text-[10px] text-gray-400 mt-0.5">Ends {b.end_date}</div>
+                          ) : null}
+                        </div>
+                        {b.status === "active" ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="rounded-full text-xs shrink-0"
+                            disabled={batchStatusSavingId === b.id}
+                            onClick={() => void markBatchInactive(b.id)}
+                            data-testid={`batch-mark-inactive-${b.id}`}
+                          >
+                            {batchStatusSavingId === b.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              "Mark inactive"
+                            )}
+                          </Button>
+                        ) : null}
                       </div>
                       <div className="pb-2">
                         {(b.clients || []).map((c) => (
@@ -1841,7 +1967,7 @@ export default function AdminDashboard() {
 
             <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
               {(() => {
-                const inactive = users.filter((u) => u.role === "client" && u.is_active === false);
+                const inactive = users.filter((u) => u.role === "client" && getClientStatus(u) === "inactive");
                 if (inactive.length === 0) {
                   return (
                     <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500" data-testid="inactive-empty">
@@ -1895,7 +2021,7 @@ export default function AdminDashboard() {
                           <Button
                             size="sm"
                             className="rounded-full bg-emerald-900 hover:bg-emerald-950"
-                            onClick={() => toggleActive(u, true)}
+                            onClick={() => setClientStatus(u, "active")}
                             disabled={activeSavingId === u.id}
                             data-testid={`inactive-reactivate-${u.id}`}
                           >
@@ -2116,25 +2242,25 @@ export default function AdminDashboard() {
                 </Button>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                <div className="inline-flex rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden text-xs w-full sm:w-auto" data-testid="users-role-filter">
-                  {[
-                    { id: "all", label: "All" },
-                    { id: "employees", label: "Employees" },
-                    { id: "clients", label: "Clients" },
-                    { id: "inactive_clients", label: "Inactive Clients" },
-                  ].map((opt) => (
+                <div className="flex flex-wrap gap-1.5 w-full" data-testid="users-role-filter">
+                  {USERS_LIST_TABS.map((opt) => (
                     <button
                       key={opt.id}
                       type="button"
                       onClick={() => setUsersRoleFilter(opt.id)}
-                      className={`px-3 py-1.5 flex-1 sm:flex-none whitespace-nowrap ${
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs whitespace-nowrap touch-manipulation ${
                         usersRoleFilter === opt.id
-                          ? "bg-emerald-900 text-white"
-                          : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                          ? "border-emerald-800 bg-emerald-900 text-white"
+                          : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
                       }`}
                       data-testid={`users-role-filter-${opt.id}`}
                     >
                       {opt.label}
+                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
+                        usersRoleFilter === opt.id ? "bg-white/20" : "bg-gray-100 dark:bg-gray-800"
+                      }`}>
+                        {usersTabCounts[opt.id] ?? 0}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -2175,15 +2301,20 @@ export default function AdminDashboard() {
                       <span className={`h-2 w-2 rounded-full ${onlineUsers[u.id] ? "bg-emerald-500" : "bg-gray-300 dark:bg-gray-600"}`} />
                       {onlineUsers[u.id] ? "Online" : "Offline"}  |  {u.status || "available"}
                     </span>
-                    {u.role !== "admin" && (
+                    {u.role === "employee" && (
                       <span
                         className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${
                           u.is_active === false
-                            ? "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/15 dark:text-rose-200 dark:border-rose-500/30"
-                            : "bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-200 dark:border-emerald-500/30"
+                            ? "bg-rose-50 text-rose-700 border-rose-200"
+                            : "bg-emerald-50 text-emerald-800 border-emerald-200"
                         }`}
                       >
                         {u.is_active === false ? "Inactive" : "Active"}
+                      </span>
+                    )}
+                    {u.role === "client" && (
+                      <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border bg-gray-50 border-gray-200 capitalize">
+                        {getClientStatus(u)}
                       </span>
                     )}
                   </div>
@@ -2191,14 +2322,14 @@ export default function AdminDashboard() {
                     <Button size="sm" variant="outline" className="rounded-full" onClick={() => openUserDetail(u)} data-testid={`users-details-mobile-${u.id}`}>
                       Details
                     </Button>
-                    {u.role === "client" && (
+                    {u.role === "employee" && (
                       u.is_active === false ? (
                         <Button
                           size="sm"
                           className="rounded-full bg-emerald-900 hover:bg-emerald-950"
-                          onClick={() => toggleActive(u, true)}
+                          onClick={() => setEmployeeActive(u, true)}
                           disabled={activeSavingId === u.id}
-                          data-testid={`users-activate-mobile-${u.id}`}
+                          data-testid={`users-activate-employee-mobile-${u.id}`}
                         >
                           Activate
                         </Button>
@@ -2207,15 +2338,59 @@ export default function AdminDashboard() {
                           size="sm"
                           variant="outline"
                           className="rounded-full text-rose-700 border-rose-200"
-                          onClick={() => {
-                            if (window.confirm(`Mark ${u.full_name} as inactive?`)) toggleActive(u, false);
-                          }}
+                          onClick={() => setEmployeeActive(u, false)}
                           disabled={activeSavingId === u.id}
-                          data-testid={`users-deactivate-mobile-${u.id}`}
+                          data-testid={`users-deactivate-employee-mobile-${u.id}`}
                         >
                           Deactivate
                         </Button>
                       )
+                    )}
+                    {u.role === "client" && getClientStatus(u) === "active" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-full text-rose-700 border-rose-200"
+                        onClick={() => setClientStatus(u, "dropped")}
+                        disabled={activeSavingId === u.id}
+                        data-testid={`users-drop-mobile-${u.id}`}
+                      >
+                        Drop
+                      </Button>
+                    )}
+                    {u.role === "client" && getClientStatus(u) === "inactive" && (
+                      <>
+                        <Button
+                          size="sm"
+                          className="rounded-full bg-emerald-900 hover:bg-emerald-950"
+                          onClick={() => setClientStatus(u, "active")}
+                          disabled={activeSavingId === u.id}
+                          data-testid={`users-activate-mobile-${u.id}`}
+                        >
+                          Activate
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="rounded-full text-rose-700 border-rose-200"
+                          onClick={() => setClientStatus(u, "dropped")}
+                          disabled={activeSavingId === u.id}
+                          data-testid={`users-drop-inactive-mobile-${u.id}`}
+                        >
+                          Drop
+                        </Button>
+                      </>
+                    )}
+                    {u.role === "client" && getClientStatus(u) === "dropped" && (
+                      <Button
+                        size="sm"
+                        className="rounded-full bg-emerald-900 hover:bg-emerald-950"
+                        onClick={() => setClientStatus(u, "active")}
+                        disabled={activeSavingId === u.id}
+                        data-testid={`users-reactivate-dropped-mobile-${u.id}`}
+                      >
+                        Reactivate
+                      </Button>
                     )}
                     {u.role !== "admin" && (
                       <Button size="sm" variant="outline" className="rounded-full" onClick={() => navigate(resetPasswordPath(u.id))} data-testid={`users-reset-mobile-${u.id}`}>
@@ -2288,7 +2463,7 @@ export default function AdminDashboard() {
                       <td className="px-4 py-3">
                         {u.role === "admin" ? (
                           <span className="text-xs text-gray-400">-</span>
-                        ) : (
+                        ) : u.role === "employee" ? (
                           <span
                             className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${
                               u.is_active === false
@@ -2297,8 +2472,11 @@ export default function AdminDashboard() {
                             }`}
                             data-testid={`users-active-pill-${u.id}`}
                           >
-                            <span className={`h-1.5 w-1.5 rounded-full ${u.is_active === false ? "bg-rose-500" : "bg-emerald-500"}`} />
                             {u.is_active === false ? "Inactive" : "Active"}
+                          </span>
+                        ) : (
+                          <span className="inline-flex text-[11px] px-2 py-0.5 rounded-full border capitalize" data-testid={`users-active-pill-${u.id}`}>
+                            {getClientStatus(u)}
                           </span>
                         )}
                       </td>
@@ -2321,14 +2499,14 @@ export default function AdminDashboard() {
                           <Button size="sm" variant="outline" className="rounded-full" onClick={() => openUserDetail(u)} data-testid={`users-details-${u.id}`}>
                             Details
                           </Button>
-                          {u.role === "client" && (
+                          {u.role === "employee" && (
                             u.is_active === false ? (
                               <Button
                                 size="sm"
                                 className="rounded-full bg-emerald-900 hover:bg-emerald-950"
-                                onClick={() => toggleActive(u, true)}
+                                onClick={() => setEmployeeActive(u, true)}
                                 disabled={activeSavingId === u.id}
-                                data-testid={`users-activate-${u.id}`}
+                                data-testid={`users-activate-employee-${u.id}`}
                               >
                                 <Power className="h-3.5 w-3.5 mr-1" />
                                 Activate
@@ -2338,18 +2516,60 @@ export default function AdminDashboard() {
                                 size="sm"
                                 variant="outline"
                                 className="rounded-full text-rose-700 border-rose-200 hover:bg-rose-50"
-                                onClick={() => {
-                                  if (window.confirm(`Mark ${u.full_name} as inactive? They will lose login access but their chats and batch history are preserved.`)) {
-                                    toggleActive(u, false);
-                                  }
-                                }}
+                                onClick={() => setEmployeeActive(u, false)}
                                 disabled={activeSavingId === u.id}
-                                data-testid={`users-deactivate-${u.id}`}
+                                data-testid={`users-deactivate-employee-${u.id}`}
                               >
                                 <PowerOff className="h-3.5 w-3.5 mr-1" />
                                 Deactivate
                               </Button>
                             )
+                          )}
+                          {u.role === "client" && getClientStatus(u) === "active" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-full text-rose-700 border-rose-200 hover:bg-rose-50"
+                              onClick={() => setClientStatus(u, "dropped")}
+                              disabled={activeSavingId === u.id}
+                              data-testid={`users-drop-${u.id}`}
+                            >
+                              Drop
+                            </Button>
+                          )}
+                          {u.role === "client" && getClientStatus(u) === "inactive" && (
+                            <>
+                              <Button
+                                size="sm"
+                                className="rounded-full bg-emerald-900 hover:bg-emerald-950"
+                                onClick={() => setClientStatus(u, "active")}
+                                disabled={activeSavingId === u.id}
+                                data-testid={`users-activate-${u.id}`}
+                              >
+                                Activate
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="rounded-full text-rose-700 border-rose-200"
+                                onClick={() => setClientStatus(u, "dropped")}
+                                disabled={activeSavingId === u.id}
+                                data-testid={`users-drop-inactive-${u.id}`}
+                              >
+                                Drop
+                              </Button>
+                            </>
+                          )}
+                          {u.role === "client" && getClientStatus(u) === "dropped" && (
+                            <Button
+                              size="sm"
+                              className="rounded-full bg-emerald-900 hover:bg-emerald-950"
+                              onClick={() => setClientStatus(u, "active")}
+                              disabled={activeSavingId === u.id}
+                              data-testid={`users-reactivate-dropped-${u.id}`}
+                            >
+                              Reactivate
+                            </Button>
                           )}
                           {u.role === "client" && (
                             <Button
