@@ -70,6 +70,10 @@ import {
   updateConversationPreferences,
 } from "@/lib/conversationPreferences";
 import { useOptimisticMessageSend } from "@/hooks/useOptimisticMessageSend";
+import {
+  clientAssignedEmployeeId,
+  isClientPortalUser,
+} from "@/lib/clientChat";
 
 export default function ChatApp() {
   useMobileChatViewport();
@@ -101,9 +105,39 @@ export default function ChatApp() {
   const [batches, setBatches] = useState([]);
   const [listSelection, setListSelection] = useState(null);
   const [quickView, setQuickView] = useState(null);
+  const [clientChatReady, setClientChatReady] = useState(true);
   const listScrollRef = useRef(null);
+
+  const isClient = isClientPortalUser(user);
+  const clientEmployeeId = clientAssignedEmployeeId(user);
+  const clientUnassigned = isClient && !clientEmployeeId;
+
+  const loadClientAssignedChat = useCallback(async () => {
+    try {
+      const res = await api.get("/conversations/assigned-employee");
+      const conv = res.data?.conversation || null;
+      if (conv) {
+        setConversations([conv]);
+        setSelected(conv);
+        setActiveConversationId(conv.id);
+      } else {
+        setConversations([]);
+        setSelected(null);
+        clearActiveConversation();
+      }
+    } catch (err) {
+      toast.error(formatApiError(err));
+      setConversations([]);
+      setSelected(null);
+      clearActiveConversation();
+    } finally {
+      setClientChatReady(true);
+    }
+  }, [setActiveConversationId, clearActiveConversation]);
+
   // Restore thread from URL, push, or sessionStorage (returning from diet/medical).
   useEffect(() => {
+    if (isClient) return;
     const convId =
       chatConvIdFromUrl ||
       location.state?.conversationId ||
@@ -120,6 +154,7 @@ export default function ChatApp() {
       }
     }
   }, [
+    isClient,
     chatConvIdFromUrl,
     location.state?.conversationId,
     location.state?.pendingChat,
@@ -133,6 +168,7 @@ export default function ChatApp() {
   }, [selected?.id, setActiveConversationId]);
 
   useEffect(() => {
+    if (isClient) return;
     const pending = location.state?.pendingChat;
     if (!pending?.selectedConv?.id || conversations.length === 0) return;
     const resolved =
@@ -140,20 +176,24 @@ export default function ChatApp() {
     setSelected(resolved);
     setActiveConversationId(resolved.id);
     navigate(chatOpenTarget(resolved.id), { replace: true, state: {} });
-  }, [location.state?.pendingChat, conversations, navigate, setActiveConversationId]);
+  }, [isClient, location.state?.pendingChat, conversations, navigate, setActiveConversationId]);
 
   const openChat = useCallback(
     (conv) => {
       if (!conv?.id) return;
+      if (isClient && conv.other_user?.id !== clientEmployeeId) return;
       setListSelection(null);
       setSelected(conv);
       setActiveConversationId(conv.id);
-      navigate(chatOpenTarget(conv.id), { push: true });
+      if (!isClient) {
+        navigate(chatOpenTarget(conv.id), { push: true });
+      }
     },
-    [navigate, setActiveConversationId],
+    [navigate, setActiveConversationId, isClient, clientEmployeeId],
   );
 
   const closeChat = useCallback(() => {
+    if (isClient) return;
     clearActiveConversation();
     if (chatConvIdFromUrl) {
       navigate(-1);
@@ -161,10 +201,11 @@ export default function ChatApp() {
     }
     setSelected(null);
     navigate(chatListTarget(), { replace: true });
-  }, [chatConvIdFromUrl, navigate, clearActiveConversation]);
+  }, [isClient, chatConvIdFromUrl, navigate, clearActiveConversation]);
 
   // Return from full-screen new-conversation page with a started thread.
   useEffect(() => {
+    if (isClient) return;
     const conv = location.state?.selectedConversation;
     if (!conv?.id) return;
     setConversations((prev) => (prev.some((c) => c.id === conv.id) ? prev : [conv, ...prev]));
@@ -195,6 +236,9 @@ export default function ChatApp() {
   }, []);
 
   const loadConversations = useCallback(async () => {
+    if (user?.role === "client") {
+      return;
+    }
     try {
       const res = await api.get("/conversations");
       setConversations(res.data);
@@ -211,7 +255,7 @@ export default function ChatApp() {
     } catch (err) {
       toast.error(formatApiError(err));
     }
-  }, []);
+  }, [user?.role]);
 
   const loadBatches = useCallback(async () => {
     if (user?.role !== "employee") {
@@ -267,14 +311,39 @@ export default function ChatApp() {
 
   const handleRefresh = useCallback(async () => {
     const convId = selectedIdRef.current;
+    if (user?.role === "client") {
+      await loadClientAssignedChat();
+      if (convId) await loadMessages(convId);
+      if (user?.id) loadCacheFromStorage(user.id);
+      return;
+    }
     await Promise.all([
       loadConversations(),
       convId ? loadMessages(convId) : Promise.resolve(),
     ]);
     if (user?.id) loadCacheFromStorage(user.id);
-  }, [loadConversations, loadMessages, user?.id]);
+  }, [user?.role, loadConversations, loadMessages, loadClientAssignedChat, user?.id]);
 
-  useEffect(() => { loadConversations(); }, [loadConversations]);
+  useEffect(() => {
+    if (user?.role === "client") {
+      setClientChatReady(false);
+      void loadClientAssignedChat();
+      return;
+    }
+    setClientChatReady(true);
+    void loadConversations();
+  }, [user?.role, user?.employee_id, location.pathname, loadConversations, loadClientAssignedChat]);
+
+  useEffect(() => {
+    if (!isClient) return;
+    const convId = location.state?.conversationId;
+    if (!convId || conversations.length === 0) return;
+    const target = conversations.find((c) => c.id === convId);
+    if (target) {
+      setSelected(target);
+      setActiveConversationId(target.id);
+    }
+  }, [isClient, location.state?.conversationId, conversations, setActiveConversationId]);
 
   useEffect(() => () => {
     void clearActiveChatState();
@@ -588,14 +657,21 @@ export default function ChatApp() {
     setConversations((prev) => {
       const target = prev.find((c) => c.id === convId);
       if (target) {
+        if (isClient && target.other_user?.id !== clientEmployeeId) {
+          return prev;
+        }
         setListSelection(null);
         setSelected(target);
         setActiveConversationId(target.id);
-        navigate(chatOpenTarget(target.id), { replace: false });
+        if (!isClient) {
+          navigate(chatOpenTarget(target.id), { replace: false });
+        }
+      } else if (isClient) {
+        void loadClientAssignedChat();
       }
       return prev;
     });
-  }, [navigate, setActiveConversationId]);
+  }, [navigate, setActiveConversationId, isClient, clientEmployeeId, loadClientAssignedChat]);
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
@@ -615,6 +691,7 @@ export default function ChatApp() {
   }, [openConversationById]);
 
   useEffect(() => {
+    if (isClient) return;
     const params = new URLSearchParams(window.location.search);
     const convId = params.get("open_conversation");
     if (!convId || conversations.length === 0) return;
@@ -623,7 +700,7 @@ export default function ChatApp() {
     next.delete("open_conversation");
     const qs = next.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
-  }, [conversations.length, openConversationById]);
+  }, [isClient, conversations.length, openConversationById]);
 
   const sendTyping = useCallback((conversationId, isTyping) => {
     wsSendTyping(conversationId, isTyping);
@@ -687,6 +764,7 @@ export default function ChatApp() {
   }, [unreadTotal, panelCtx]);
 
   const handlePanelBack = useCallback(() => {
+    if (isClient) return false;
     if (listSelection) {
       setListSelection(null);
       return true;
@@ -696,13 +774,14 @@ export default function ChatApp() {
       return true;
     }
     return false;
-  }, [listSelection, chatConvIdFromUrl, navigate]);
+  }, [isClient, listSelection, chatConvIdFromUrl, navigate]);
 
   usePanelMobileBack({
     enabled: user?.role === "client" || user?.role === "employee",
     onBack: handlePanelBack,
     onExitApp: () =>
       (user?.role === "client" || user?.role === "employee") &&
+      !isClient &&
       !chatConvIdFromUrl &&
       location.pathname === "/chat",
   });
@@ -724,7 +803,8 @@ export default function ChatApp() {
     setQuickView({ conv, user: profileUser });
   }, []);
 
-  const showMobileFooter = inPanelLayout && !selected && !chatConvIdFromUrl;
+  const showMobileFooter = inPanelLayout && !isClient && !selected && !chatConvIdFromUrl;
+  const clientThreadReadOnly = isClient && selected && selected.client_can_write === false;
 
   return (
     <div
@@ -750,42 +830,53 @@ export default function ChatApp() {
       </div>
 
       <div className={`flex min-h-0 flex-1 overflow-hidden ${showMobileFooter ? "pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0" : ""}`}>
-        <div className={`${selected ? "hidden md:flex" : "flex"} h-full min-h-0 w-full flex-col md:w-auto md:flex-none`}>
-          <ChatSidebar
-            conversations={filteredConversations}
-            onlineUsers={onlineUsers}
-            selectedId={selected?.id}
-            onSelect={(c) => openChat(c)}
-            onNewChat={openNewConversation}
-            batches={batches}
-            selectedBatchId={selectedBatchId}
-            onSelectBatch={setSelectedBatchId}
-            onBatchesChanged={loadBatches}
-            onPreferenceChange={handlePreferenceChange}
-            selectedConversation={listSelection}
-            onSelectedConversationChange={setListSelection}
-            onAvatarPress={handleAvatarQuickView}
-            listScrollRef={listScrollRef}
-          />
-        </div>
-        <main className={`${selected || chatConvIdFromUrl ? "flex" : "hidden md:flex"} min-h-0 flex-1 flex-col overflow-hidden`}>
-          <ChatWindow
-            conversation={selected}
-            messages={messages}
-            conversations={conversations}
-            onSendMessage={handleSendMessage}
-            onPatchMessage={patchMessage}
-            typingUsers={(selected && typingUsers[selected.id]) || {}}
-            onlineUsers={onlineUsers}
-            lastSeenByUser={lastSeenByUser}
-            sendTyping={sendTyping}
-            onBack={closeChat}
-            chatBackTo="/chat"
-          />
+        {!isClient && (
+          <div className={`${selected ? "hidden md:flex" : "flex"} h-full min-h-0 w-full flex-col md:w-auto md:flex-none`}>
+            <ChatSidebar
+              conversations={filteredConversations}
+              onlineUsers={onlineUsers}
+              selectedId={selected?.id}
+              onSelect={(c) => openChat(c)}
+              onNewChat={openNewConversation}
+              batches={batches}
+              selectedBatchId={selectedBatchId}
+              onSelectBatch={setSelectedBatchId}
+              onBatchesChanged={loadBatches}
+              onPreferenceChange={handlePreferenceChange}
+              selectedConversation={listSelection}
+              onSelectedConversationChange={setListSelection}
+              onAvatarPress={handleAvatarQuickView}
+              listScrollRef={listScrollRef}
+            />
+          </div>
+        )}
+        <main className={`${isClient || selected || chatConvIdFromUrl ? "flex" : "hidden md:flex"} min-h-0 flex-1 flex-col overflow-hidden`}>
+          {isClient && !clientChatReady && !clientUnassigned ? (
+            <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-gray-400" data-testid="client-chat-loading">
+              Loading chat…
+            </div>
+          ) : (
+            <ChatWindow
+              conversation={clientUnassigned ? null : selected}
+              messages={messages}
+              conversations={isClient ? (selected ? [selected] : []) : conversations}
+              onSendMessage={handleSendMessage}
+              onPatchMessage={patchMessage}
+              typingUsers={(selected && typingUsers[selected.id]) || {}}
+              onlineUsers={onlineUsers}
+              lastSeenByUser={lastSeenByUser}
+              sendTyping={sendTyping}
+              onBack={isClient ? undefined : closeChat}
+              hideBackButton={isClient}
+              clientUnassigned={clientUnassigned}
+              readOnly={clientThreadReadOnly}
+              chatBackTo="/chat"
+            />
+          )}
         </main>
       </div>
 
-      {!selected && (
+      {!isClient && !selected && (
         <button
           type="button"
           onClick={openNewConversation}

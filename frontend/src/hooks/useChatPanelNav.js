@@ -27,12 +27,12 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
     () => [
       {
         id: "chats",
-        label: "Chats",
+        label: "Chat",
         icon: MessageSquare,
         active: isActive("chats"),
         badge: unreadTotal,
         testId: "client-nav-chats",
-        onClick: () => navigate(chatListTarget(), { replace: true }),
+        onClick: () => navigate("/chat", { replace: true }),
       },
       {
         id: "diet",

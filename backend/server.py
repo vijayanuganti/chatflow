@@ -2908,6 +2908,54 @@ async def admin_update_complaint(
 
 
 # ---------- Conversations ----------
+async def _assert_client_conversation_policy(user: dict, conv: dict, *, write: bool) -> None:
+    """Clients may only access a direct thread with their currently assigned employee."""
+    if user.get("role") != "client":
+        return
+    if conv.get("type") != "direct":
+        raise HTTPException(
+            status_code=403,
+            detail="Clients may only chat with their assigned employee",
+        )
+    assigned = (user.get("employee_id") or "").strip()
+    other_id = next((p for p in conv.get("participants", []) if p != user["id"]), None)
+    if not other_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    other = await db.users.find_one({"id": other_id}, {"_id": 0, "role": 1})
+    if not other:
+        raise HTTPException(status_code=403, detail="Access denied")
+    other_role = (other.get("role") or "").strip().lower()
+    if other_role == "admin":
+        raise HTTPException(status_code=403, detail="Clients cannot chat with administrators")
+    if other_role == "client":
+        raise HTTPException(status_code=403, detail="Clients cannot chat with other clients")
+    if other_role != "employee":
+        raise HTTPException(status_code=403, detail="Access denied")
+    if write:
+        if not assigned:
+            raise HTTPException(status_code=403, detail="No employee assigned")
+        if other_id != assigned:
+            raise HTTPException(
+                status_code=403,
+                detail="You can only message your assigned employee",
+            )
+    elif other_id != assigned:
+        raise HTTPException(
+            status_code=403,
+            detail="This conversation is no longer available",
+        )
+
+
+def _client_allowed_conversation_ids(user: dict) -> Optional[Set[str]]:
+    """When role is client, return the sole allowed conv id set, or empty if unassigned."""
+    if user.get("role") != "client":
+        return None
+    assigned = (user.get("employee_id") or "").strip()
+    if not assigned:
+        return set()
+    return {direct_conv_id(user["id"], assigned)}
+
+
 async def _ensure_direct(user_a: str, user_b: str) -> dict:
     cid = direct_conv_id(user_a, user_b)
     conv = await db.conversations.find_one({"id": cid}, {"_id": 0})
@@ -2928,17 +2976,48 @@ async def _ensure_direct(user_a: str, user_b: str) -> dict:
 
 @api_router.post("/conversations/start")
 async def start_conversation(body: StartDirectBody, user: dict = Depends(get_current_user)):
+    if user.get("role") == "client":
+        raise HTTPException(
+            status_code=403,
+            detail="Clients cannot start new conversations",
+        )
     other = await db.users.find_one({"id": body.other_user_id}, {"_id": 0, "password_hash": 0})
     if not other:
         raise HTTPException(status_code=404, detail="User not found")
     if other["id"] == user["id"]:
         raise HTTPException(status_code=400, detail="Cannot chat with yourself")
+    if user.get("role") == "employee" and other.get("role") == "admin":
+        raise HTTPException(status_code=403, detail="Employees cannot start chats with administrators")
     conv = await _ensure_direct(user["id"], other["id"])
     return {"conversation": conv, "other_user": other}
 
 
+@api_router.get("/conversations/assigned-employee")
+async def client_assigned_employee_chat(user: dict = Depends(get_current_user)):
+    """Client portal: assigned employee thread (auto-created when employee is assigned)."""
+    if user.get("role") != "client":
+        raise HTTPException(status_code=403, detail="Clients only")
+    assigned = (user.get("employee_id") or "").strip()
+    if not assigned:
+        return {"employee": None, "conversation": None}
+    employee = await db.users.find_one(
+        {"id": assigned, "role": "employee"},
+        {"_id": 0, "password_hash": 0},
+    )
+    if not employee:
+        return {"employee": None, "conversation": None}
+    conv = await _ensure_direct(assigned, user["id"])
+    enriched = await _enrich_conversations([conv], user["id"])
+    conversation = enriched[0] if enriched else None
+    if conversation is not None:
+        conversation["client_can_write"] = True
+    return {"employee": clean_user(employee), "conversation": conversation}
+
+
 @api_router.post("/conversations/group")
 async def create_group(body: CreateGroupBody, user: dict = Depends(get_current_user)):
+    if user.get("role") == "client":
+        raise HTTPException(status_code=403, detail="Clients cannot create group chats")
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Group name required")
@@ -3034,10 +3113,23 @@ async def _enrich_conversations(convs: List[dict], viewer_id: Optional[str]) -> 
 
 @api_router.get("/conversations")
 async def list_conversations(user: dict = Depends(get_current_user)):
-    convs = await db.conversations.find(
-        {"participants": user["id"]}, {"_id": 0}
-    ).sort("last_message_at", -1).to_list(500)
-    return await _enrich_conversations(convs, user["id"])
+    allowed = _client_allowed_conversation_ids(user)
+    if allowed is not None:
+        if not allowed:
+            return []
+        convs = await db.conversations.find(
+            {"id": {"$in": list(allowed)}},
+            {"_id": 0},
+        ).to_list(5)
+    else:
+        convs = await db.conversations.find(
+            {"participants": user["id"]}, {"_id": 0}
+        ).sort("last_message_at", -1).to_list(500)
+    enriched = await _enrich_conversations(convs, user["id"])
+    if allowed is not None:
+        for c in enriched:
+            c["client_can_write"] = True
+    return enriched
 
 
 @api_router.patch("/conversations/{conv_id}/preferences")
@@ -3051,6 +3143,7 @@ async def update_conversation_preferences(
         raise HTTPException(status_code=404, detail="Conversation not found")
     if user["role"] != "admin" and user["id"] not in conv.get("participants", []):
         raise HTTPException(status_code=403, detail="Access denied")
+    await _assert_client_conversation_policy(user, conv, write=True)
 
     updates = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     if not updates:
@@ -3091,6 +3184,8 @@ async def get_messages(conv_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Conversation not found")
     if user["role"] != "admin" and user["id"] not in conv["participants"]:
         raise HTTPException(status_code=403, detail="Access denied")
+    await _assert_client_conversation_policy(user, conv, write=False)
+
     messages = await db.messages.find({"conversation_id": conv_id}, {"_id": 0}).sort("created_at", 1).to_list(2000)
     return messages
 
@@ -3102,6 +3197,7 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
         raise HTTPException(status_code=404, detail="Conversation not found")
     if user["id"] not in conv["participants"]:
         raise HTTPException(status_code=403, detail="Not a participant")
+    await _assert_client_conversation_policy(user, conv, write=True)
 
     msg = {
         "id": str(uuid.uuid4()),
@@ -3461,6 +3557,7 @@ async def mark_read(conv_id: str, user: dict = Depends(get_current_user)):
     conv = await db.conversations.find_one({"id": conv_id}, {"_id": 0})
     if not conv or user["id"] not in conv["participants"]:
         raise HTTPException(status_code=403, detail="Not a participant")
+    await _assert_client_conversation_policy(user, conv, write=False)
 
     to_mark = await db.messages.find(
         {

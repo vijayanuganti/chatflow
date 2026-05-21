@@ -8,6 +8,7 @@ import MobilePageShell from "@/components/layout/MobilePageShell";
 import Avatar from "@/components/Avatar";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { isClientPortalUser } from "@/lib/clientChat";
 import { toast } from "sonner";
 
 /**
@@ -24,6 +25,12 @@ export default function NewConversationPage() {
 
   const backTo = location.state?.backTo ?? "/chat";
   const panel = location.state?.panel ?? "chat";
+
+  useEffect(() => {
+    if (isClientPortalUser(user)) {
+      navigate("/chat", { replace: true });
+    }
+  }, [user, navigate]);
 
   const [users, setUsers] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState({});

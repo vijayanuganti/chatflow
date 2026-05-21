@@ -60,6 +60,10 @@ export default function ChatWindow({
   sendTyping,
   readOnly = false,
   onBack,
+  /** When true, never show the mobile back arrow (client portal uses footer tabs). */
+  hideBackButton = false,
+  /** Client portal: no employee assigned — centered empty state, no composer. */
+  clientUnassigned = false,
   /** Base path for profile / diet / medical back navigation (e.g. /chat, /admin/mychats). */
   chatBackTo,
   /** Admin tab when embedded in AdminDashboard (chats | mychats | batches). */
@@ -565,6 +569,29 @@ export default function ChatWindow({
   }, [pinToBottom]);
 
   if (!conversation) {
+    if (clientUnassigned) {
+      return (
+        <div
+          className="flex min-h-0 flex-1 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950"
+          data-testid="client-unassigned-chat"
+        >
+          <div className="chat-header z-10 flex shrink-0 flex-col border-b border-gray-200 bg-white/90 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-950/80">
+            <div className="flex items-center gap-2 px-3 py-2.5 sm:px-4">
+              <span className="font-display font-semibold text-sm sm:text-base dark:text-gray-100">Chat</span>
+            </div>
+          </div>
+          <div className="chat-bg flex min-h-0 flex-1 items-center justify-center px-6">
+            <div className="text-center max-w-sm">
+              <p className="text-[15px] text-[#6B7280] dark:text-gray-400 leading-relaxed" data-testid="client-unassigned-message">
+                No employee assigned yet.
+                <br />
+                Please contact admin for support.
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950">
         <div className="chat-bg flex min-h-0 flex-1 items-center justify-center" data-testid="no-conversation-placeholder">
@@ -684,7 +711,7 @@ export default function ChatWindow({
           </div>
         ) : (
           <>
-        {onBack && (
+        {onBack && !hideBackButton && (
           <Button size="icon" variant="ghost" className="md:hidden rounded-full" onClick={onBack} data-testid="chat-back-btn">
             <ArrowLeft className="h-5 w-5" />
           </Button>
