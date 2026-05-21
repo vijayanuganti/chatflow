@@ -1213,7 +1213,7 @@ export default function AdminDashboard() {
               <h1 className="font-display text-2xl sm:text-4xl font-semibold mt-1 dark:text-gray-100">Hi, {user?.full_name?.split(" ")[0] || "Admin"}.</h1>
               <p className="text-gray-500 dark:text-gray-400 mt-1">Monitor conversations and chat with anyone on the platform.</p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
               <StatCard
                 icon={Users}
                 label="Total users"
@@ -1260,6 +1260,14 @@ export default function AdminDashboard() {
                 testId="stat-dropped-clients"
                 accent="bg-violet-50 text-violet-900"
                 onClick={() => goToUsersFilter("dropped_clients")}
+              />
+              <StatCard
+                icon={Inbox}
+                label="Open complaints"
+                value={formatStatValue(stats?.complaints_pending)}
+                testId="stat-complaints-open"
+                accent="bg-rose-50 text-rose-900"
+                onClick={() => goToTab("complaints", { historyMode: "push" })}
               />
             </div>
           </div>
