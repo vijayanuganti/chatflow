@@ -202,16 +202,21 @@ export default function FolderBrowsePage() {
     }
   };
 
+  const sectionTabClass =
+    "shrink-0 flex-none whitespace-nowrap rounded-lg text-xs sm:text-sm py-2 px-3 data-[state=active]:bg-white data-[state=active]:text-emerald-900 data-[state=active]:shadow-sm dark:data-[state=active]:bg-gray-950 dark:data-[state=active]:text-emerald-200";
+
   const employeeTabs = (
-    <Tabs value={tab} onValueChange={setTab} className="w-full">
-      <TabsList className="w-full grid grid-cols-2 h-auto p-1 rounded-xl bg-gray-100 dark:bg-gray-900">
-        <TabsTrigger value="admin" className="rounded-lg text-xs sm:text-sm py-2" data-testid="folders-tab-admin">
-          Admin Media
-        </TabsTrigger>
-        <TabsTrigger value="mine" className="rounded-lg text-xs sm:text-sm py-2" data-testid="folders-tab-mine">
-          My Folders
-        </TabsTrigger>
-      </TabsList>
+    <Tabs value={tab} onValueChange={setTab} className="w-full min-w-0">
+      <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x scroll-smooth [-webkit-overflow-scrolling:touch]">
+        <TabsList className="inline-flex h-auto w-max min-w-full flex-nowrap gap-1 p-1 rounded-xl bg-gray-100 dark:bg-gray-900 justify-start">
+          <TabsTrigger value="admin" className={sectionTabClass} data-testid="folders-tab-admin">
+            Admin Media
+          </TabsTrigger>
+          <TabsTrigger value="mine" className={sectionTabClass} data-testid="folders-tab-mine">
+            My Folders
+          </TabsTrigger>
+        </TabsList>
+      </div>
       <TabsContent value="admin" className="mt-4">
         <p className="text-xs text-gray-500 mb-3">Folders shared by administrators. View only.</p>
         <FolderList
@@ -244,15 +249,17 @@ export default function FolderBrowsePage() {
   );
 
   const clientTabs = (
-    <Tabs value={tab} onValueChange={setTab} className="w-full">
-      <TabsList className="w-full grid grid-cols-2 h-auto p-1 rounded-xl bg-gray-100 dark:bg-gray-900">
-        <TabsTrigger value="admin" className="rounded-lg text-xs sm:text-sm py-2" data-testid="folders-tab-admin">
-          Admin Media
-        </TabsTrigger>
-        <TabsTrigger value="employee" className="rounded-lg text-xs sm:text-sm py-2" data-testid="folders-tab-employee">
-          Employee Media
-        </TabsTrigger>
-      </TabsList>
+    <Tabs value={tab} onValueChange={setTab} className="w-full min-w-0">
+      <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x scroll-smooth [-webkit-overflow-scrolling:touch]">
+        <TabsList className="inline-flex h-auto w-max min-w-full flex-nowrap gap-1 p-1 rounded-xl bg-gray-100 dark:bg-gray-900 justify-start">
+          <TabsTrigger value="admin" className={sectionTabClass} data-testid="folders-tab-admin">
+            Admin Media
+          </TabsTrigger>
+          <TabsTrigger value="employee" className={sectionTabClass} data-testid="folders-tab-employee">
+            Employee Media
+          </TabsTrigger>
+        </TabsList>
+      </div>
       <TabsContent value="admin" className="mt-4">
         <p className="text-xs text-gray-500 mb-3">Media shared by your organization. View only.</p>
         <FolderList

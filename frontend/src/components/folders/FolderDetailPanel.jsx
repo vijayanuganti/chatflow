@@ -155,7 +155,7 @@ export default function FolderDetailPanel({
         {items.length === 0 && renderEmpty("Links")}
         <div className="divide-y divide-gray-100 dark:divide-gray-800 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
           {items.map((item) => (
-            <div key={item.id} className="flex items-center gap-3 p-4" data-testid={`folder-link-${item.id}`}>
+            <div key={item.id} className="flex items-center gap-2 sm:gap-3 p-3 sm:p-4 min-w-0" data-testid={`folder-link-${item.id}`}>
               <Link2 className="h-5 w-5 text-emerald-800 shrink-0" />
               <div className="flex-1 min-w-0">
                 <a
@@ -168,16 +168,18 @@ export default function FolderDetailPanel({
                 </a>
                 <div className="text-xs text-gray-500 truncate">{item.url_or_path}</div>
               </div>
-              <Button size="icon" variant="ghost" className="shrink-0 rounded-full" asChild>
-                <a href={item.url_or_path} target="_blank" rel="noopener noreferrer" title="Open">
-                  <ExternalLink className="h-4 w-4" />
-                </a>
-              </Button>
-              {canEdit && (
-                <Button size="icon" variant="ghost" className="shrink-0 rounded-full text-rose-600" onClick={() => handleDeleteItem(item)}>
-                  <Trash2 className="h-4 w-4" />
+              <div className="flex shrink-0 items-center gap-0.5">
+                <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0 rounded-full" asChild>
+                  <a href={item.url_or_path} target="_blank" rel="noopener noreferrer" title="Open link">
+                    <ExternalLink className="h-4 w-4" />
+                  </a>
                 </Button>
-              )}
+                {canEdit && (
+                  <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0 rounded-full text-rose-600" onClick={() => handleDeleteItem(item)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -280,26 +282,31 @@ export default function FolderDetailPanel({
   };
 
   return (
-    <div className="space-y-4" data-testid="folder-detail-panel">
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="flex w-full h-auto gap-1 overflow-x-auto pb-1 bg-transparent [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {FOLDER_CATEGORIES.map((c) => {
-            const Icon = TAB_ICONS[c.id];
-            const count = (itemsByCategory[c.id] || []).length;
-            return (
-              <TabsTrigger
-                key={c.id}
-                value={c.id}
-                className="shrink-0 rounded-full px-3 py-2 text-xs data-[state=active]:bg-emerald-900 data-[state=active]:text-white"
-                data-testid={`folder-tab-${c.id}`}
-              >
-                <Icon className="h-3.5 w-3.5 mr-1 inline" />
-                {c.label}
-                {count > 0 && <span className="ml-1 opacity-80">({count})</span>}
-              </TabsTrigger>
-            );
-          })}
-        </TabsList>
+    <div className="space-y-4 min-w-0 w-full" data-testid="folder-detail-panel">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="min-w-0 w-full">
+        <div
+          className="w-full min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x scroll-smooth [-webkit-overflow-scrolling:touch] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600"
+          data-testid="folder-category-tabs-scroll"
+        >
+          <TabsList className="inline-flex h-auto w-max max-w-none flex-nowrap gap-1.5 rounded-none border-0 bg-transparent p-0 pb-2 justify-start shadow-none">
+            {FOLDER_CATEGORIES.map((c) => {
+              const Icon = TAB_ICONS[c.id];
+              const count = (itemsByCategory[c.id] || []).length;
+              return (
+                <TabsTrigger
+                  key={c.id}
+                  value={c.id}
+                  className="shrink-0 flex-none whitespace-nowrap rounded-full px-3.5 py-2 text-xs sm:text-sm bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200 data-[state=active]:bg-emerald-900 data-[state=active]:text-white data-[state=active]:shadow-sm"
+                  data-testid={`folder-tab-${c.id}`}
+                >
+                  <Icon className="h-3.5 w-3.5 mr-1.5 inline shrink-0" />
+                  {c.label}
+                  {count > 0 && <span className="ml-1 opacity-80">({count})</span>}
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+        </div>
         <TabsContent value="links" className="mt-4">{renderLinks()}</TabsContent>
         <TabsContent value="videos" className="mt-4">{renderMediaGrid("videos", itemsByCategory.videos || [])}</TabsContent>
         <TabsContent value="photos" className="mt-4">{renderMediaGrid("photos", itemsByCategory.photos || [])}</TabsContent>
