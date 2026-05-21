@@ -10,7 +10,7 @@ export const DEVELOPER_ROLE = "Full Stack Developer";
 export const DEVELOPER_INITIALS = "VA";
 
 export const SUPPORT_EMAIL =
-  (process.env.REACT_APP_SUPPORT_EMAIL || "").trim() || "support@chatflow.app";
+  (process.env.REACT_APP_SUPPORT_EMAIL || "").trim() || "vijayanuganti504@gmail.com";
 
 export const PRIVACY_POLICY_URL = (process.env.REACT_APP_PRIVACY_POLICY_URL || "").trim();
 

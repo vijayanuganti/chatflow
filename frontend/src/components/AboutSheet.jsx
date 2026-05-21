@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback, useRef } from "react";
 import { MessageCircle, ChevronRight } from "lucide-react";
 import {
   Sheet,
@@ -82,7 +82,41 @@ function LinkRow({ icon: Icon, emoji, label, onClick, testId }) {
   );
 }
 
+const SWIPE_CLOSE_PX = 72;
+
 export default function AboutSheet({ open, onOpenChange }) {
+  const scrollRef = useRef(null);
+  const touchStartY = useRef(null);
+
+  const close = useCallback(() => onOpenChange(false), [onOpenChange]);
+
+  const onDragTouchStart = (e) => {
+    touchStartY.current = e.touches[0]?.clientY ?? null;
+  };
+
+  const onDragTouchMove = (e) => {
+    if (touchStartY.current == null) return;
+    const y = e.touches[0]?.clientY ?? touchStartY.current;
+    if (y - touchStartY.current > SWIPE_CLOSE_PX) {
+      touchStartY.current = null;
+      close();
+    }
+  };
+
+  const onDragTouchEnd = (e) => {
+    if (touchStartY.current != null) {
+      const y = e.changedTouches[0]?.clientY ?? touchStartY.current;
+      if (y - touchStartY.current > SWIPE_CLOSE_PX) close();
+    }
+    touchStartY.current = null;
+  };
+
+  const onContentTouchStart = (e) => {
+    const el = scrollRef.current;
+    if (!el || el.scrollTop > 4) return;
+    touchStartY.current = e.touches[0]?.clientY ?? null;
+  };
+
   const openPrivacy = () => {
     if (PRIVACY_POLICY_URL) {
       window.open(PRIVACY_POLICY_URL, "_blank", "noopener,noreferrer");
@@ -103,15 +137,37 @@ export default function AboutSheet({ open, onOpenChange }) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="rounded-t-[20px] border-0 bg-white p-0 max-h-[92vh] overflow-hidden flex flex-col dark:bg-gray-950 [&>button]:hidden"
+        hideClose
+        className="rounded-t-[20px] border-0 bg-white p-0 max-h-[92vh] overflow-hidden flex flex-col dark:bg-gray-950"
         data-testid="about-sheet"
       >
         <SheetTitle className="sr-only">About {APP_NAME}</SheetTitle>
-        <div className="shrink-0 flex justify-center pt-3 pb-1">
+        <div
+          className="shrink-0 flex flex-col items-center pt-3 pb-2 touch-none cursor-grab active:cursor-grabbing"
+          onTouchStart={onDragTouchStart}
+          onTouchMove={onDragTouchMove}
+          onTouchEnd={onDragTouchEnd}
+          onTouchCancel={onDragTouchEnd}
+          role="button"
+          tabIndex={0}
+          aria-label="Swipe down to close"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") close();
+          }}
+          data-testid="about-sheet-drag-handle"
+        >
           <div className="h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" aria-hidden />
+          <span className="mt-2 text-[10px] text-[#9CA3AF] dark:text-gray-500">Swipe down to close</span>
         </div>
 
-        <div className="flex-1 overflow-y-auto overscroll-contain px-5 pb-8">
+        <div
+          ref={scrollRef}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 pb-8"
+          onTouchStart={onContentTouchStart}
+          onTouchMove={onDragTouchMove}
+          onTouchEnd={onDragTouchEnd}
+          onTouchCancel={onDragTouchEnd}
+        >
           {/* App identity */}
           <div className="flex flex-col items-center text-center pt-2 pb-6">
             <div
@@ -171,8 +227,37 @@ export default function AboutSheet({ open, onOpenChange }) {
 
           <Divider />
 
-          <div className="py-5 flex flex-col items-center text-center">
-            <SectionLabel>Credits</SectionLabel>
+          <div className="py-5 space-y-0">
+            <p
+              className="text-[11px] font-bold uppercase tracking-[0.12em] text-left mb-2"
+              style={{ color: COMPANY_PRIMARY }}
+            >
+              Legal &amp; Support
+            </p>
+            <LinkRow
+              emoji="📄"
+              label="Privacy Policy"
+              onClick={openPrivacy}
+              testId="about-privacy"
+            />
+            <Divider />
+            <LinkRow
+              emoji="📩"
+              label="Contact Support"
+              onClick={openSupport}
+              testId="about-support"
+            />
+          </div>
+
+          <Divider />
+
+          <div className="py-5 flex flex-col items-center text-center w-full">
+            <p
+              className="text-[11px] font-bold uppercase tracking-[0.12em] w-full mb-2"
+              style={{ color: COMPANY_PRIMARY }}
+            >
+              Credits
+            </p>
             <div
               className="flex h-11 w-11 items-center justify-center rounded-full text-white text-sm font-bold"
               style={{ backgroundColor: COMPANY_PRIMARY }}
@@ -191,25 +276,7 @@ export default function AboutSheet({ open, onOpenChange }) {
             </p>
           </div>
 
-          <Divider />
-
-          <div className="py-5 space-y-0">
-            <LinkRow
-              emoji="📄"
-              label="Privacy Policy"
-              onClick={openPrivacy}
-              testId="about-privacy"
-            />
-            <Divider />
-            <LinkRow
-              emoji="📩"
-              label="Contact Support"
-              onClick={openSupport}
-              testId="about-support"
-            />
-          </div>
-
-          <div className="pt-6 pb-2 text-center">
+          <div className="pt-4 pb-2 text-center">
             <p className="text-[9px] text-[#6B7280] dark:text-gray-500">
               © 2025 {DEVELOPER_NAME}. All rights reserved.
             </p>
