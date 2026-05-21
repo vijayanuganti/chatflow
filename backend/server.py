@@ -1115,6 +1115,110 @@ class UpdateComplaintBody(BaseModel):
         return v
 
 
+# --- Client referrals --------------------------------------------------------
+REFERRAL_STATUSES = ("pending", "converted", "rejected")
+REFERRAL_HEALTH_GOALS = (
+    "weight_loss",
+    "muscle_gain",
+    "general_fitness",
+    "diet_planning",
+    "medical_condition",
+    "other",
+)
+
+
+class CreateReferralBody(BaseModel):
+    referred_name: str = Field(..., min_length=1, max_length=120)
+    referred_phone: str = Field(..., min_length=7, max_length=32)
+    referred_email: Optional[str] = Field(default=None, max_length=200)
+    referred_age: Optional[int] = Field(default=None, ge=1, le=120)
+    health_goal: str
+    health_goal_other: Optional[str] = Field(default=None, max_length=200)
+    notes: Optional[str] = Field(default=None, max_length=200)
+
+    @validator("health_goal")
+    def valid_health_goal(cls, v):
+        if v not in REFERRAL_HEALTH_GOALS:
+            raise ValueError(f"health_goal must be one of {REFERRAL_HEALTH_GOALS}")
+        return v
+
+    @validator("referred_phone")
+    def strip_phone(cls, v):
+        return (v or "").strip()
+
+
+class UpdateReferralBody(BaseModel):
+    status: Optional[str] = None
+    admin_note: Optional[str] = Field(default=None, max_length=2000)
+    converted_client_id: Optional[str] = None
+
+    @validator("status")
+    def valid_status(cls, v):
+        if v is not None and v not in REFERRAL_STATUSES:
+            raise ValueError(f"status must be one of {REFERRAL_STATUSES}")
+        return v
+
+
+def _schedule_user_notification(
+    user_id: str,
+    title: str,
+    body: str,
+    data: Optional[Dict[str, str]] = None,
+) -> None:
+    async def _run() -> None:
+        await send_fcm_notification(user_id, title, body, data)
+
+    task = asyncio.create_task(_run())
+
+    def _on_done(t: asyncio.Task) -> None:
+        try:
+            t.result()
+        except Exception:
+            logger.exception("Notification task failed for user_id=%s", user_id)
+
+    task.add_done_callback(_on_done)
+
+
+async def _notify_all_admins(title: str, body: str, data: Optional[Dict[str, str]] = None) -> None:
+    async for a in db.users.find({"role": "admin"}, {"id": 1, "_id": 0}):
+        _schedule_user_notification(a["id"], title, body, data)
+
+
+async def _hydrate_referral(referral: dict) -> dict:
+    referrer = await db.users.find_one(
+        {"id": referral.get("referred_by_id")},
+        {"_id": 0, "password_hash": 0},
+    )
+    converted_client = None
+    cid = referral.get("converted_client_id")
+    if cid:
+        converted_client = await db.users.find_one(
+            {"id": cid},
+            {"_id": 0, "password_hash": 0, "id": 1, "full_name": 1},
+        )
+    out = {
+        **referral,
+        "referrer": referrer,
+        "referred_by_name": (referrer or {}).get("full_name") or "Unknown",
+        "converted_client": converted_client,
+    }
+    out.pop("_id", None)
+    return out
+
+
+async def _referral_stats() -> Dict[str, int]:
+    total = await db.referrals.count_documents({})
+    pending = await db.referrals.count_documents({"status": "pending"})
+    converted = await db.referrals.count_documents({"status": "converted"})
+    rejected = await db.referrals.count_documents({"status": "rejected"})
+    return {
+        "total": total,
+        "pending": pending,
+        "converted": converted,
+        "rejected": rejected,
+    }
+
+
 # --- Diet plan ---------------------------------------------------------------
 MEAL_SLOTS = ("morning", "afternoon", "night")
 
@@ -2907,6 +3011,131 @@ async def admin_update_complaint(
     return await _hydrate_complaint(fresh)
 
 
+@api_router.post("/referrals")
+async def create_referral(body: CreateReferralBody, user: dict = Depends(get_current_user)):
+    """Employee or client submits a referral for admin review."""
+    role = (user.get("role") or "").strip().lower()
+    if role not in ("employee", "client"):
+        raise HTTPException(status_code=403, detail="Only employees and clients can submit referrals")
+
+    if body.health_goal == "other" and not (body.health_goal_other or "").strip():
+        raise HTTPException(status_code=400, detail="Please describe the health goal")
+
+    created_at = now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "referred_name": body.referred_name.strip(),
+        "referred_phone": body.referred_phone.strip(),
+        "referred_email": (body.referred_email or "").strip() or None,
+        "referred_age": body.referred_age,
+        "health_goal": body.health_goal,
+        "health_goal_other": (body.health_goal_other or "").strip() or None,
+        "notes": (body.notes or "").strip() or None,
+        "referred_by_id": user["id"],
+        "referred_by_type": role,
+        "status": "pending",
+        "admin_note": None,
+        "converted_client_id": None,
+        "created_at": created_at,
+        "updated_at": created_at,
+    }
+    await db.referrals.insert_one(doc)
+    await log_audit(
+        actor_user_id=user["id"],
+        action="referral.create",
+        metadata={"referral_id": doc["id"], "referred_name": doc["referred_name"]},
+    )
+
+    referrer_name = user.get("full_name") or "Someone"
+    await _notify_all_admins(
+        "New client referral",
+        f"New referral from {referrer_name} for {doc['referred_name']}",
+        {"type": "new_referral", "referral_id": doc["id"]},
+    )
+
+    return await _hydrate_referral(doc)
+
+
+@api_router.get("/admin/referrals")
+async def admin_list_referrals(
+    status: Optional[str] = None,
+    _: dict = Depends(require_admin),
+):
+    query: dict = {}
+    if status and status != "all":
+        if status not in REFERRAL_STATUSES:
+            raise HTTPException(status_code=400, detail=f"status must be one of {REFERRAL_STATUSES}")
+        query["status"] = status
+    rows = await db.referrals.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    items = [await _hydrate_referral(r) for r in rows]
+    return {"stats": await _referral_stats(), "items": items}
+
+
+@api_router.get("/admin/referrals/{referral_id}")
+async def admin_get_referral(referral_id: str, _: dict = Depends(require_admin)):
+    row = await db.referrals.find_one({"id": referral_id}, {"_id": 0})
+    if not row:
+        raise HTTPException(status_code=404, detail="Referral not found")
+    return await _hydrate_referral(row)
+
+
+@api_router.patch("/admin/referrals/{referral_id}")
+async def admin_update_referral(
+    referral_id: str,
+    body: UpdateReferralBody,
+    admin: dict = Depends(require_admin),
+):
+    existing = await db.referrals.find_one({"id": referral_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Referral not found")
+
+    updates: Dict[str, Any] = {"updated_at": now_iso()}
+    if body.status is not None:
+        updates["status"] = body.status
+    if body.admin_note is not None:
+        updates["admin_note"] = body.admin_note.strip() or None
+    if body.converted_client_id is not None:
+        updates["converted_client_id"] = body.converted_client_id.strip() or None
+
+    if not updates.keys() - {"updated_at"}:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    new_status = updates.get("status", existing.get("status"))
+    if new_status == "converted" and not updates.get("converted_client_id") and not existing.get(
+        "converted_client_id"
+    ):
+        pass  # allowed without client id until account is created
+
+    await db.referrals.update_one({"id": referral_id}, {"$set": updates})
+    fresh = await db.referrals.find_one({"id": referral_id}, {"_id": 0})
+
+    if body.status and body.status != existing.get("status"):
+        referrer_id = existing.get("referred_by_id")
+        referred_name = existing.get("referred_name") or "your referral"
+        if referrer_id:
+            if body.status == "converted":
+                _schedule_user_notification(
+                    referrer_id,
+                    "Referral converted",
+                    f"Great news! Your referral {referred_name} has been converted. Thank you!",
+                    {"type": "referral_converted", "referral_id": referral_id},
+                )
+            elif body.status == "rejected":
+                _schedule_user_notification(
+                    referrer_id,
+                    "Referral reviewed",
+                    f"Your referral for {referred_name} has been reviewed. Thank you for referring!",
+                    {"type": "referral_rejected", "referral_id": referral_id},
+                )
+
+    await log_audit(
+        actor_user_id=admin["id"],
+        action=f"referral.{new_status}",
+        metadata={"referral_id": referral_id},
+    )
+    return await _hydrate_referral(fresh)
+
+
 # ---------- Conversations ----------
 async def _assert_client_conversation_policy(user: dict, conv: dict, *, write: bool) -> None:
     """Clients may only access a direct thread with their currently assigned employee."""
@@ -4043,6 +4272,9 @@ async def on_startup():
         await db.complaints.create_index([("status", 1), ("created_at", -1)])
         await db.complaints.create_index("client_id")
         await db.complaints.create_index("employee_id")
+        await db.referrals.create_index([("status", 1), ("created_at", -1)])
+        await db.referrals.create_index("referred_by_id")
+        await db.referrals.create_index("referred_phone")
         await db.folders.create_index([("created_at", -1)])
         await db.folders.create_index("created_by_type")
         await db.folders.create_index("created_by_id")

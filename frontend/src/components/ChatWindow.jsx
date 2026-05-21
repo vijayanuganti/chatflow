@@ -72,7 +72,7 @@ export default function ChatWindow({
   statusBarInset = false,
 }) {
   const { user } = useAuth();
-  const { setActiveConversationId } = useChat();
+  const { setActiveConversationId, setChatComposerActive } = useChat();
   const navigate = useNavigate();
 
   const resolvedBackTo =
@@ -110,6 +110,12 @@ export default function ChatWindow({
   const [recording, setRecording] = useState(false);
   const [emojiPanelOpen, setEmojiPanelOpen] = useState(false);
   const scrollRef = useRef(null);
+
+  useEffect(() => {
+    const active = composerFocused || emojiPanelOpen;
+    setChatComposerActive(active);
+    return () => setChatComposerActive(false);
+  }, [composerFocused, emojiPanelOpen, setChatComposerActive]);
   const composerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const lastTypingPingRef = useRef(0);

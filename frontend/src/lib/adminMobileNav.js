@@ -19,6 +19,7 @@ export const ADMIN_SETTINGS_TABS = new Set([
   "reports",
   "permissions",
   "complaints",
+  "referrals",
   "storage",
   "inactive",
 ]);

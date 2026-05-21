@@ -30,6 +30,8 @@ export default function CreateAccountPage() {
     location.state?.allowedRoles ?? (me?.role === "admin" ? ["employee", "client"] : ["client"]);
   const defaultRole = location.state?.defaultRole ?? "client";
   const backTo = location.state?.backTo ?? panelBase(me?.role);
+  const referralId = location.state?.referralId;
+  const referralPrefill = location.state?.referralPrefill;
   const initialRole = allowedRoles.includes(defaultRole) ? defaultRole : allowedRoles[0];
 
   const [form, setForm] = useState({
@@ -66,6 +68,17 @@ export default function CreateAccountPage() {
     setMedOpen(false);
     setMedForm({ ...MEDICAL_PROFILE_DEFAULTS });
   }, [initialRole, me?.role, me?.id]);
+
+  useEffect(() => {
+    if (!referralPrefill) return;
+    setForm((prev) => ({
+      ...prev,
+      role: "client",
+      full_name: referralPrefill.full_name || prev.full_name,
+      phone_number: referralPrefill.phone_number || prev.phone_number,
+      username: referralPrefill.username || prev.username,
+    }));
+  }, [referralPrefill]);
 
   const loadAdminEmployees = async () => {
     setLoadingMeta(true);
@@ -156,6 +169,17 @@ export default function CreateAccountPage() {
     setSubmitting(true);
     try {
       const res = await api.post("/accounts", payload);
+      const newUserId = res.data?.user?.id;
+      if (referralId && newUserId) {
+        try {
+          await api.patch(`/admin/referrals/${referralId}`, {
+            status: "converted",
+            converted_client_id: newUserId,
+          });
+        } catch {
+          /* account created; referral link is best-effort */
+        }
+      }
       toast.success(`Account created for ${res.data.user.full_name}`);
       navigate(backTo, { state: { refreshAccounts: true } });
     } catch (err) {

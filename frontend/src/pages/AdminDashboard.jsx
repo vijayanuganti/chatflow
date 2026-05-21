@@ -28,9 +28,10 @@ import {
   MessageCircle, Eye, Plus, Layers, UserPlus, ShieldCheck,
   KeyRound, ShieldAlert, UserCheck, UserX, PowerOff, Power, Stethoscope,
   ArrowRightLeft, FolderPlus, Inbox, CheckCircle2, Clock, RotateCcw, Loader2,
-  HardDrive, Trash2, Settings, Folder, FileBarChart,
+  HardDrive, Trash2, Settings, Folder, FileBarChart, UserPlus,
 } from "lucide-react";
 import AdminReportsPane from "@/components/admin/AdminReportsPane";
+import AdminReferralsPane from "@/components/admin/AdminReferralsPane";
 import { useAuth } from "@/context/AuthContext";
 import { useChat } from "@/context/ChatContext";
 import { Button } from "@/components/ui/button";
@@ -103,7 +104,7 @@ import {
 } from "@/components/ui/dialog";
 
 const ADMIN_TAB_IDS = new Set([
-  "overview", "batches", "chats", "mychats", "users", "folders", "reports",
+  "overview", "batches", "chats", "mychats", "users", "referrals", "folders", "reports",
   "permissions", "inactive", "complaints", "storage", "more",
 ]);
 
@@ -1147,6 +1148,7 @@ export default function AdminDashboard() {
         <NavButton icon={Eye} label="Monitor Chats" active={tab === "chats"} onClick={() => goToTab("chats")} testId="admin-nav-chats" />
         <NavButton icon={MessageSquare} label="My Chats" active={tab === "mychats"} onClick={() => goToTab("mychats")} testId="admin-nav-mychats" />
         <NavButton icon={Users} label="Users" active={tab === "users"} onClick={() => goToTab("users")} testId="admin-nav-users" />
+        <NavButton icon={UserPlus} label="Referrals" active={tab === "referrals"} onClick={() => goToTab("referrals")} testId="admin-nav-referrals" />
         <NavButton icon={Folder} label="Folders" active={tab === "folders"} onClick={() => goToTab("folders")} testId="admin-nav-folders" />
         <NavButton icon={FileBarChart} label="Reports" active={tab === "reports"} onClick={() => goToTab("reports")} testId="admin-nav-reports" />
         <NavButton icon={Inbox} label="Complaints" active={tab === "complaints"} onClick={() => goToTab("complaints")} testId="admin-nav-complaints" badge={stats?.complaints_pending || 0} />
@@ -1240,6 +1242,7 @@ export default function AdminDashboard() {
               <AdminMoreTile icon={Folder} title="Folders" subtitle="Media library" onClick={() => goToTab("folders", { historyMode: "push" })} testId="more-folders" />
               <AdminMoreTile icon={FileBarChart} title="Reports" subtitle="User reports & PDF" onClick={() => goToTab("reports", { historyMode: "push" })} testId="more-reports" />
               <AdminMoreTile icon={ShieldCheck} title="Permissions" subtitle="Who can create clients" onClick={() => goToTab("permissions", { historyMode: "push" })} testId="more-permissions" />
+              <AdminMoreTile icon={UserPlus} title="Referrals" subtitle="Client referrals" onClick={() => goToTab("referrals", { historyMode: "push" })} testId="more-referrals" />
               <AdminMoreTile icon={Inbox} title="Complaints" subtitle={stats?.complaints_pending ? `${stats.complaints_pending} open` : "Inbox"} onClick={() => goToTab("complaints", { historyMode: "push" })} testId="more-complaints" />
               <AdminMoreTile icon={HardDrive} title="Storage" subtitle="Usage & quotas" onClick={() => goToTab("storage", { historyMode: "push" })} testId="more-storage" />
             </div>
@@ -1687,6 +1690,8 @@ export default function AdminDashboard() {
             </div>
           </div>
         )}
+
+        {tab === "referrals" && <AdminReferralsPane />}
 
         {tab === "complaints" && (
           <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-complaints-pane">
@@ -2317,7 +2322,7 @@ export default function AdminDashboard() {
           label="Settings"
           active={
             tab === "more" ||
-            ["permissions", "batches", "chats", "folders", "reports", "complaints", "storage", "inactive"].includes(tab)
+            ["permissions", "batches", "chats", "folders", "reports", "complaints", "storage", "inactive", "referrals"].includes(tab)
           }
           onClick={() => goToTab("more", { historyMode: "push" })}
           testId="admin-nav-mobile-settings"

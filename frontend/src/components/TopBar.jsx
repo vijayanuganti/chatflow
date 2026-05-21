@@ -1,5 +1,7 @@
-import React from "react";
-import { ArrowLeft, MessageCircle, MoreVertical, Settings, LogOut, UserPlus, Sun, Moon, ShieldAlert, RefreshCw } from "lucide-react";
+import React, { useState } from "react";
+import { ArrowLeft, MessageCircle, MoreVertical, Settings, LogOut, UserPlus, Sun, Moon, ShieldAlert, RefreshCw, Info } from "lucide-react";
+import AboutSheet from "@/components/AboutSheet";
+import ReferClientSheet from "@/components/ReferClientSheet";
 import { Button } from "@/components/ui/button";
 import Avatar from "@/components/Avatar";
 import {
@@ -24,6 +26,10 @@ export default function TopBar({
 }) {
   const { user, logout } = useAuth();
   const { toggleTheme, isDark } = useTheme();
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [referOpen, setReferOpen] = useState(false);
+  const canReferClient =
+    user?.role === "employee" || user?.role === "client";
   const canCreateAccounts =
     !!onCreateAccount &&
     (user?.role === "admin" || (user?.role === "employee" && !!user?.account_creation_access));
@@ -109,12 +115,24 @@ export default function TopBar({
             <DropdownMenuItem onClick={() => onOpenSettings?.()} data-testid="topbar-settings-item">
               <Settings /> Profile & settings
             </DropdownMenuItem>
+            {canReferClient && (
+              <DropdownMenuItem onClick={() => setReferOpen(true)} data-testid="topbar-refer-item">
+                <UserPlus /> Refer a Client
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => { logout(); }} data-testid="topbar-logout-item">
               <LogOut /> Logout
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setAboutOpen(true)} data-testid="topbar-about-item">
+              <Info /> About
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <AboutSheet open={aboutOpen} onOpenChange={setAboutOpen} />
+        {canReferClient && (
+          <ReferClientSheet open={referOpen} onOpenChange={setReferOpen} />
+        )}
       </div>
       </div>
     </header>

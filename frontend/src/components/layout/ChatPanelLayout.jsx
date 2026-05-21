@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Outlet, useOutletContext, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import { useChat } from "@/context/ChatContext";
 import { api } from "@/lib/api";
 import PanelBottomNav from "@/components/layout/PanelBottomNav";
 import { ChatPanelSidebar, useChatPanelNav } from "@/hooks/useChatPanelNav";
@@ -11,6 +12,7 @@ import { getChatConversationId } from "@/lib/chatMobileNav";
  */
 export default function ChatPanelLayout() {
   const { user } = useAuth();
+  const { chatComposerActive } = useChat();
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [searchParams] = useSearchParams();
   const chatConvIdFromUrl = getChatConversationId(searchParams);
@@ -37,7 +39,8 @@ export default function ChatPanelLayout() {
   });
 
   const isClient = (user?.role || "").toLowerCase() === "client";
-  const showMobileFooter = isClient || !chatConvIdFromUrl;
+  const showMobileFooter =
+    (isClient || !chatConvIdFromUrl) && !chatComposerActive;
 
   return (
     <div

@@ -11,6 +11,8 @@ export function ChatProvider({ children }) {
   const [activeConversationId, setActiveConversationIdState] = useState(
     () => getStoredActiveConversationId(),
   );
+  /** Mobile: hide panel footer while chat input / emoji keyboard is open. */
+  const [chatComposerActive, setChatComposerActive] = useState(false);
 
   const setActiveConversationId = useCallback((conversationId) => {
     const next = conversationId ? String(conversationId) : null;
@@ -28,8 +30,15 @@ export function ChatProvider({ children }) {
       activeConversationId,
       setActiveConversationId,
       clearActiveConversation,
+      chatComposerActive,
+      setChatComposerActive,
     }),
-    [activeConversationId, setActiveConversationId, clearActiveConversation],
+    [
+      activeConversationId,
+      setActiveConversationId,
+      clearActiveConversation,
+      chatComposerActive,
+    ],
   );
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
