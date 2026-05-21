@@ -25,7 +25,7 @@ import {
 import { toast } from "sonner";
 import {
   Users, MessageSquare, Briefcase, UserCircle2, LayoutDashboard,
-  MessageCircle, Eye, Activity, Plus, Layers, UserPlus, ShieldCheck,
+  MessageCircle, Eye, Plus, Layers, UserPlus, ShieldCheck,
   KeyRound, ShieldAlert, UserCheck, UserX, PowerOff, Power, Stethoscope,
   ArrowRightLeft, FolderPlus, Inbox, CheckCircle2, Clock, RotateCcw, Loader2,
   HardDrive, Trash2, Settings,
@@ -72,8 +72,6 @@ import {
   adminHasDrillDownSearch,
   adminTabNavigateTarget,
   buildAdminSearchParams,
-  getAdminActivityStep,
-  getAdminActivityUserId,
   getAdminBatchEmployeeId,
   getAdminBatchStep,
   getAdminChatConversationId,
@@ -98,8 +96,8 @@ import {
 } from "@/components/ui/dialog";
 
 const ADMIN_TAB_IDS = new Set([
-  "overview", "batches", "chats", "mychats", "activity", "users",
-  "accounts", "permissions", "inactive", "complaints", "storage", "more",
+  "overview", "batches", "chats", "mychats", "users",
+  "permissions", "inactive", "complaints", "storage", "more",
 ]);
 
 /** ASCII-only stat display (avoids em-dash mojibake in Android WebView). */
@@ -176,8 +174,6 @@ export default function AdminDashboard() {
   const chatConvIdFromUrl = getAdminChatConversationId(searchParams);
   const batchEmployeeIdFromUrl = getAdminBatchEmployeeId(searchParams);
   const batchStepFromUrl = getAdminBatchStep(searchParams);
-  const activityUserIdFromUrl = getAdminActivityUserId(searchParams);
-  const activityStepFromUrl = getAdminActivityStep(searchParams);
   const tab = useMemo(() => {
     if (!section) return "overview";
     return ADMIN_TAB_IDS.has(section) ? section : "overview";
@@ -207,11 +203,6 @@ export default function AdminDashboard() {
       setEmployeeBatches([]);
       setSelected(null);
     }
-    if (prev === "activity" && tab !== "activity") {
-      setActivityTarget(null);
-      setActivityData(null);
-      setMobileActivityStep("list");
-    }
     if (tab === "batches" && prev !== "batches") {
       setMobileBatchesStep("employees");
       setSelectedEmployee(null);
@@ -227,7 +218,6 @@ export default function AdminDashboard() {
   const [employeeBatches, setEmployeeBatches] = useState([]);
   const [mobileBatchesStep, setMobileBatchesStep] = useState("employees"); // employees | batches | chat
   const [mobileChatStep, setMobileChatStep] = useState("list"); // list | chat
-  const [mobileActivityStep, setMobileActivityStep] = useState("list"); // list | detail
   const [allConvs, setAllConvs] = useState([]); // admin monitoring
   const [myConvs, setMyConvs] = useState([]);   // admin's own chats
   const [selected, setSelected] = useState(null);
@@ -239,8 +229,6 @@ export default function AdminDashboard() {
   useEffect(() => {
     selectedIdRef.current = selected?.id ?? null;
   }, [selected?.id]);
-  const [activityTarget, setActivityTarget] = useState(null);
-  const [activityData, setActivityData] = useState(null);
   const [permissionSavingId, setPermissionSavingId] = useState(null);
   const [activeSavingId, setActiveSavingId] = useState(null);
   const [usersRoleFilter, setUsersRoleFilter] = useState("all");
@@ -290,14 +278,8 @@ export default function AdminDashboard() {
       selectedConv,
       mobileBatchesStep: batchesStep,
       mobileChatStep: chatStep,
-      resetActivityList,
       historyMode = "auto",
     } = opts;
-    if (resetActivityList) {
-      setActivityTarget(null);
-      setActivityData(null);
-      setMobileActivityStep("list");
-    }
     if (batchesStep != null) setMobileBatchesStep(batchesStep);
     if (chatStep != null) setMobileChatStep(chatStep);
     if (selectedConv !== undefined) setSelected(selectedConv);
@@ -501,17 +483,6 @@ export default function AdminDashboard() {
     }
   }, [user?.id]);
 
-  const loadActivity = useCallback(async (u) => {
-    if (!u?.id) return;
-    setActivityTarget(u);
-    try {
-      const res = await api.get(`/admin/users/${u.id}/activity`);
-      setActivityData(res.data);
-    } catch (err) {
-      toast.error(formatApiError(err));
-    }
-  }, []);
-
   /** Sync open chat from URL (?c=) after browser / system back. */
   useEffect(() => {
     if (tab !== "chats" && tab !== "mychats") return;
@@ -580,53 +551,6 @@ export default function AdminDashboard() {
     loadEmployeeBatches,
     employeeBatches,
     selected?.id,
-  ]);
-
-  /** Sync activity drill-down from URL (?au= & ?as=). */
-  useEffect(() => {
-    if (tab !== "activity") return;
-    if (!activityUserIdFromUrl) {
-      setActivityTarget(null);
-      setActivityData(null);
-      setMobileActivityStep("list");
-      if (activityStepFromUrl === "chat") {
-        setSelected(null);
-        setMessages([]);
-      }
-      return;
-    }
-    const u = users.find((x) => x.id === activityUserIdFromUrl);
-    if (u && activityTarget?.id !== u.id) {
-      void loadActivity(u);
-    }
-    if (activityStepFromUrl === "chat" && chatConvIdFromUrl) {
-      setMobileActivityStep("chat");
-      if (activityData?.conversations && selected?.id !== chatConvIdFromUrl) {
-        const conv = activityData.conversations.find((c) => c.id === chatConvIdFromUrl);
-        if (conv) {
-          setSelected(conv);
-          const cached = getCachedMessages(conv.id);
-          setMessages(cached?.length ? cached : []);
-          void loadMessages(conv.id);
-        }
-      }
-    } else if (activityStepFromUrl === "convs") {
-      setMobileActivityStep("convs");
-      setSelected(null);
-    } else if (activityStepFromUrl === "detail" || activityUserIdFromUrl) {
-      setMobileActivityStep("detail");
-    }
-  }, [
-    tab,
-    activityUserIdFromUrl,
-    activityStepFromUrl,
-    chatConvIdFromUrl,
-    users,
-    activityTarget?.id,
-    activityData?.conversations,
-    selected?.id,
-    loadMessages,
-    loadActivity,
   ]);
 
   useEffect(() => { loadOverview(); }, [loadOverview]);
@@ -843,64 +767,6 @@ export default function AdminDashboard() {
       state: { backTo: location.pathname },
     });
   }, [navigate, location.pathname]);
-
-  const openActivityUser = useCallback(
-    (u) => {
-      if (!u?.id) return;
-      void loadActivity(u);
-      setMobileActivityStep("detail");
-      navigate(
-        adminTabNavigateTarget("activity", {
-          activityUserId: u.id,
-          activityStep: "detail",
-        }),
-        { push: true },
-      );
-    },
-    [navigate, loadActivity],
-  );
-
-  const openActivityConversations = useCallback(() => {
-    if (!activityTarget?.id) return;
-    setMobileActivityStep("convs");
-    navigate(
-      adminTabNavigateTarget("activity", {
-        activityUserId: activityTarget.id,
-        activityStep: "convs",
-      }),
-      { push: true },
-    );
-  }, [navigate, activityTarget?.id]);
-
-  const openActivityChat = useCallback(
-    (conv) => {
-      if (!conv?.id || !activityTarget?.id) return;
-      setSelected(conv);
-      setMobileActivityStep("chat");
-      const cached = getCachedMessages(conv.id);
-      setMessages(cached?.length ? cached : []);
-      void loadMessages(conv.id);
-      navigate(
-        adminTabNavigateTarget("activity", {
-          activityUserId: activityTarget.id,
-          activityStep: "chat",
-          conversationId: conv.id,
-        }),
-        { push: true },
-      );
-    },
-    [navigate, activityTarget?.id, loadMessages],
-  );
-
-  const closeActivityChat = useCallback(() => {
-    if (tab === "activity" && activityStepFromUrl === "chat") {
-      navigate(-1);
-      return;
-    }
-    setSelected(null);
-    setMessages([]);
-    setMobileActivityStep("convs");
-  }, [tab, activityStepFromUrl, navigate]);
 
   const handleIncoming = useCallback((msg) => {
     if (!msg) return;
@@ -1198,8 +1064,7 @@ export default function AdminDashboard() {
   // hide the global topbar, the horizontal tab scroller and the bottom nav so
   // only the chat header + composer is visible (WhatsApp-style).
   const mobileInChat = (
-    ((tab === "chats" || tab === "mychats") && mobileChatStep === "chat") ||
-    (tab === "activity" && activityStepFromUrl === "chat" && !!chatConvIdFromUrl)
+    (tab === "chats" || tab === "mychats") && mobileChatStep === "chat"
   );
   const closeBatchChat = useCallback(() => {
     if (chatConvIdFromUrl) {
@@ -1261,11 +1126,6 @@ export default function AdminDashboard() {
     if ((tab === "chats" || tab === "mychats") && mobileChatStep === "chat") {
       return closeAdminChat;
     }
-    if (tab === "activity") {
-      if (activityStepFromUrl === "chat") return closeActivityChat;
-      if (activityStepFromUrl === "convs") return () => navigate(-1);
-      if (activityUserIdFromUrl) return () => navigate(-1);
-    }
     return undefined;
   })();
 
@@ -1284,7 +1144,7 @@ export default function AdminDashboard() {
           onCreateAccount={() =>
             navigate(createAccountPath("admin"), {
               push: true,
-              state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/accounts" },
+              state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/users" },
             })
           }
         />
@@ -1303,12 +1163,10 @@ export default function AdminDashboard() {
             <span className="font-display text-lg font-semibold hidden lg:inline">ChatFlow</span>
           </div>
         <NavButton icon={LayoutDashboard} label="Overview" active={tab === "overview"} onClick={() => goToTab("overview")} testId="admin-nav-overview" />
-        <NavButton icon={UserPlus} label="Accounts" active={tab === "accounts"} onClick={() => goToTab("accounts")} testId="admin-nav-accounts" />
         <NavButton icon={ShieldCheck} label="Permissions" active={tab === "permissions"} onClick={() => goToTab("permissions")} testId="admin-nav-permissions" />
         <NavButton icon={Layers} label="Batches" active={tab === "batches"} onClick={() => goToTab("batches")} testId="admin-nav-batches" />
         <NavButton icon={Eye} label="Monitor Chats" active={tab === "chats"} onClick={() => goToTab("chats")} testId="admin-nav-chats" />
         <NavButton icon={MessageSquare} label="My Chats" active={tab === "mychats"} onClick={() => goToTab("mychats")} testId="admin-nav-mychats" />
-        <NavButton icon={Activity} label="Activity" active={tab === "activity"} onClick={() => goToTab("activity")} testId="admin-nav-activity" />
         <NavButton icon={Users} label="Users" active={tab === "users"} onClick={() => goToTab("users")} testId="admin-nav-users" />
         <NavButton icon={Inbox} label="Complaints" active={tab === "complaints"} onClick={() => goToTab("complaints")} testId="admin-nav-complaints" badge={stats?.complaints_pending || 0} />
         <NavButton icon={HardDrive} label="Storage" active={tab === "storage"} onClick={() => goToTab("storage")} testId="admin-nav-storage" />
@@ -1364,9 +1222,7 @@ export default function AdminDashboard() {
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               <AdminMoreTile icon={Eye} title="Monitor chats" subtitle="All conversations" onClick={() => goToTab("chats", { mobileChatStep: "list", historyMode: "push" })} testId="more-monitor" />
               <AdminMoreTile icon={Layers} title="Batches" subtitle="Teams & clients" onClick={() => goToTab("batches", { mobileBatchesStep: "employees", historyMode: "push" })} testId="more-batches" />
-              <AdminMoreTile icon={UserPlus} title="Accounts" subtitle="Create users" onClick={() => goToTab("accounts", { historyMode: "push" })} testId="more-accounts" />
               <AdminMoreTile icon={ShieldCheck} title="Permissions" subtitle="Who can create clients" onClick={() => goToTab("permissions", { historyMode: "push" })} testId="more-permissions" />
-              <AdminMoreTile icon={Activity} title="Activity" subtitle="Audit trail" onClick={() => goToTab("activity", { resetActivityList: true, historyMode: "push" })} testId="more-activity" />
               <AdminMoreTile icon={Inbox} title="Complaints" subtitle={stats?.complaints_pending ? `${stats.complaints_pending} open` : "Inbox"} onClick={() => goToTab("complaints", { historyMode: "push" })} testId="more-complaints" />
               <AdminMoreTile icon={HardDrive} title="Storage" subtitle="Usage & quotas" onClick={() => goToTab("storage", { historyMode: "push" })} testId="more-storage" />
               <AdminMoreTile icon={UserX} title="Inactive" subtitle="Deactivated clients" onClick={() => goToTab("inactive", { historyMode: "push" })} testId="more-inactive" />
@@ -1658,223 +1514,6 @@ export default function AdminDashboard() {
                 statusBarInset={mobileInChat}
               />
             </main>
-          </div>
-        )}
-
-        {tab === "activity" && (
-          <div className="flex flex-1 overflow-hidden" data-testid="admin-activity-pane">
-            <div className={`w-full md:w-72 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col ${activityUserIdFromUrl ? "hidden md:flex" : ""}`}>
-              <div className="hidden md:block p-4 border-b border-gray-200 dark:border-gray-800">
-                <h2 className="font-display font-semibold dark:text-gray-100">Employee activity</h2>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Tap a person to see their chats.</p>
-              </div>
-              <div className="flex-1 overflow-y-auto">
-                {users.filter((u) => u.role !== "admin").map((u) => (
-                  <button
-                    key={u.id}
-                    onClick={() => openActivityUser(u)}
-                    data-testid={`activity-user-${u.id}`}
-                    className={`w-full flex items-center gap-3 p-3 border-b border-gray-50 dark:border-gray-800/60 text-left transition-colors ${
-                      activityTarget?.id === u.id
-                        ? "bg-amber-50 dark:bg-amber-500/15"
-                        : "hover:bg-gray-50 dark:hover:bg-gray-800/60"
-                    }`}
-                  >
-                    <Avatar name={u.full_name} avatarUrl={u.avatar_url} online={onlineUsers[u.id]} status={u.status} size={38} />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate dark:text-gray-100">{u.full_name}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 capitalize">{u.role}</div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <main className={`flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 ${
-              activityStepFromUrl === "chat" ? "hidden md:block" : activityUserIdFromUrl && activityStepFromUrl !== "convs" ? "block" : !activityUserIdFromUrl ? "hidden md:block" : "hidden"
-            }`}>
-              {!activityTarget ? (
-                <div className="h-full flex items-center justify-center text-gray-400 dark:text-gray-500 text-sm" data-testid="activity-empty">
-                  Select a user from the left to view their activity.
-                </div>
-              ) : !activityData ? (
-                <div className="p-10 text-gray-400 dark:text-gray-500">Loading activity...</div>
-              ) : (
-                <div className="p-4 sm:p-6 lg:p-10 space-y-6">
-                  <div className="flex items-start gap-4">
-                    <Avatar name={activityData.user.full_name} avatarUrl={activityData.user.avatar_url} online={onlineUsers[activityData.user.id]} status={activityData.user.status} size={64} />
-                    <div className="min-w-0">
-                      <h1 className="font-display text-2xl font-semibold dark:text-gray-100 truncate">{activityData.user.full_name}</h1>
-                      <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">@{activityData.user.username}  |  {activityData.user.role}</div>
-                      {activityData.user.bio && <p className="mt-2 text-sm text-gray-600 dark:text-gray-300 max-w-md">{activityData.user.bio}</p>}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-lg">
-                    <StatCard icon={MessageSquare} label="Conversations" value={activityData.conversations.length} testId="activity-stat-convs" />
-                    <StatCard icon={Activity} label="Messages sent" value={activityData.messages_sent} testId="activity-stat-msgs" accent="bg-amber-50 text-amber-900" />
-                    <StatCard icon={Users} label="Groups" value={activityData.conversations.filter((c) => c.type === "group").length} testId="activity-stat-groups" accent="bg-violet-50 text-violet-900" />
-                  </div>
-                  <Button
-                    type="button"
-                    className="md:hidden w-full rounded-full bg-emerald-900 hover:bg-emerald-950"
-                    onClick={openActivityConversations}
-                    data-testid="activity-view-conversations-mobile"
-                  >
-                    View conversations
-                  </Button>
-                  <div className="hidden md:block bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800">
-                    <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                      <h3 className="font-display font-semibold dark:text-gray-100">Conversations</h3>
-                    </div>
-                    <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                      {activityData.conversations.map((c) => (
-                        <button
-                          key={c.id}
-                          onClick={() => openActivityChat(c)}
-                          data-testid={`activity-conv-${c.id}`}
-                          className="w-full flex items-center gap-3 px-5 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/60 text-left"
-                        >
-                          <div className="flex -space-x-2">
-                            {(c.participants_info || []).slice(0, 2).map((p) => (
-                              <Avatar key={p.id} name={p.full_name} avatarUrl={p.avatar_url} online={onlineUsers[p.id]} size={32} />
-                            ))}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm truncate dark:text-gray-100">
-                              {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(", ")}
-                            </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{c.last_message || "No messages"}</div>
-                          </div>
-                          <Eye className="h-4 w-4 text-gray-400" />
-                        </button>
-                      ))}
-                      {activityData.conversations.length === 0 && (
-                        <div className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">No conversations yet.</div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </main>
-            {activityStepFromUrl === "convs" && activityData && (
-              <main className="flex md:hidden flex-1 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950">
-                <div className="shrink-0 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3">
-                  <h2 className="font-display font-semibold dark:text-gray-100">Conversations</h2>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{activityData.user.full_name}</p>
-                </div>
-                <div className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-800">
-                  {activityData.conversations.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => openActivityChat(c)}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/60"
-                      data-testid={`activity-conv-mobile-${c.id}`}
-                    >
-                      <Avatar name={(c.participants_info || [])[0]?.full_name} size={32} />
-                      <span className="flex-1 min-w-0 text-sm font-medium truncate dark:text-gray-100">
-                        {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(", ")}
-                      </span>
-                      <Eye className="h-4 w-4 text-gray-400 shrink-0" />
-                    </button>
-                  ))}
-                  {activityData.conversations.length === 0 && (
-                    <div className="py-8 text-center text-sm text-gray-400 dark:text-gray-500">No conversations yet.</div>
-                  )}
-                </div>
-              </main>
-            )}
-            {activityStepFromUrl === "chat" && (
-              <main className="flex md:hidden min-h-0 flex-1 flex-col overflow-hidden">
-                <ChatWindow
-                  conversation={selected}
-                  messages={messages}
-                  conversations={activityData?.conversations || []}
-                  onSendMessage={handleSendMessage}
-                  onPatchMessage={patchMessage}
-                  typingUsers={(selected && typingUsers[selected.id]) || {}}
-                  onlineUsers={onlineUsers}
-                  lastSeenByUser={lastSeenByUser}
-                  sendTyping={sendTyping}
-                  readOnly
-                  onBack={closeActivityChat}
-                  chatBackTo={adminTabPath("activity")}
-                  adminChatTab="activity"
-                  statusBarInset={mobileInChat}
-                />
-              </main>
-            )}
-          </div>
-        )}
-
-        {tab === "accounts" && (
-          <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-accounts-pane">
-            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-              <div>
-                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin  |  Accounts</div>
-                <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Create accounts</h1>
-                <p className="text-gray-500 dark:text-gray-400 mt-1">Provision employees and clients. Only authorised users may sign in.</p>
-              </div>
-              <Button
-                className="rounded-full bg-emerald-900 hover:bg-emerald-950 self-start sm:self-auto"
-                onClick={() =>
-                  navigate(createAccountPath("admin"), {
-                    push: true,
-                    state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/accounts" },
-                  })
-                }
-                data-testid="accounts-create-btn"
-              >
-                <UserPlus className="h-4 w-4 mr-1.5" />
-                New account
-              </Button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
-              <StatCard icon={Users} label="Total users" value={formatStatValue(stats?.total_users)} testId="accounts-stat-total" />
-              <StatCard icon={Briefcase} label="Employees" value={formatStatValue(stats?.employees)} testId="accounts-stat-employees" accent="bg-amber-50 text-amber-900" />
-              <StatCard icon={UserCircle2} label="Clients" value={formatStatValue(stats?.clients)} testId="accounts-stat-clients" accent="bg-sky-50 text-sky-900" />
-            </div>
-
-            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden">
-              <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-800">
-                <h2 className="font-display font-semibold dark:text-gray-100">Recent accounts</h2>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Most recently created accounts and the user who created them.</p>
-              </div>
-              <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                {[...users]
-                  .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""))
-                  .slice(0, 12)
-                  .map((u) => (
-                    <div
-                      key={u.id}
-                      className="px-4 sm:px-5 py-3 flex flex-col sm:flex-row sm:items-center gap-3"
-                      data-testid={`accounts-recent-${u.id}`}
-                    >
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <Avatar name={u.full_name} avatarUrl={u.avatar_url} status={u.status} size={36} />
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-sm truncate dark:text-gray-100">{u.full_name}</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                            @{u.username}  |  {u.phone_number || "no phone"}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">
-                        Created {u.created_at ? new Date(u.created_at).toLocaleString() : "-"}
-                      </div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400 hidden lg:block">
-                        by {u.created_by ? (usersById[u.created_by]?.full_name || "Unknown") : <span className="italic">system</span>}
-                      </div>
-                      <Button size="sm" variant="outline" className="rounded-full self-start sm:self-auto" onClick={() => openUserDetail(u)} data-testid={`accounts-detail-${u.id}`}>
-                        Details
-                      </Button>
-                    </div>
-                  ))}
-                {users.length === 0 && (
-                  <div className="py-10 text-center text-sm text-gray-400 dark:text-gray-500">No accounts yet.</div>
-                )}
-              </div>
-            </div>
           </div>
         )}
 
@@ -2202,7 +1841,7 @@ export default function AdminDashboard() {
                   onClick={() =>
                   navigate(createAccountPath("admin"), {
                     push: true,
-                    state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/accounts" },
+                    state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/users" },
                   })
                 }
                   size="sm"
@@ -2239,7 +1878,7 @@ export default function AdminDashboard() {
                   onClick={() =>
                   navigate(createAccountPath("admin"), {
                     push: true,
-                    state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/accounts" },
+                    state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/users" },
                   })
                 }
                   data-testid="users-create-account-btn"
@@ -2727,7 +2366,7 @@ export default function AdminDashboard() {
           label="Settings"
           active={
             tab === "more" ||
-            ["accounts", "permissions", "batches", "chats", "activity", "complaints", "storage", "inactive"].includes(tab)
+            ["permissions", "batches", "chats", "complaints", "storage", "inactive"].includes(tab)
           }
           onClick={() => goToTab("more", { historyMode: "push" })}
           testId="admin-nav-mobile-settings"

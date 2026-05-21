@@ -28,7 +28,7 @@ export default function ResetPasswordPage() {
       })
       .catch((err) => {
         toast.error(formatApiError(err));
-        navigate("/admin/accounts", { replace: true });
+        navigate("/admin/users", { replace: true });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

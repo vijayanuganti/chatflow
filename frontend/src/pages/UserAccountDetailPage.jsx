@@ -24,7 +24,7 @@ export default function UserAccountDetailPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user: me } = useAuth();
-  const backTo = resolveBackTo(location.state, "/admin/accounts");
+  const backTo = resolveBackTo(location.state, "/admin/users");
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [toggleBusy, setToggleBusy] = useState(false);
