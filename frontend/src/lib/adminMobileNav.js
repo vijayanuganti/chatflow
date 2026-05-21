@@ -15,6 +15,7 @@ export const ADMIN_MOBILE_ROOT_TABS = new Set(["overview", "mychats", "users", "
 export const ADMIN_SETTINGS_TABS = new Set([
   "chats",
   "batches",
+  "folders",
   "permissions",
   "complaints",
   "storage",

@@ -3875,6 +3875,9 @@ async def on_startup():
         await db.complaints.create_index([("status", 1), ("created_at", -1)])
         await db.complaints.create_index("client_id")
         await db.complaints.create_index("employee_id")
+        await db.folders.create_index([("created_at", -1)])
+        await db.folder_items.create_index("folder_id")
+        await db.folder_items.create_index([("folder_id", 1), ("category", 1)])
 
         if _init_firebase():
             logger.info("Firebase Admin ready — background push (FCM) enabled")
@@ -4032,4 +4035,54 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+async def _folder_upload_fileobj(fileobj, key: str, content_type: str, filename: str):
+    from io import BytesIO
+
+    mime = (content_type or "").lower()
+    data = fileobj.read()
+    size = len(data)
+    bio = BytesIO(data)
+    file_id = key.split("/")[-1]
+    if S3_BUCKET:
+        file_url = _upload_to_s3(bio, key, mime)
+    else:
+        dest = UPLOAD_DIR / file_id
+        with dest.open("wb") as f:
+            f.write(data)
+        file_url = f"/api/files/{file_id}"
+    return file_url, size
+
+
+async def _folder_delete_storage_urls(urls: List[Optional[str]]) -> None:
+    keys = _urls_to_s3_keys(urls)
+    if keys:
+        await asyncio.to_thread(_delete_s3_keys_blocking, keys)
+    for url in urls or []:
+        if not url or not str(url).startswith("/api/files/"):
+            continue
+        fid = str(url).rstrip("/").split("/")[-1]
+        if ".." in fid or "/" in fid or "\\" in fid:
+            continue
+        path = UPLOAD_DIR / fid
+        if path.is_file():
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+
+from folders_api import register_folder_routes
+
+register_folder_routes(
+    api_router,
+    db,
+    get_current_user=get_current_user,
+    require_admin=require_admin,
+    upload_fileobj=_folder_upload_fileobj,
+    delete_storage_urls=_folder_delete_storage_urls,
+    log_audit=log_audit,
+)
+
 app.include_router(api_router, prefix="/api")

@@ -55,7 +55,7 @@ import {
   mergeMessageStatus,
 } from "@/lib/messageSeen";
 import { toast } from "sonner";
-import { MessageSquare, UtensilsCrossed, Settings, Layers } from "lucide-react";
+import { MessageSquare, UtensilsCrossed, Settings, Layers, Folder } from "lucide-react";
 import ComposeIcon from "@/components/icons/ComposeIcon";
 import PanelBottomNav from "@/components/layout/PanelBottomNav";
 import ProfileQuickView from "@/components/ProfileQuickView";
@@ -833,6 +833,17 @@ export default function ChatApp() {
               },
             },
             {
+              id: "folders",
+              label: "Folders",
+              icon: Folder,
+              active: mobileSection === "folders",
+              testId: "client-nav-folders",
+              onClick: () => {
+                if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
+                navigate("/chat/folders", { push: true });
+              },
+            },
+            {
               id: "settings",
               label: "Settings",
               icon: Settings,
@@ -874,6 +885,17 @@ export default function ChatApp() {
               onClick: () => {
                 setMobileSection("batches");
                 document.querySelector("[data-testid='batch-boards']")?.scrollIntoView({ behavior: "smooth" });
+              },
+            },
+            {
+              id: "folders",
+              label: "Folders",
+              icon: Folder,
+              active: mobileSection === "folders",
+              testId: "employee-nav-folders",
+              onClick: () => {
+                if (listScrollRef.current) saveChatListScroll(listScrollRef.current.scrollTop);
+                navigate("/chat/folders", { push: true });
               },
             },
             {

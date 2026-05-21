@@ -17,6 +17,8 @@ import NewConversationPage from "@/pages/NewConversationPage";
 import DietPlanPage from "@/pages/DietPlanPage";
 import UserProfilePage from "@/pages/UserProfilePage";
 import RaiseComplaintPage from "@/pages/RaiseComplaintPage";
+import FolderBrowsePage from "@/pages/FolderBrowsePage";
+import FolderDetailPage from "@/pages/FolderDetailPage";
 import { Toaster } from "@/components/ui/sonner";
 import PushNotificationBootstrap from "@/components/PushNotificationBootstrap";
 import InAppMessageBanner from "@/components/InAppMessageBanner";
@@ -170,6 +172,22 @@ function App() {
               element={
                 <Protected roles={["employee", "client", "admin"]}>
                   <DietPlanPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/chat/folders"
+              element={
+                <Protected roles={["employee", "client"]}>
+                  <FolderBrowsePage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/chat/folders/:folderId"
+              element={
+                <Protected roles={["employee", "client"]}>
+                  <FolderDetailPage />
                 </Protected>
               }
             />
