@@ -213,7 +213,10 @@ async def user_can_access_folder(db, folder: dict, user: dict) -> bool:
     if ctype == "employee":
         if user.get("role") == "employee":
             return _folder_created_by_id(folder) == user.get("id")
-        return any(await user_matches_employee_access_rule(db, user, r, folder) for r in rules)
+        for r in rules:
+            if await user_matches_employee_access_rule(db, user, r, folder):
+                return True
+        return False
     return False
 
 
