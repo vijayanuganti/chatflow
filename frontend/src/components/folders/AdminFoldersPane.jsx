@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FolderPlus, LayoutGrid, List, ArrowLeft, Pencil, Trash2, FolderOpen, Loader2,
 } from "lucide-react";
@@ -23,11 +23,20 @@ import {
   listAdminFolders,
   updateAdminFolder,
 } from "@/lib/foldersApi";
+import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import { matchesFolderSearch } from "@/lib/adminSearchFilters";
 import { toast } from "sonner";
+
+const FOLDER_DIVISION_TABS = [
+  { id: "admin", label: "Admin folders" },
+  { id: "employee", label: "Employee folders" },
+];
 
 export default function AdminFoldersPane() {
   const [folders, setFolders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [divisionTab, setDivisionTab] = useState("admin");
+  const [folderSearchQuery, setFolderSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState("grid");
   const [selectedId, setSelectedId] = useState(null);
   const [selectedFolder, setSelectedFolder] = useState(null);
@@ -122,6 +131,23 @@ export default function AdminFoldersPane() {
     setEditAccessOpen(true);
   };
 
+  const foldersByDivision = useMemo(() => {
+    const admin = [];
+    const employee = [];
+    for (const f of folders) {
+      if (f.created_by_type === "employee") employee.push(f);
+      else admin.push(f);
+    }
+    return { admin, employee };
+  }, [folders]);
+
+  const divisionFolders = foldersByDivision[divisionTab] || [];
+
+  const displayedFolders = useMemo(
+    () => divisionFolders.filter((f) => matchesFolderSearch(f, folderSearchQuery)),
+    [divisionFolders, folderSearchQuery],
+  );
+
   const handleSaveAccess = async () => {
     if (!selectedId || !accessSel.rules?.length) {
       toast.error("Select at least one access option");
@@ -209,16 +235,58 @@ export default function AdminFoldersPane() {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2" data-testid="admin-folders-division-tabs">
+        {FOLDER_DIVISION_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setDivisionTab(t.id)}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs ${
+              divisionTab === t.id
+                ? "border-emerald-800 bg-emerald-900 text-white"
+                : "border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+            }`}
+            data-testid={`admin-folders-division-${t.id}`}
+          >
+            {t.label}
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
+                divisionTab === t.id ? "bg-white/20" : "bg-gray-100 dark:bg-gray-800"
+              }`}
+            >
+              {(foldersByDivision[t.id] || []).length}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <AdminSearchBar
+        value={folderSearchQuery}
+        onChange={setFolderSearchQuery}
+        placeholder="Search folders..."
+        testId="folders-search"
+      />
+
       {loading && <div className="text-sm text-gray-500">Loading folders...</div>}
       {!loading && folders.length === 0 && (
         <div className="py-16 text-center text-gray-500 rounded-2xl border border-dashed border-gray-300 dark:border-gray-700">
           No folders yet. Create one to get started.
         </div>
       )}
+      {!loading && folders.length > 0 && divisionFolders.length === 0 && (
+        <div className="py-12 text-center text-sm text-gray-500 rounded-2xl border border-dashed border-gray-300 dark:border-gray-700">
+          No folders in this section.
+        </div>
+      )}
+      {!loading && divisionFolders.length > 0 && displayedFolders.length === 0 && folderSearchQuery.trim() && (
+        <div className="py-12 text-center text-sm text-gray-500" data-testid="folders-search-empty">
+          No folders found.
+        </div>
+      )}
 
-      {viewMode === "grid" ? (
+      {displayedFolders.length > 0 && viewMode === "grid" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {folders.map((f) => (
+          {displayedFolders.map((f) => (
             <div
               key={f.id}
               className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 hover:shadow-md transition-shadow cursor-pointer"
@@ -246,9 +314,9 @@ export default function AdminFoldersPane() {
             </div>
           ))}
         </div>
-      ) : (
+      ) : displayedFolders.length > 0 ? (
         <div className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
-          {folders.map((f) => (
+          {displayedFolders.map((f) => (
             <div key={f.id} className="flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-gray-800/40 cursor-pointer" onClick={() => setSelectedId(f.id)}>
               <FolderOpen className="h-5 w-5 text-emerald-800 shrink-0" />
               <div className="flex-1 min-w-0">
@@ -261,7 +329,7 @@ export default function AdminFoldersPane() {
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">

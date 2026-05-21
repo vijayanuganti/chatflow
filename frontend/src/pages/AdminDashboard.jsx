@@ -37,6 +37,8 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import Avatar from "@/components/Avatar";
 import PresenceLabel from "@/components/admin/PresenceLabel";
+import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import { matchesEmployeeSearch, matchesUserSearch } from "@/lib/adminSearchFilters";
 import {
   adminChatTabBackTo,
   adminTabPath,
@@ -255,6 +257,8 @@ export default function AdminDashboard() {
   const [permissionSavingId, setPermissionSavingId] = useState(null);
   const [activeSavingId, setActiveSavingId] = useState(null);
   const [usersRoleFilter, setUsersRoleFilter] = useState("all");
+  const [usersSearchQuery, setUsersSearchQuery] = useState("");
+  const [batchesEmployeeSearch, setBatchesEmployeeSearch] = useState("");
   const [batchStatusTab, setBatchStatusTab] = useState("active");
   const [batchStatusSavingId, setBatchStatusSavingId] = useState(null);
   const [listSelection, setListSelection] = useState(null);
@@ -1013,6 +1017,16 @@ export default function AdminDashboard() {
     [usersRoleFilter],
   );
 
+  const displayedUsers = useMemo(
+    () => users.filter(filterUsersForTab).filter((u) => matchesUserSearch(u, usersSearchQuery)),
+    [users, filterUsersForTab, usersSearchQuery],
+  );
+
+  const filteredEmployeesForBatches = useMemo(
+    () => (employees || []).filter((e) => matchesEmployeeSearch(e, batchesEmployeeSearch)),
+    [employees, batchesEmployeeSearch],
+  );
+
   const usersTabCounts = useMemo(() => {
     const counts = {};
     USERS_LIST_TABS.forEach((t) => {
@@ -1198,7 +1212,6 @@ export default function AdminDashboard() {
         <NavButton icon={HardDrive} label="Storage" active={tab === "storage"} onClick={() => goToTab("storage")} testId="admin-nav-storage" />
         <NavButton icon={Settings} label="Settings & more" active={tab === "more"} onClick={() => goToTab("more")} testId="admin-nav-more" />
         <div className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-[0.2em] text-emerald-200/50 hidden lg:block">Archive</div>
-        <NavButton icon={UserX} label="Inactive" active={tab === "inactive"} onClick={() => goToTab("inactive")} testId="admin-nav-inactive" />
         <div className="mt-auto px-2 py-2 text-[10px] text-emerald-200/70 hidden lg:block">
           Logged in as <span className="font-medium text-emerald-100">{user?.full_name}</span>
         </div>
@@ -1288,7 +1301,6 @@ export default function AdminDashboard() {
               <AdminMoreTile icon={ShieldCheck} title="Permissions" subtitle="Who can create clients" onClick={() => goToTab("permissions", { historyMode: "push" })} testId="more-permissions" />
               <AdminMoreTile icon={Inbox} title="Complaints" subtitle={stats?.complaints_pending ? `${stats.complaints_pending} open` : "Inbox"} onClick={() => goToTab("complaints", { historyMode: "push" })} testId="more-complaints" />
               <AdminMoreTile icon={HardDrive} title="Storage" subtitle="Usage & quotas" onClick={() => goToTab("storage", { historyMode: "push" })} testId="more-storage" />
-              <AdminMoreTile icon={UserX} title="Inactive" subtitle="Deactivated clients" onClick={() => goToTab("inactive", { historyMode: "push" })} testId="more-inactive" />
             </div>
             <button
               type="button"
@@ -1306,12 +1318,20 @@ export default function AdminDashboard() {
           <div className="flex min-h-0 flex-1 overflow-hidden" data-testid="admin-batches-pane">
             {/* Employees */}
             <div className={`flex min-h-0 w-full flex-col border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 md:w-72 ${mobileBatchesStep !== "employees" ? "hidden md:flex" : ""}`}>
-              <div className="hidden md:block p-4 border-b border-gray-200 dark:border-gray-800">
-                <h2 className="font-display font-semibold dark:text-gray-100">Employees</h2>
-                <p className="text-xs text-gray-500 dark:text-gray-400">Pick an employee to view their batches.</p>
+              <div className="p-3 md:p-4 border-b border-gray-200 dark:border-gray-800 space-y-3 shrink-0">
+                <div className="hidden md:block">
+                  <h2 className="font-display font-semibold dark:text-gray-100">Employees</h2>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">Pick an employee to view their batches.</p>
+                </div>
+                <AdminSearchBar
+                  value={batchesEmployeeSearch}
+                  onChange={setBatchesEmployeeSearch}
+                  placeholder="Search by employee name or ID..."
+                  testId="batches-employee-search"
+                />
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
-                {(employees || []).map((e) => (
+                {filteredEmployeesForBatches.map((e) => (
                   <button
                     key={e.id}
                     onClick={() => {
@@ -1350,6 +1370,11 @@ export default function AdminDashboard() {
                 ))}
                 {(employees || []).length === 0 && (
                   <div className="p-6 text-sm text-gray-400 dark:text-gray-500">No employees found.</div>
+                )}
+                {(employees || []).length > 0 && filteredEmployeesForBatches.length === 0 && (
+                  <div className="p-6 text-sm text-gray-400 dark:text-gray-500 text-center" data-testid="batches-employee-search-empty">
+                    No batches found for this employee.
+                  </div>
                 )}
               </div>
             </div>
@@ -1938,6 +1963,12 @@ export default function AdminDashboard() {
                   New account
                 </Button>
               </div>
+              <AdminSearchBar
+                value={usersSearchQuery}
+                onChange={setUsersSearchQuery}
+                placeholder="Search by name, ID, phone or email..."
+                testId="users-search"
+              />
               {/* Mobile: WhatsApp-style horizontal filter chips */}
               <div
                 className="md:hidden sticky top-0 z-10 -mx-4 bg-gray-50/95 px-4 pb-2 pt-0 backdrop-blur dark:bg-gray-950/95"
@@ -1994,9 +2025,12 @@ export default function AdminDashboard() {
               </div>
             </div>
             <div className="md:hidden space-y-3">
-              {users
-                .filter(filterUsersForTab)
-                .map((u) => (
+              {displayedUsers.length === 0 && usersSearchQuery.trim() && (
+                <div className="py-8 text-center text-gray-400 dark:text-gray-500 bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800" data-testid="users-search-empty">
+                  No results found.
+                </div>
+              )}
+              {displayedUsers.map((u) => (
                 <div key={u.id} className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4" data-testid={`admin-user-card-${u.id}`}>
                   <div className="flex items-center gap-3">
                     <Avatar name={u.full_name} avatarUrl={u.avatar_url} online={onlineUsers[u.id]} status={u.status} size={40} />
@@ -2118,7 +2152,11 @@ export default function AdminDashboard() {
                   </div>
                 </div>
               ))}
-              {users.length === 0 && (<div className="py-8 text-center text-gray-400 dark:text-gray-500 bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800">No users yet.</div>)}
+              {users.length === 0 && (
+                <div className="py-8 text-center text-gray-400 dark:text-gray-500 bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800">
+                  No users yet.
+                </div>
+              )}
             </div>
             <div className="hidden md:block bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden overflow-x-auto">
               <table className="w-full text-sm min-w-[860px]">
@@ -2135,9 +2173,7 @@ export default function AdminDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800 dark:text-gray-200">
-                  {users
-                    .filter(filterUsersForTab)
-                    .map((u) => (
+                  {displayedUsers.map((u) => (
                     <tr key={u.id} data-testid={`admin-user-row-${u.id}`}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
@@ -2285,7 +2321,12 @@ export default function AdminDashboard() {
                       </td>
                     </tr>
                   ))}
-                  {users.length === 0 && (<tr><td colSpan={8} className="py-8 text-center text-gray-400 dark:text-gray-500">No users yet.</td></tr>)}
+                  {users.length === 0 && (
+                    <tr><td colSpan={8} className="py-8 text-center text-gray-400 dark:text-gray-500">No users yet.</td></tr>
+                  )}
+                  {users.length > 0 && displayedUsers.length === 0 && usersSearchQuery.trim() && (
+                    <tr><td colSpan={8} className="py-8 text-center text-gray-400 dark:text-gray-500" data-testid="users-search-empty-desktop">No results found.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
