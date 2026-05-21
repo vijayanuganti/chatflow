@@ -3,7 +3,6 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import {
-  createAccountPath,
   newConversationPath,
   newConversationState,
   raiseComplaintPath,
@@ -104,10 +103,6 @@ export default function ChatApp() {
   const [listSelection, setListSelection] = useState(null);
   const [quickView, setQuickView] = useState(null);
   const listScrollRef = useRef(null);
-  const canCreateAccounts =
-    user?.role === "admin" ||
-    (user?.role === "employee" && !!user?.account_creation_access);
-
   // Restore thread from URL, push, or sessionStorage (returning from diet/medical).
   useEffect(() => {
     const convId =
@@ -743,18 +738,6 @@ export default function ChatApp() {
             navigate(profilePath(user?.role));
           }}
           onRefresh={handleRefresh}
-          onCreateAccount={
-            canCreateAccounts
-              ? () =>
-                  navigate(createAccountPath(user?.role), {
-                    state: {
-                      allowedRoles: user?.role === "admin" ? ["employee", "client"] : ["client"],
-                      defaultRole: "client",
-                      backTo: "/chat",
-                    },
-                  })
-              : undefined
-          }
           onRaiseComplaint={
             user?.role === "client"
               ? () => navigate(raiseComplaintPath(), { push: true })

@@ -1167,12 +1167,6 @@ export default function AdminDashboard() {
           title={topbarTitle}
           onBack={topbarOnBack}
           onRefresh={handleRefresh}
-          onCreateAccount={() =>
-            navigate(createAccountPath("admin"), {
-              push: true,
-              state: { allowedRoles: ["employee", "client"], defaultRole: "client", backTo: "/admin/users" },
-            })
-          }
         />
       </div>
 
