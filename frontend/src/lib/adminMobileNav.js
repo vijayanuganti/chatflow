@@ -16,6 +16,7 @@ export const ADMIN_SETTINGS_TABS = new Set([
   "chats",
   "batches",
   "folders",
+  "reports",
   "permissions",
   "complaints",
   "storage",

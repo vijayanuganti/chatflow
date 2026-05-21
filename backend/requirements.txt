@@ -19,5 +19,9 @@ python-multipart==0.0.9
 boto3==1.34.0
 httpx==0.27.0
 
+# Reports PDF
+reportlab>=4.0.0
+Pillow>=10.0.0
+
 # Firebase Cloud Messaging
 firebase-admin>=6.5.0

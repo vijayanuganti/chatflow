@@ -214,7 +214,7 @@ export default function UserAccountDetailPage() {
                 }
                 data-testid="user-detail-diet-plan"
               >
-                <UtensilsCrossed className="h-4 w-4 mr-1.5" /> Diet plan
+                <UtensilsCrossed className="h-4 w-4 mr-1.5" /> Diet log
               </Button>
             </div>
           )}

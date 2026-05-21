@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import MobilePageShell from "@/components/layout/MobilePageShell";
-import DietPlanContent from "@/components/diet/DietPlanContent";
+import ClientDietLog from "@/components/diet/ClientDietLog";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigateBack } from "@/hooks/useNavigateBack";
@@ -57,22 +57,19 @@ export default function DietPlanPage({ panelLayout = false }) {
   }, [client?.id, resolvedClientId, me, navigate, backTo]);
 
   const description = isClientViewer
-    ? "Your nutritionist's plan for each day. Upload a photo of what you actually ate to log it."
-    : "Suggest morning, afternoon and night meals. The client uploads photos as they complete each one.";
+    ? "Log meals by day — upload photos of what you ate. Each photo is timestamped automatically."
+    : "View this client's diet log (photos by day). Read-only.";
 
   return (
     <MobilePageShell
       embedded={panelLayout}
-      title={client ? `Diet plan | ${client.full_name}` : "Diet plan"}
+      title={client ? `Diet log | ${client.full_name}` : "Diet log"}
       description={description}
       onBack={handleBack}
       testId="diet-plan-page"
     >
       {client?.id ? (
-        <DietPlanContent
-          client={client}
-          startFromDayOne={!!location.state?.startFromDayOne}
-        />
+        <ClientDietLog client={client} />
       ) : (
         <div className="py-12 text-center text-sm text-gray-400">Loading client...</div>
       )}

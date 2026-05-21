@@ -783,7 +783,7 @@ export default function ChatWindow({
               className="rounded-full hidden sm:inline-flex"
               onClick={openDietPlan}
               data-testid="chat-header-diet-btn"
-              title="Diet plan"
+              title="Diet log"
             >
               <UtensilsCrossed className="h-4 w-4 sm:mr-1.5" />
               <span className="hidden md:inline">Diet</span>
@@ -794,7 +794,7 @@ export default function ChatWindow({
               className="rounded-full sm:hidden"
               onClick={openDietPlan}
               data-testid="chat-header-diet-btn-mobile"
-              title="Diet plan"
+              title="Diet log"
             >
               <UtensilsCrossed className="h-4 w-4" />
             </Button>

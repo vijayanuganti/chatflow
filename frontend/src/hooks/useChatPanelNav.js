@@ -36,7 +36,7 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
       },
       {
         id: "diet",
-        label: "My Diet",
+        label: "Diet",
         icon: UtensilsCrossed,
         active: isActive("diet"),
         testId: "client-nav-diet",

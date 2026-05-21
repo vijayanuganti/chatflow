@@ -2124,8 +2124,13 @@ async def admin_delete_user(
 
     if target.get("role") == "client":
         diet_urls = await _diet_photo_urls_for_client(user_id)
+        async for ent in db.diet_entries.find({"client_id": user_id}, {"photo_path": 1, "_id": 0}):
+            p = ent.get("photo_path")
+            if p:
+                diet_urls.add(p)
         all_keys |= _urls_to_s3_keys(list(diet_urls))
         await db.diet_plans.delete_many({"client_id": user_id})
+        await db.diet_entries.delete_many({"client_id": user_id})
         await db.batches.update_many({"client_ids": user_id}, {"$pull": {"client_ids": user_id}})
 
     convs = await db.conversations.find({"participants": user_id}, {"_id": 0}).to_list(5000)
@@ -3878,6 +3883,8 @@ async def on_startup():
         await db.folders.create_index([("created_at", -1)])
         await db.folders.create_index("created_by_type")
         await db.folders.create_index("created_by_id")
+        await db.diet_entries.create_index([("client_id", 1), ("day_number", 1)])
+        await db.diet_entries.create_index([("client_id", 1), ("entry_date", 1)])
         await db.folder_items.create_index("folder_id")
         await db.folder_items.create_index([("folder_id", 1), ("category", 1)])
         await migrate_folders_schema(db)
@@ -4085,7 +4092,25 @@ async def _folder_delete_storage_urls(urls: List[Optional[str]]) -> None:
                 pass
 
 
+from diet_api import register_diet_routes
 from folders_api import migrate_folders_schema, register_folder_routes
+from reports_api import register_reports_routes
+
+register_diet_routes(
+    api_router,
+    db,
+    get_current_user=get_current_user,
+    upload_fileobj=_folder_upload_fileobj,
+    delete_storage_urls=_folder_delete_storage_urls,
+    log_audit=log_audit,
+)
+
+register_reports_routes(
+    api_router,
+    db,
+    require_admin=require_admin,
+    upload_dir=str(UPLOAD_DIR),
+)
 
 register_folder_routes(
     api_router,

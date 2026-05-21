@@ -28,8 +28,9 @@ import {
   MessageCircle, Eye, Plus, Layers, UserPlus, ShieldCheck,
   KeyRound, ShieldAlert, UserCheck, UserX, PowerOff, Power, Stethoscope,
   ArrowRightLeft, FolderPlus, Inbox, CheckCircle2, Clock, RotateCcw, Loader2,
-  HardDrive, Trash2, Settings, Folder,
+  HardDrive, Trash2, Settings, Folder, FileBarChart,
 } from "lucide-react";
+import AdminReportsPane from "@/components/admin/AdminReportsPane";
 import { useAuth } from "@/context/AuthContext";
 import { useChat } from "@/context/ChatContext";
 import { Button } from "@/components/ui/button";
@@ -97,7 +98,7 @@ import {
 } from "@/components/ui/dialog";
 
 const ADMIN_TAB_IDS = new Set([
-  "overview", "batches", "chats", "mychats", "users", "folders",
+  "overview", "batches", "chats", "mychats", "users", "folders", "reports",
   "permissions", "inactive", "complaints", "storage", "more",
 ]);
 
@@ -1190,6 +1191,7 @@ export default function AdminDashboard() {
         <NavButton icon={MessageSquare} label="My Chats" active={tab === "mychats"} onClick={() => goToTab("mychats")} testId="admin-nav-mychats" />
         <NavButton icon={Users} label="Users" active={tab === "users"} onClick={() => goToTab("users")} testId="admin-nav-users" />
         <NavButton icon={Folder} label="Folders" active={tab === "folders"} onClick={() => goToTab("folders")} testId="admin-nav-folders" />
+        <NavButton icon={FileBarChart} label="Reports" active={tab === "reports"} onClick={() => goToTab("reports")} testId="admin-nav-reports" />
         <NavButton icon={Inbox} label="Complaints" active={tab === "complaints"} onClick={() => goToTab("complaints")} testId="admin-nav-complaints" badge={stats?.complaints_pending || 0} />
         <NavButton icon={HardDrive} label="Storage" active={tab === "storage"} onClick={() => goToTab("storage")} testId="admin-nav-storage" />
         <NavButton icon={Settings} label="Settings & more" active={tab === "more"} onClick={() => goToTab("more")} testId="admin-nav-more" />
@@ -1280,6 +1282,7 @@ export default function AdminDashboard() {
               <AdminMoreTile icon={Eye} title="Monitor chats" subtitle="All conversations" onClick={() => goToTab("chats", { mobileChatStep: "list", historyMode: "push" })} testId="more-monitor" />
               <AdminMoreTile icon={Layers} title="Batches" subtitle="Teams & clients" onClick={() => goToTab("batches", { mobileBatchesStep: "employees", historyMode: "push" })} testId="more-batches" />
               <AdminMoreTile icon={Folder} title="Folders" subtitle="Media library" onClick={() => goToTab("folders", { historyMode: "push" })} testId="more-folders" />
+              <AdminMoreTile icon={FileBarChart} title="Reports" subtitle="User reports & PDF" onClick={() => goToTab("reports", { historyMode: "push" })} testId="more-reports" />
               <AdminMoreTile icon={ShieldCheck} title="Permissions" subtitle="Who can create clients" onClick={() => goToTab("permissions", { historyMode: "push" })} testId="more-permissions" />
               <AdminMoreTile icon={Inbox} title="Complaints" subtitle={stats?.complaints_pending ? `${stats.complaints_pending} open` : "Inbox"} onClick={() => goToTab("complaints", { historyMode: "push" })} testId="more-complaints" />
               <AdminMoreTile icon={HardDrive} title="Storage" subtitle="Usage & quotas" onClick={() => goToTab("storage", { historyMode: "push" })} testId="more-storage" />
@@ -1578,6 +1581,12 @@ export default function AdminDashboard() {
         {tab === "folders" && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <AdminFoldersPane />
+          </div>
+        )}
+
+        {tab === "reports" && (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <AdminReportsPane />
           </div>
         )}
 
@@ -2460,7 +2469,7 @@ export default function AdminDashboard() {
           label="Settings"
           active={
             tab === "more" ||
-            ["permissions", "batches", "chats", "folders", "complaints", "storage", "inactive"].includes(tab)
+            ["permissions", "batches", "chats", "folders", "reports", "complaints", "storage", "inactive"].includes(tab)
           }
           onClick={() => goToTab("more", { historyMode: "push" })}
           testId="admin-nav-mobile-settings"
