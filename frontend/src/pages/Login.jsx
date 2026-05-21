@@ -17,6 +17,11 @@ import { api, formatApiError, BROWSER_ID_KEY } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 import COUNTRIES, { DEFAULT_COUNTRY_CODE, getCountry } from "@/lib/countries";
+import ForceLogoutModal from "@/components/ForceLogoutModal";
+import {
+  consumeForceLogoutPending,
+  LOGOUT_REASON_ANOTHER_DEVICE,
+} from "@/lib/forcedLogout";
 
 // Heuristic: any character that's not a digit / space / dash / plus / brackets
 // means the user is typing a username rather than a phone number.
@@ -44,6 +49,13 @@ export default function LoginPage() {
   const [staySignedIn, setStaySignedIn] = useState(true);
   const loginCardRef = useRef(null);
   const passwordRef = useRef(null);
+  const [forceLogoutOpen, setForceLogoutOpen] = useState(false);
+
+  useEffect(() => {
+    if (consumeForceLogoutPending()) {
+      setForceLogoutOpen(true);
+    }
+  }, []);
 
   // If the user is already authenticated (e.g. they pressed the system Back
   // button from inside the app and somehow landed here), bounce them right
@@ -364,6 +376,12 @@ export default function LoginPage() {
         </div>
       </div>
       </div>
+
+      <ForceLogoutModal
+        open={forceLogoutOpen}
+        reason={LOGOUT_REASON_ANOTHER_DEVICE}
+        onConfirm={() => setForceLogoutOpen(false)}
+      />
     </div>
   );
 }

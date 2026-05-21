@@ -38,6 +38,7 @@ import { Switch } from "@/components/ui/switch";
 import Avatar from "@/components/Avatar";
 import PresenceLabel from "@/components/admin/PresenceLabel";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
+import AdminStoragePane from "@/components/admin/AdminStoragePane";
 import { matchesEmployeeSearch, matchesUserSearch } from "@/lib/adminSearchFilters";
 import {
   adminChatTabBackTo,
@@ -111,48 +112,6 @@ function formatStatValue(value) {
   if (value == null || value === "") return "0";
   if (typeof value === "number" && Number.isNaN(value)) return "0";
   return String(value);
-}
-
-function formatStorageBytes(n) {
-  if (n == null || Number.isNaN(Number(n))) return "0";
-  const v = Number(n);
-  if (v < 1024) return `${Math.round(v)} B`;
-  if (v < 1024 ** 2) return `${(v / 1024).toFixed(1)} KB`;
-  if (v < 1024 ** 3) return `${(v / 1024 ** 2).toFixed(2)} MB`;
-  return `${(v / 1024 ** 3).toFixed(2)} GB`;
-}
-
-function StorageMeter({ title, usedBytes, quotaBytes, freeBytes, percentUsed, subtitle, testId }) {
-  const pct = percentUsed != null ? Math.min(100, Math.max(0, percentUsed)) : null;
-  return (
-    <div
-      className="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 space-y-3"
-      data-testid={testId}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">{title}</div>
-          <div className="font-display text-lg font-semibold dark:text-gray-100 mt-1">
-            {formatStorageBytes(usedBytes)} used
-            {quotaBytes != null && (
-              <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
-                {" "} |  {formatStorageBytes(freeBytes)} free
-              </span>
-            )}
-          </div>
-          {subtitle && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{subtitle}</p>}
-        </div>
-      </div>
-      {pct != null && (
-        <div className="h-2 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
-          <div
-            className="h-full rounded-full bg-emerald-600 dark:bg-emerald-500 transition-all"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      )}
-    </div>
-  );
 }
 
 function StatCard({ icon: Icon, label, value, testId, accent, onClick }) {
@@ -270,8 +229,7 @@ export default function AdminDashboard() {
   const [complaintsLoading, setComplaintsLoading] = useState(false);
   const [complaintsFilter, setComplaintsFilter] = useState("pending"); // pending | solved | all
   const [complaintSavingId, setComplaintSavingId] = useState(null);
-  const [storage, setStorage] = useState(null);
-  const [storageLoading, setStorageLoading] = useState(false);
+  const [storageRefreshSignal, setStorageRefreshSignal] = useState(0);
   const [deleteUserTarget, setDeleteUserTarget] = useState(null);
   const [deleteConvTarget, setDeleteConvTarget] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -419,18 +377,6 @@ export default function AdminDashboard() {
       setEmployees(res.data || []);
     } catch (err) {
       toast.error(formatApiError(err));
-    }
-  }, []);
-
-  const loadStorage = useCallback(async () => {
-    setStorageLoading(true);
-    try {
-      const res = await api.get("/admin/storage");
-      setStorage(res.data);
-    } catch (err) {
-      toast.error(formatApiError(err));
-    } finally {
-      setStorageLoading(false);
     }
   }, []);
 
@@ -621,11 +567,6 @@ export default function AdminDashboard() {
     if (tab !== "complaints") return;
     loadComplaints();
   }, [tab, complaintsFilter, loadComplaints]);
-  useEffect(() => {
-    if (tab !== "storage") return;
-    loadStorage();
-  }, [tab, loadStorage]);
-
   const prevSelectedConvRef = useRef(null);
   useEffect(() => {
     if (!selected?.id) {
@@ -1066,13 +1007,13 @@ export default function AdminDashboard() {
       setDeleteUserTarget(null);
       setUsers((prev) => prev.filter((u) => u.id !== t.id));
       await loadOverview();
-      await loadStorage();
+      setStorageRefreshSignal((n) => n + 1);
     } catch (err) {
       toast.error(formatApiError(err));
     } finally {
       setDeleteBusy(false);
     }
-  }, [deleteUserTarget, loadOverview, loadStorage]);
+  }, [deleteUserTarget, loadOverview]);
 
   const submitDeleteConversation = useCallback(async () => {
     const t = deleteConvTarget;
@@ -1087,13 +1028,13 @@ export default function AdminDashboard() {
       toast.success("Conversation deleted");
       setDeleteConvTarget(null);
       await loadOverview();
-      await loadStorage();
+      setStorageRefreshSignal((n) => n + 1);
     } catch (err) {
       toast.error(formatApiError(err));
     } finally {
       setDeleteBusy(false);
     }
-  }, [deleteConvTarget, loadOverview, loadStorage]);
+  }, [deleteConvTarget, loadOverview]);
 
   const unreadTotal = myConvs
     .filter((c) => !c.is_archived)
@@ -1827,108 +1768,11 @@ export default function AdminDashboard() {
         )}
 
         {tab === "storage" && (
-          <div className="p-4 sm:p-6 lg:p-10 overflow-y-auto space-y-6" data-testid="admin-storage-pane">
-            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-              <div>
-                <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin  |  Storage</div>
-                <h1 className="font-display text-2xl sm:text-3xl font-semibold mt-1 dark:text-gray-100">Storage & cleanup</h1>
-                <p className="text-gray-500 dark:text-gray-400 mt-1 max-w-2xl">
-                  Database footprint (MongoDB) and chat uploads bucket (S3 <code className="text-xs">uploads/</code>).
-                  Set <code className="text-xs">MONGO_STORAGE_QUOTA_BYTES</code> and <code className="text-xs">S3_STORAGE_QUOTA_BYTES</code> on the server to show free space.
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="rounded-full self-start"
-                onClick={() => loadStorage()}
-                disabled={storageLoading}
-                data-testid="storage-refresh-btn"
-              >
-                {storageLoading ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <RotateCcw className="h-4 w-4 mr-1.5" />}
-                Refresh
-              </Button>
-            </div>
-
-            {storageLoading && !storage && (
-              <div className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Loading storage...</div>
-            )}
-
-            {storage && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-w-4xl">
-                <StorageMeter
-                  title="Database (MongoDB)"
-                  usedBytes={storage.database?.used_bytes}
-                  quotaBytes={storage.database?.quota_bytes}
-                  freeBytes={storage.database?.free_bytes}
-                  percentUsed={storage.database?.percent_used}
-                  subtitle={
-                    storage.database?.error
-                      ? storage.database.error
-                      : `${formatStatValue(storage.database?.collections)} collections  |  ${formatStatValue(storage.database?.objects)} objects`
-                  }
-                  testId="storage-meter-db"
-                />
-                <StorageMeter
-                  title="Object storage (S3)"
-                  usedBytes={storage.object_storage?.used_bytes}
-                  quotaBytes={storage.object_storage?.quota_bytes}
-                  freeBytes={storage.object_storage?.free_bytes}
-                  percentUsed={storage.object_storage?.percent_used}
-                  subtitle={
-                    storage.object_storage?.error
-                      ? storage.object_storage.error
-                      : (storage.object_storage?.configured
-                        ? `${storage.object_storage?.object_count ?? 0} objects under ${storage.object_storage?.prefix || "uploads/"} in ${storage.object_storage?.bucket || "bucket"}`
-                        : "S3 not configured - uploads are stored on the server disk (not counted here).")
-                  }
-                  testId="storage-meter-s3"
-                />
-              </div>
-            )}
-
-            <div className="rounded-2xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/50 dark:bg-rose-950/20 p-4 sm:p-6 space-y-4 max-w-4xl">
-              <div className="flex items-center gap-2 text-rose-900 dark:text-rose-200 font-display font-semibold">
-                <Trash2 className="h-5 w-5" />
-                Free space - delete data
-              </div>
-              <p className="text-sm text-rose-900/90 dark:text-rose-200/90">
-                Deleting a user removes their account, complaints, diet days, and chat they participated in (direct chats are removed entirely; in groups their messages are removed).
-                Deleting a conversation removes all messages and S3 attachments for that thread.
-              </p>
-              <div className="space-y-2">
-                <div className="text-xs font-medium text-gray-600 dark:text-gray-300 uppercase tracking-wider">
-                  Conversations (first 80 - use Monitor for full list)
-                </div>
-                <div className="max-h-64 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 divide-y divide-gray-100 dark:divide-gray-800">
-                  {(allConvs || []).slice(0, 80).map((c) => (
-                    <div key={c.id} className="px-3 py-2 flex items-center justify-between gap-2 text-sm">
-                      <div className="min-w-0">
-                        <div className="font-medium truncate dark:text-gray-100">
-                          {c.type === "group" ? c.name : (c.participants_info || []).map((p) => p.full_name).join(", ")}
-                        </div>
-                        <div className="text-[11px] text-gray-500 dark:text-gray-400 font-mono truncate">{c.id}</div>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="rounded-full shrink-0 text-rose-700 border-rose-200 dark:text-rose-300 dark:border-rose-800"
-                        onClick={() => setDeleteConvTarget(c)}
-                        data-testid={`storage-delete-conv-${c.id}`}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  ))}
-                  {(!allConvs || allConvs.length === 0) && (
-                    <div className="px-3 py-6 text-center text-xs text-gray-400">No conversations loaded.</div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          <AdminStoragePane
+            allConvs={allConvs}
+            onDeleteConversation={setDeleteConvTarget}
+            refreshSignal={storageRefreshSignal}
+          />
         )}
 
         {tab === "users" && (

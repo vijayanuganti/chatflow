@@ -12,6 +12,7 @@ import {
 } from "../lib/api";
 import { syncNativeAuthForPush, clearNativeAuth } from "../lib/nativeAuthSync";
 import { clearStoredActiveConversationId } from "../lib/activeConversationStorage";
+import { get401LogoutReason, performForcedLogout } from "../lib/forcedLogout";
 
 const AuthContext = React.createContext(null);
 
@@ -82,10 +83,15 @@ export function AuthProvider({ children }) {
             void syncNativeAuthForPush();
           }
         }
-      } catch {
+      } catch (err) {
         if (!cancelled && generation === bootGenerationRef.current) {
-          clearAuthSession();
-          setUserState(null);
+          const reason = get401LogoutReason(err);
+          if (reason) {
+            performForcedLogout({ reason, showModal: true });
+          } else {
+            clearAuthSession();
+            setUserState(null);
+          }
         }
       } finally {
         if (!cancelled && generation === bootGenerationRef.current) {
@@ -149,6 +155,19 @@ export function AuthProvider({ children }) {
     }
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  useEffect(() => {
+    const onForceLogout = () => {
+      bootGenerationRef.current += 1;
+      clearAuthSession();
+      clearStoredActiveConversationId();
+      setUserState(null);
+      setLoading(false);
+      void clearNativeAuth();
+    };
+    window.addEventListener("chatflow:force_logout", onForceLogout);
+    return () => window.removeEventListener("chatflow:force_logout", onForceLogout);
   }, []);
 
   const login = useCallback((userData, accessToken, staySignedIn = true) => {

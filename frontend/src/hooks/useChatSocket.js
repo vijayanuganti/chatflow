@@ -10,6 +10,7 @@ export default function useChatSocket({
   onStatusUpdate,
   onProfile,
   onConversationRemoved,
+  onForceLogout,
   enabled = true,
 }) {
   const wsRef = useRef(null);
@@ -27,6 +28,7 @@ export default function useChatSocket({
     onStatusUpdate,
     onProfile,
     onConversationRemoved,
+    onForceLogout,
   };
 
   const connect = useCallback(() => {
@@ -121,6 +123,7 @@ export default function useChatSocket({
           onStatusUpdate,
           onProfile,
           onConversationRemoved,
+          onForceLogout,
         } = handlersRef.current;
         if (data.type === "message" && onMessage) onMessage(data.message);
         else if (data.type === "typing" && onTyping) onTyping(data);
@@ -134,6 +137,7 @@ export default function useChatSocket({
         }
         else if (data.type === "profile" && onProfile) onProfile(data.user);
         else if (data.type === "conversation_removed" && onConversationRemoved) onConversationRemoved(data);
+        else if (data.type === "force_logout" && onForceLogout) onForceLogout(data);
       } catch {
         /* ignore */
       }

@@ -623,13 +623,16 @@ async def get_location_from_ip(ip: Optional[str]) -> str:
     return "Unknown"
 
 
+SESSION_INVALID_REASON = "logged_in_on_another_device"
+
+
 async def assert_active_session(jti: Optional[str]) -> None:
     """Require an active server session when JWT includes `jti` (legacy tokens without jti still work until expiry)."""
     if not jti or not str(jti).strip():
         return
     session = await db.sessions.find_one({"token_jti": jti, "is_active": True}, {"_id": 1})
     if not session:
-        raise HTTPException(status_code=401, detail="Session expired. Please login again.")
+        raise HTTPException(status_code=401, detail=SESSION_INVALID_REASON)
     await db.sessions.update_one(
         {"token_jti": jti},
         {"$set": {"last_active": now_iso()}},
@@ -640,7 +643,7 @@ def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Session expired. Please sign in again.")
+        raise HTTPException(status_code=401, detail="token_expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid session token")
 
@@ -1364,11 +1367,6 @@ async def login(body: LoginBody, request: Request):
             detail="Your account is inactive. Please contact your administrator.",
         )
 
-    await db.sessions.update_many(
-        {"user_id": user["id"], "is_active": True},
-        {"$set": {"is_active": False}},
-    )
-
     browser_id = _browser_id_from_request(request) or str(uuid.uuid4())
     jti = str(uuid.uuid4())
     ua = request.headers.get("user-agent", "")
@@ -1376,6 +1374,35 @@ async def login(body: LoginBody, request: Request):
     device_name = parse_device_name(ua)
     location = await get_location_from_ip(client_ip)
     created_at = now_iso()
+
+    old_sessions = await db.sessions.find(
+        {"user_id": user["id"], "is_active": True},
+        {"_id": 0},
+    ).to_list(20)
+    if old_sessions:
+        await manager.send_force_logout(user["id"], SESSION_INVALID_REASON)
+        await db.sessions.update_many(
+            {"user_id": user["id"], "is_active": True},
+            {"$set": {"is_active": False, "last_active": created_at}},
+        )
+        await log_audit(
+            actor_user_id=user["id"],
+            action="auth.session_replaced",
+            metadata={
+                "reason": "new_login",
+                "old_sessions": [
+                    {
+                        "id": s.get("id"),
+                        "device_name": s.get("device_name"),
+                        "ip_address": s.get("ip_address"),
+                    }
+                    for s in old_sessions
+                ],
+                "new_device_name": device_name,
+                "new_location": location,
+                "new_ip": client_ip or "",
+            },
+        )
 
     await db.sessions.insert_one(
         {
@@ -1489,6 +1516,29 @@ async def revoke_session(
         {"$set": {"is_active": False, "last_active": now_iso()}},
     )
     return {"message": "Session revoked"}
+
+
+@api_router.get("/auth/session/validate")
+async def validate_session(request: Request):
+    """Lightweight session check for foreground refresh and polling fallback."""
+    token = _extract_jwt_from_request(request)
+    if not token:
+        return {"valid": False, "reason": "no_token"}
+    try:
+        payload = decode_token(token)
+        _assert_jwt_browser_binding(request, payload)
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        if detail == SESSION_INVALID_REASON:
+            return {"valid": False, "reason": SESSION_INVALID_REASON}
+        return {"valid": False, "reason": "invalid"}
+    jti = payload.get("jti")
+    if not jti:
+        return {"valid": True}
+    session = await db.sessions.find_one({"token_jti": jti, "is_active": True}, {"_id": 1})
+    if not session:
+        return {"valid": False, "reason": SESSION_INVALID_REASON}
+    return {"valid": True}
 
 
 @api_router.get("/auth/verify")
@@ -2033,6 +2083,7 @@ async def admin_storage_overview(_: dict = Depends(require_admin)):
     s3_pack = _pack_storage_used_free(s3_used_int, S3_STORAGE_QUOTA_BYTES)
 
     return {
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
         "database": {
             **mongo_detail,
             **_pack_storage_used_free(mongo_used, MONGO_STORAGE_QUOTA_BYTES),
@@ -3530,6 +3581,12 @@ class ConnectionManager:
                 self.active.get(user_id, set()).discard(ws)
             except Exception:
                 pass
+
+    async def send_force_logout(self, user_id: str, reason: str = SESSION_INVALID_REASON) -> None:
+        """Notify connected clients then close sockets (single-session takeover)."""
+        await self.send_event(user_id, {"type": "force_logout", "reason": reason})
+        if self.has_active_connection(user_id):
+            await self.force_disconnect_user(user_id)
 
     async def broadcast_message(self, msg: dict, conv: dict):
         event = {

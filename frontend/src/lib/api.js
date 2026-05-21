@@ -1,5 +1,14 @@
 import axios from "axios";
 
+import { get401LogoutReason, performForcedLogout } from "./forcedLogout";
+
+let apiAbortController = new AbortController();
+
+/** Abort in-flight HTTP requests (force logout). */
+export function abortPendingApiRequests() {
+  apiAbortController.abort();
+  apiAbortController = new AbortController();
+}
 import {
   getMobileBackendUrlFromEnv,
   isCapacitorNative,
@@ -325,8 +334,26 @@ api.interceptors.request.use((config) => {
   if (bid) set(BROWSER_ID_HEADER, bid);
   const token = getStoredAccessToken();
   if (token) set("Authorization", `Bearer ${token}`);
+  if (!config.signal) config.signal = apiAbortController.signal;
   return config;
 });
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (typeof window !== "undefined") {
+      const reason = get401LogoutReason(err);
+      if (reason) {
+        const url = String(err?.config?.url || "");
+        const skip = url.includes("/auth/login") || url.includes("/auth/logout");
+        if (!skip) {
+          performForcedLogout({ reason, showModal: true });
+        }
+      }
+    }
+    return Promise.reject(err);
+  },
+);
 
 export function formatApiError(err) {
   if (err?.response?.status === 413) {
