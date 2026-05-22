@@ -36,6 +36,7 @@ import { syncConversationSoundsFromNative } from "@/lib/conversationSounds";
 import ForceLogoutBridge from "@/components/ForceLogoutBridge";
 import NotificationLaunchGuard from "@/components/NotificationLaunchGuard";
 import I18nGate from "@/components/I18nGate";
+import NativeMediaOpenProgress from "@/components/NativeMediaOpenProgress";
 import { useTranslation } from "react-i18next";
 
 function Protected({ children, roles }) {
@@ -287,6 +288,7 @@ function App() {
           </Routes>
         </BrowserRouter>
         <Toaster position="top-right" />
+        <NativeMediaOpenProgress />
         </ChatProvider>
       </AuthProvider>
       </ThemeProvider>

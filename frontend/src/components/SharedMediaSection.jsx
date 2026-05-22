@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ExternalLink, FileText, Loader2 } from "lucide-react";
 import { api, fileUrl, formatApiError } from "@/lib/api";
-import { openDocumentExternally } from "@/lib/openDocument";
+import { openDocumentInNativeApp, openVideoInNativeApp } from "@/lib/mediaHandler";
 import { categorizeSharedMessages } from "@/lib/sharedMedia";
 import { toast } from "sonner";
 import ImageLightbox from "./ImageLightbox";
@@ -104,8 +104,10 @@ export default function SharedMediaSection({
               onClick={() => {
                 if (m.message_type === "image") {
                   setLightbox({ src: fileUrl(m.file_url), alt: m.file_name || "image" });
+                } else if (m.message_type === "video") {
+                  void openVideoInNativeApp(m.file_url, m.file_name, null, (msg) => toast.error(msg));
                 } else {
-                  window.open(fileUrl(m.file_url), "_blank", "noopener,noreferrer");
+                  void openDocumentInNativeApp(m.file_url, m.file_name, null, (msg) => toast.error(msg));
                 }
               }}
             >
@@ -120,15 +122,20 @@ export default function SharedMediaSection({
       ) : (
         <div className={`space-y-2 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 ${isProfile ? "max-h-none" : "max-h-72"}`}>
           {tab === "media" && items.map((m) => (
-            <a
+            <button
               key={m.id}
-              href={fileUrl(m.file_url)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-900/50"
+              type="button"
+              onClick={() => {
+                if (m.message_type === "image") {
+                  setLightbox({ src: fileUrl(m.file_url), alt: m.file_name || "image" });
+                } else if (m.message_type === "video") {
+                  void openVideoInNativeApp(m.file_url, m.file_name, null, (msg) => toast.error(msg));
+                }
+              }}
+              className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-900/50"
             >
               <span className="text-sm truncate dark:text-gray-200">{m.file_name || m.message_type}</span>
-            </a>
+            </button>
           ))}
           {tab === "documents" && items.map((m) => (
             <button
@@ -136,7 +143,7 @@ export default function SharedMediaSection({
               type="button"
               onClick={(e) => {
                 e.preventDefault();
-                void openDocumentExternally(m.file_url, m.file_name);
+                void openDocumentInNativeApp(m.file_url, m.file_name, null, (msg) => toast.error(msg));
               }}
               className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-900/50"
             >

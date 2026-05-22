@@ -34,14 +34,19 @@ export default function DocumentMessageBlock({
 }) {
   const color = fileIconColor(mimeType, fileName);
 
-  const handleDownload = (e) => {
+  const handleOpen = (e) => {
     e.preventDefault();
     e.stopPropagation();
     void openDocumentExternally(href, fileName, mimeType);
   };
 
   return (
-    <div className="document-bubble-inner w-full min-w-0">
+    <button
+      type="button"
+      onClick={handleOpen}
+      className="document-bubble-inner w-full min-w-0 text-left touch-manipulation"
+      data-testid="message-document-open"
+    >
       <div className="flex items-center gap-3">
         <div
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
@@ -57,16 +62,14 @@ export default function DocumentMessageBlock({
             {fileExtLabel(fileName)}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleDownload}
-          className="shrink-0 rounded-full p-1.5 hover:bg-black/10 dark:hover:bg-white/10 touch-manipulation"
-          aria-label="Download file"
+        <span
+          className="shrink-0 rounded-full p-1.5 text-gray-500"
+          aria-hidden
         >
-          <Download className="h-4 w-4 text-gray-500" strokeWidth={1.75} />
-        </button>
+          <Download className="h-4 w-4" strokeWidth={1.75} />
+        </span>
       </div>
-      {timestampRow ? <div className="message-timestamp-row mt-0.5">{timestampRow}</div> : null}
-    </div>
+      {timestampRow ? <div className="message-timestamp-row mt-0.5 pointer-events-none">{timestampRow}</div> : null}
+    </button>
   );
 }

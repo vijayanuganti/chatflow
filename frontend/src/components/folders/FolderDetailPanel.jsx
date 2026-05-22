@@ -7,8 +7,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ImageLightbox from "@/components/ImageLightbox";
-import VideoLightbox from "@/components/chat/VideoLightbox";
 import { fileUrl, formatApiError } from "@/lib/api";
+import { openDocumentInNativeApp, openVideoInNativeApp } from "@/lib/mediaHandler";
 import { FOLDER_CATEGORIES } from "@/lib/folderAccess";
 import {
   addFolderLink,
@@ -56,7 +56,24 @@ export default function FolderDetailPanel({
   const [uploadPct, setUploadPct] = useState(null);
   const [busy, setBusy] = useState(false);
   const [photoView, setPhotoView] = useState(null);
-  const [videoView, setVideoView] = useState(null);
+
+  const openNativeVideo = (item) => {
+    void openVideoInNativeApp(
+      item.url_or_path,
+      item.title || "video.mp4",
+      null,
+      (msg) => toast.error(msg),
+    );
+  };
+
+  const openNativeDocument = (item) => {
+    void openDocumentInNativeApp(
+      item.url_or_path,
+      item.title || "document",
+      null,
+      (msg) => toast.error(msg),
+    );
+  };
 
   const itemsByCategory = folder?.items_by_category || {};
 
@@ -232,7 +249,11 @@ export default function FolderDetailPanel({
                   </button>
                 )}
                 {isVideo && (
-                  <button type="button" className="w-full aspect-video bg-gray-900 flex items-center justify-center text-white" onClick={() => setVideoView(fileUrl(item.url_or_path))}>
+                  <button
+                    type="button"
+                    className="w-full aspect-video bg-gray-900 flex items-center justify-center text-white"
+                    onClick={() => openNativeVideo(item)}
+                  >
                     <Film className="h-10 w-10 opacity-80" />
                   </button>
                 )}
@@ -249,8 +270,8 @@ export default function FolderDetailPanel({
                   </div>
                   <div className="flex gap-1 pt-1">
                     {isVideo && (
-                      <Button size="sm" variant="outline" className="rounded-full flex-1 text-xs" onClick={() => setVideoView(fileUrl(item.url_or_path))}>
-                        Play
+                      <Button size="sm" variant="outline" className="rounded-full flex-1 text-xs" onClick={() => openNativeVideo(item)}>
+                        Open
                       </Button>
                     )}
                     {isPhoto && (
@@ -259,8 +280,13 @@ export default function FolderDetailPanel({
                       </Button>
                     )}
                     {category === "documents" && (
-                      <Button size="sm" variant="outline" className="rounded-full flex-1 text-xs" asChild>
-                        <a href={fileUrl(item.url_or_path)} target="_blank" rel="noopener noreferrer">View</a>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="rounded-full flex-1 text-xs"
+                        onClick={() => openNativeDocument(item)}
+                      >
+                        Open
                       </Button>
                     )}
                     <Button size="sm" variant="outline" className="rounded-full" onClick={() => openDownload(item)} title="Download">
@@ -313,7 +339,6 @@ export default function FolderDetailPanel({
         <TabsContent value="documents" className="mt-4">{renderMediaGrid("documents", itemsByCategory.documents || [])}</TabsContent>
       </Tabs>
       <ImageLightbox open={!!photoView} src={photoView} onClose={() => setPhotoView(null)} />
-      <VideoLightbox open={!!videoView} src={videoView} onClose={() => setVideoView(null)} />
     </div>
   );
 }

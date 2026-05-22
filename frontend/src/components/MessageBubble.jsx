@@ -6,7 +6,8 @@ import { NO_SELECT_STYLE } from "@/lib/noSelectStyles";
 import VoiceNotePlayer, { parseVoiceNoteDurationLabel } from "@/components/VoiceNotePlayer";
 import UploadProgressRing from "@/components/chat/UploadProgressRing";
 import DocumentMessageBlock from "@/components/chat/DocumentMessageBlock";
-import VideoLightbox from "@/components/chat/VideoLightbox";
+import { openVideoInNativeApp } from "@/lib/mediaHandler";
+import { toast } from "sonner";
 
 function formatTime(iso) {
   try {
@@ -90,7 +91,6 @@ function MessageBubble({
   const { t } = useTranslation();
   const longPressRef = useRef(null);
   const didLongPressRef = useRef(false);
-  const [videoLightboxOpen, setVideoLightboxOpen] = useState(false);
   const [videoDurationLabel, setVideoDurationLabel] = useState("");
 
   const time = formatTime(message.created_at);
@@ -287,7 +287,14 @@ function MessageBubble({
               className="relative cursor-pointer touch-manipulation"
               onClick={(e) => {
                 e.stopPropagation();
-                if (!uploading) setVideoLightboxOpen(true);
+                if (!uploading) {
+                  void openVideoInNativeApp(
+                    message.file_url,
+                    message.file_name || "video.mp4",
+                    message.__mimeType,
+                    (msg) => toast.error(msg),
+                  );
+                }
               }}
               data-testid={`message-video-${message.id}`}
             >
@@ -406,7 +413,6 @@ function MessageBubble({
         </div>
       </div>
 
-      <VideoLightbox open={videoLightboxOpen} src={mediaSrc} onClose={() => setVideoLightboxOpen(false)} />
     </>
   );
 }
