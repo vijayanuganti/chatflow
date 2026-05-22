@@ -82,6 +82,11 @@
     "cap:ios": "npx cap open ios",
     "android:assemble": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/android-assemble-debug.ps1"
   },
+  "jest": {
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/src/$1"
+    }
+  },
   "browserslist": {
     "production": [
       ">0.2%",

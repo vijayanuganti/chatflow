@@ -33,6 +33,11 @@ import {
 } from "lucide-react";
 import AdminReportsPane from "@/components/admin/AdminReportsPane";
 import AdminReferralsPane from "@/components/admin/AdminReferralsPane";
+import {
+  filterAdminMyChatConversations,
+  filterMonitoringConversations,
+  adminCanChatWithUser,
+} from "@/lib/adminMonitoring";
 import { useAuth } from "@/context/AuthContext";
 import { useChat } from "@/context/ChatContext";
 import { Button } from "@/components/ui/button";
@@ -492,13 +497,13 @@ export default function AdminDashboard() {
       }
       return;
     }
-    const convs = tab === "chats" ? allConvs : myConvs;
+    const convs = tab === "chats" ? monitoringConvs : adminMyChatsConvs;
     const found = convs.find((c) => c.id === chatConvIdFromUrl);
     if (found) {
       setSelected(found);
       setMobileChatStep("chat");
     }
-  }, [chatConvIdFromUrl, tab, allConvs, myConvs, mobileChatStep]);
+  }, [chatConvIdFromUrl, tab, monitoringConvs, adminMyChatsConvs, mobileChatStep]);
 
   /** Sync batches drill-down from URL (?be= & ?bs=). */
   useEffect(() => {
@@ -624,9 +629,9 @@ export default function AdminDashboard() {
     if (!pending?.selectedConv?.id) return;
     const convId = pending.selectedConv.id;
     const resolved =
-      (pending.tab === "chats" ? allConvs : myConvs).find((c) => c.id === convId) ||
-      myConvs.find((c) => c.id === convId) ||
-      allConvs.find((c) => c.id === convId) ||
+      (pending.tab === "chats" ? monitoringConvs : adminMyChatsConvs).find((c) => c.id === convId) ||
+      adminMyChatsConvs.find((c) => c.id === convId) ||
+      monitoringConvs.find((c) => c.id === convId) ||
       pending.selectedConv;
 
     if (pending.tab === "batches") {
@@ -646,7 +651,8 @@ export default function AdminDashboard() {
     goToTab,
     openAdminChat,
     myConvs,
-    allConvs,
+    monitoringConvs,
+    adminMyChatsConvs,
   ]);
 
   const openNewConversation = useCallback(() => {
@@ -928,8 +934,16 @@ export default function AdminDashboard() {
     enabled: Boolean(user?.id),
   });
 
+  const monitoringConvs = useMemo(
+    () => filterMonitoringConversations(allConvs),
+    [allConvs],
+  );
+  const adminMyChatsConvs = useMemo(
+    () => filterAdminMyChatConversations(myConvs),
+    [myConvs],
+  );
   const isSelectedAdminChat = selected && myConvs.find((c) => c.id === selected.id);
-  const currentConvs = tab === "mychats" ? myConvs : allConvs;
+  const currentConvs = tab === "mychats" ? adminMyChatsConvs : monitoringConvs;
 
   const topbarTitle = "ChatFlow";
 
@@ -1277,15 +1291,6 @@ export default function AdminDashboard() {
               <AdminMoreTile icon={Inbox} title={t("nav.adminComplaints")} subtitle={stats?.complaints_pending ? t("admin.moreComplaintsOpen", { count: stats.complaints_pending }) : t("admin.moreComplaintsSub")} onClick={() => goToTab("complaints", { historyMode: "push" })} testId="more-complaints" />
               <AdminMoreTile icon={HardDrive} title={t("nav.adminStorage")} subtitle={t("admin.moreStorageSub")} onClick={() => goToTab("storage", { historyMode: "push" })} testId="more-storage" />
             </div>
-            <button
-              type="button"
-              onClick={() => navigate(profilePath("admin"), { push: true })}
-              className="flex w-full min-h-[48px] items-center justify-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-emerald-900 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-emerald-200"
-              data-testid="more-profile-btn"
-            >
-              <UserCircle2 className="h-5 w-5" strokeWidth={1.5} />
-              {t("admin.moreProfile")}
-            </button>
           </div>
         )}
 
@@ -1564,7 +1569,7 @@ export default function AdminDashboard() {
               <ChatWindow
                 conversation={selected}
                 messages={messages}
-                conversations={tab === "chats" ? allConvs : myConvs}
+                conversations={tab === "chats" ? monitoringConvs : adminMyChatsConvs}
                 onSendMessage={handleSendMessage}
                 onPatchMessage={patchMessage}
                 onUpdateMessage={updateMessageById}
@@ -1753,10 +1758,9 @@ export default function AdminDashboard() {
               </Button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
-              <StatCard icon={Inbox} label="Pending" value={formatStatValue(stats?.complaints_pending)} testId="complaints-stat-pending" accent="bg-rose-50 text-rose-900" />
-              <StatCard icon={CheckCircle2} label="Solved" value={formatStatValue(stats?.complaints_solved)} testId="complaints-stat-solved" accent="bg-emerald-50 text-emerald-900" />
-              <StatCard icon={Users} label="Active clients" value={formatStatValue(stats?.active_clients)} testId="complaints-stat-active" accent="bg-sky-50 text-sky-900" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+              <StatCard icon={Inbox} label={t("admin.complaintsPending")} value={formatStatValue(stats?.complaints_pending)} testId="complaints-stat-pending" accent="bg-rose-50 text-rose-900" />
+              <StatCard icon={CheckCircle2} label={t("admin.complaintsSolved")} value={formatStatValue(stats?.complaints_solved)} testId="complaints-stat-solved" accent="bg-emerald-50 text-emerald-900" />
             </div>
 
             <div className="inline-flex rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden text-xs" data-testid="complaints-filter">
@@ -2311,6 +2315,9 @@ export default function AdminDashboard() {
         status={quickView?.user?.status}
         online={!!onlineUsers[quickView?.user?.id]}
         onClose={() => setQuickView(null)}
+        showChat={
+          quickView?.user ? adminCanChatWithUser(quickView.user) : false
+        }
         onChat={() => {
           const c = quickView?.conv;
           setQuickView(null);

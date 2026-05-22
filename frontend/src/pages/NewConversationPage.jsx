@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import Avatar from "@/components/Avatar";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { isClientPortalUser } from "@/lib/clientChat";
+import { adminCanChatWithUser } from "@/lib/adminMonitoring";
 import { toast } from "sonner";
 
 /**
@@ -58,14 +59,21 @@ export default function NewConversationPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const eligibleUsers = useMemo(() => {
+    if ((user?.role || "").toLowerCase() === "admin") {
+      return (users || []).filter((u) => adminCanChatWithUser(u));
+    }
+    return users || [];
+  }, [users, user?.role]);
+
   const term = q.trim().toLowerCase();
   const filtered = term
-    ? users.filter(
+    ? eligibleUsers.filter(
         (u) =>
           u.full_name?.toLowerCase().includes(term) ||
           u.username?.toLowerCase().includes(term),
       )
-    : users;
+    : eligibleUsers;
 
   const toggleMember = (u) => {
     setSelectedMembers((prev) => {

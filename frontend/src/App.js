@@ -22,6 +22,8 @@ import UserProfilePage from "@/pages/UserProfilePage";
 import RaiseComplaintPage from "@/pages/RaiseComplaintPage";
 import FolderBrowsePage from "@/pages/FolderBrowsePage";
 import FolderDetailPage from "@/pages/FolderDetailPage";
+import ReferralDetailPage from "@/pages/ReferralDetailPage";
+import ToolsPage from "@/pages/ToolsPage";
 import { Toaster } from "@/components/ui/sonner";
 import PushNotificationBootstrap from "@/components/PushNotificationBootstrap";
 import InAppMessageBanner from "@/components/InAppMessageBanner";
@@ -123,6 +125,7 @@ function App() {
             >
               <Route index element={<ChatApp />} />
               <Route path="profile" element={<ProfileSettingsPage panelLayout />} />
+              <Route path="tools" element={<ToolsPage panelLayout />} />
               <Route path="diet-plan" element={<DietPlanPage panelLayout />} />
               <Route path="diet-plan/:clientId" element={<DietPlanPage panelLayout />} />
               <Route
@@ -259,6 +262,14 @@ function App() {
               element={
                 <Protected roles={["admin"]}>
                   <UserProfilePage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/admin/referrals/:referralId"
+              element={
+                <Protected roles={["admin"]}>
+                  <ReferralDetailPage />
                 </Protected>
               }
             />

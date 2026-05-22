@@ -29,7 +29,7 @@
     "medical": "Medical",
     "diet": "Diet",
     "folders": "Folders",
-    "settings": "Settings",
+    "settings": "Tools",
     "chats": "Chats",
     "chat": "Chat",
     "home": "Home",
@@ -103,10 +103,11 @@
     "clientChat": "Chat",
     "clientDiet": "Diet",
     "clientFolders": "Folders",
-    "clientSettings": "Settings",
+    "clientSettings": "Tools",
+    "tools": "Tools",
     "employeeChats": "Chats",
     "employeeFolders": "Folders",
-    "employeeSettings": "Settings",
+    "employeeSettings": "Tools",
     "adminOverview": "Overview",
     "adminPermissions": "Permissions",
     "adminBatches": "Batches",
@@ -118,13 +119,13 @@
     "adminReports": "Reports",
     "adminComplaints": "Complaints",
     "adminStorage": "Storage",
-    "adminMore": "Settings & more",
+    "adminMore": "Tools",
     "adminArchive": "Archive",
     "adminLoggedInAs": "Logged in as",
     "adminHome": "Home",
     "adminChats": "Chats",
     "adminContacts": "Contacts",
-    "adminSettings": "Settings"
+    "adminSettings": "Tools"
   },
   "sidebar": {
     "batchBoards": "Batch boards",
@@ -235,6 +236,10 @@
     "yesterday": "last seen yesterday at {{time}}",
     "date": "last seen {{date}} at {{time}}"
   },
+  "tools": {
+    "pageDesc": "Shortcuts and utilities",
+    "hint": "Profile and preferences are available from the ⋮ menu at the top of the app."
+  },
   "settings": {
     "pageTitle": "Profile & Settings",
     "pageDesc": "Manage your identity on ChatFlow.",
@@ -280,7 +285,7 @@
     "statDropped": "Dropped",
     "statOpenComplaints": "Open complaints",
     "moreEyebrow": "Tools",
-    "moreTitle": "Settings & admin",
+    "moreTitle": "Tools",
     "moreSubtitle": "Jump to monitoring, batches, and account tools.",
     "moreMonitor": "Monitor chats",
     "moreMonitorSub": "All conversations",

@@ -55,12 +55,7 @@ import { Capacitor } from "@capacitor/core";
 import { setActiveChatState, clearActiveChatState } from "@/lib/activeChatState";
 import { fcmGroupKeyForSender } from "@/lib/notificationDisplay";
 import { ChatFlowNative } from "@/lib/nativeAuthSync";
-
-function messageCanEdit(message, userId) {
-  if (!message?.id || !userId) return false;
-  if (String(message.sender_id) !== String(userId)) return false;
-  return (message.message_type || "text") === "text";
-}
+import { messageCanEdit } from "@/lib/messageCanEdit";
 
 export default function ChatWindow({
   conversation,

@@ -92,6 +92,16 @@ h1, h2, h3, h4, h5, h6, .font-display,
  * App-like UX: native chat apps do not highlight text on long-press.
  * Inputs and the composer stay selectable.
  */
+*,
+*::before,
+*::after {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
 html, body {
     -webkit-tap-highlight-color: transparent;
 }

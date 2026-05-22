@@ -278,7 +278,7 @@ export default function AboutSheet({ open, onOpenChange }) {
 
           <div className="pt-4 pb-2 text-center">
             <p className="text-[9px] text-[#6B7280] dark:text-gray-500">
-              © 2025 {DEVELOPER_NAME}. All rights reserved.
+              © {new Date().getFullYear()} {DEVELOPER_NAME}. All rights reserved.
             </p>
             <p className="mt-2 text-[8px] text-[#6B7280] dark:text-gray-500">
               Made with ❤️ for better health journeys

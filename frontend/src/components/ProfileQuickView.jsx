@@ -12,6 +12,7 @@ export default function ProfileQuickView({
   onClose,
   onChat,
   onInfo,
+  showChat = true,
 }) {
   if (!open) return null;
 
@@ -45,11 +46,13 @@ export default function ProfileQuickView({
             <Avatar name={name} avatarUrl={avatarUrl} status={status} online={online} size={88} />
           </div>
           <h3 className="mt-3 font-display text-lg font-semibold dark:text-gray-100">{name || "Contact"}</h3>
-          <div className="mt-5 flex gap-3 w-full">
-            <Button type="button" className="flex-1 rounded-full bg-emerald-900 hover:bg-emerald-950 h-11" onClick={onChat} data-testid="profile-quick-chat">
-              <MessageCircle className="h-4 w-4 mr-2" /> Chat
-            </Button>
-            <Button type="button" variant="outline" className="flex-1 rounded-full h-11" onClick={onInfo} data-testid="profile-quick-info">
+          <div className={`mt-5 flex gap-3 w-full ${showChat ? "" : "justify-center"}`}>
+            {showChat ? (
+              <Button type="button" className="flex-1 rounded-full bg-emerald-900 hover:bg-emerald-950 h-11" onClick={onChat} data-testid="profile-quick-chat">
+                <MessageCircle className="h-4 w-4 mr-2" /> Chat
+              </Button>
+            ) : null}
+            <Button type="button" variant="outline" className={`${showChat ? "flex-1" : "w-full"} rounded-full h-11`} onClick={onInfo} data-testid="profile-quick-info">
               <Info className="h-4 w-4 mr-2" /> Info
             </Button>
           </div>

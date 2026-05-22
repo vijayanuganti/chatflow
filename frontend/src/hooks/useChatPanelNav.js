@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { MessageSquare, UtensilsCrossed, Settings, Folder, MessageCircle } from "lucide-react";
+import { MessageSquare, UtensilsCrossed, Wrench, Folder, MessageCircle } from "lucide-react";
 import { dietPlanPath, profilePath } from "@/lib/appRoutes";
 import { chatListTarget } from "@/lib/chatMobileNav";
 import { saveChatListScroll } from "@/lib/chatListScroll";
@@ -17,11 +17,11 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
 
   const isActive = (id) => {
     if (id === "chats") {
-      return pathname === "/chat" || (pathname.startsWith("/chat") && !pathname.match(/\/(folders|profile|diet-plan|complaint|new-conversation|medical|contact|create-account)/));
+      return pathname === "/chat" || (pathname.startsWith("/chat") && !pathname.match(/\/(folders|tools|profile|diet-plan|complaint|new-conversation|medical|contact|create-account)/));
     }
     if (id === "diet") return pathname.startsWith("/chat/diet-plan");
     if (id === "folders") return pathname.startsWith("/chat/folders");
-    if (id === "settings") return pathname === "/chat/profile";
+    if (id === "tools") return pathname === "/chat/tools";
     return false;
   };
 
@@ -59,12 +59,12 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
         onClick: () => navigate("/chat/folders", { push: true }),
       },
       {
-        id: "settings",
-        label: t("nav.clientSettings"),
-        icon: Settings,
-        active: isActive("settings"),
-        testId: "client-nav-settings",
-        onClick: () => navigate("/chat/profile", { push: true }),
+        id: "tools",
+        label: t("nav.tools"),
+        icon: Wrench,
+        active: isActive("tools"),
+        testId: "client-nav-tools",
+        onClick: () => navigate("/chat/tools", { push: true }),
       },
     ],
     [navigate, unreadTotal, pathname, listScrollRef, t],
@@ -90,12 +90,12 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
         onClick: () => navigate("/chat/folders", { push: true }),
       },
       {
-        id: "settings",
-        label: t("nav.employeeSettings"),
-        icon: Settings,
-        active: isActive("settings"),
-        testId: "employee-nav-settings",
-        onClick: () => navigate("/chat/profile", { push: true }),
+        id: "tools",
+        label: t("nav.tools"),
+        icon: Wrench,
+        active: isActive("tools"),
+        testId: "employee-nav-tools",
+        onClick: () => navigate("/chat/tools", { push: true }),
       },
     ],
     [navigate, unreadTotal, pathname, t],
@@ -125,7 +125,7 @@ export function ChatPanelNavButton({ icon: Icon, label, active, onClick, testId,
           </span>
         ) : null}
       </span>
-      <span className="hidden lg:inline text-sm font-medium">{label}</span>
+      <span className="text-sm font-medium">{label}</span>
     </button>
   );
 }
@@ -134,19 +134,19 @@ export function ChatPanelSidebar({ items, user }) {
   const { t } = useTranslation();
   return (
     <nav
-      className="hidden md:flex w-20 lg:w-56 shrink-0 bg-emerald-950 text-emerald-100 flex-col py-6 px-3"
+      className="hidden md:flex w-[240px] shrink-0 bg-emerald-950 text-emerald-100 flex-col py-6 px-3"
       data-testid="chat-panel-sidebar"
     >
       <div className="flex items-center gap-3 px-2 mb-8">
         <div className="h-10 w-10 rounded-xl bg-emerald-700/40 flex items-center justify-center shrink-0">
           <MessageCircle className="h-5 w-5" strokeWidth={1.5} />
         </div>
-        <span className="font-display text-lg font-semibold hidden lg:inline truncate">{t("common.appName")}</span>
+        <span className="font-display text-lg font-semibold truncate">{t("common.appName")}</span>
       </div>
       {items.map((item) => (
         <ChatPanelNavButton key={item.id} {...item} />
       ))}
-      <div className="mt-auto px-2 py-2 text-[10px] text-emerald-200/70 hidden lg:block truncate">
+      <div className="mt-auto px-2 py-2 text-[10px] text-emerald-200/70 truncate">
         {user?.full_name}
       </div>
     </nav>

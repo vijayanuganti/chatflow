@@ -53,7 +53,7 @@ export default function ChatPanelLayout() {
           showMobileFooter ? "pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0" : ""
         }`}
       >
-        {!isClient && <ChatPanelSidebar items={items} user={user} />}
+        <ChatPanelSidebar items={items} user={user} />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <Outlet context={{ panelLayout: true, setUnreadTotal, refreshUnread }} />
         </div>

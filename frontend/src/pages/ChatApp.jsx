@@ -59,6 +59,7 @@ import { toast } from "sonner";
 import ComposeIcon from "@/components/icons/ComposeIcon";
 import ProfileQuickView from "@/components/ProfileQuickView";
 import { profilePath, userProfilePath } from "@/lib/appRoutes";
+import { adminCanChatWithUser } from "@/lib/adminMonitoring";
 import {
   chatListTarget,
   chatOpenTarget,
@@ -914,6 +915,9 @@ export default function ChatApp() {
         avatarUrl={quickView?.user?.avatar_url}
         status={quickView?.user?.status}
         online={!!onlineUsers[quickView?.user?.id]}
+        showChat={
+          (user?.role || "").toLowerCase() !== "admin" || adminCanChatWithUser(quickView?.user)
+        }
         onClose={() => setQuickView(null)}
         onChat={() => {
           const c = quickView?.conv;

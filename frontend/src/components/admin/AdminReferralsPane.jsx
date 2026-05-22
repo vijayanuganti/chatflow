@@ -1,15 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, RotateCcw, UserPlus } from "lucide-react";
+import { Loader2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -18,12 +9,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import AdminSearchBar from "@/components/admin/AdminSearchBar";
-import Avatar from "@/components/Avatar";
 import { api, formatApiError } from "@/lib/api";
-import { createAccountPath } from "@/lib/appRoutes";
 import { COMPANY_PRIMARY } from "@/lib/appInfo";
 import {
-  healthGoalLabel,
   matchesReferralSearch,
   referralStatusBadgeClass,
   REFERRAL_STATUSES,
@@ -47,18 +35,6 @@ function StatBox({ label, value, testId }) {
   );
 }
 
-function formatReferredDate(iso) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
-  } catch {
-    return iso;
-  }
-}
-
 export default function AdminReferralsPane() {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
@@ -71,10 +47,6 @@ export default function AdminReferralsPane() {
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [detail, setDetail] = useState(null);
-  const [adminNote, setAdminNote] = useState("");
-  const [statusDraft, setStatusDraft] = useState("pending");
-  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -100,59 +72,9 @@ export default function AdminReferralsPane() {
     [items, search],
   );
 
-  const openDetail = (row) => {
-    setDetail(row);
-    setAdminNote(row.admin_note || "");
-    setStatusDraft(row.status || "pending");
-  };
-
-  const saveDetail = async () => {
-    if (!detail?.id) return;
-    setSaving(true);
-    try {
-      const res = await api.patch(`/admin/referrals/${detail.id}`, {
-        status: statusDraft,
-        admin_note: adminNote,
-      });
-      const updated = res.data;
-      setItems((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
-      setDetail(updated);
-      setStats((prev) => {
-        const next = { ...prev };
-        const old = detail.status;
-        const neu = updated.status;
-        if (old !== neu) {
-          if (old === "pending") next.pending = Math.max(0, next.pending - 1);
-          if (old === "converted") next.converted = Math.max(0, next.converted - 1);
-          if (old === "rejected") next.rejected = Math.max(0, next.rejected - 1);
-          if (neu === "pending") next.pending += 1;
-          if (neu === "converted") next.converted += 1;
-          if (neu === "rejected") next.rejected += 1;
-        }
-        return next;
-      });
-      toast.success("Referral updated");
-    } catch (err) {
-      toast.error(formatApiError(err));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const createClientFromReferral = () => {
-    if (!detail) return;
-    navigate(createAccountPath(), {
-      state: {
-        backTo: "/admin/referrals",
-        defaultRole: "client",
-        allowedRoles: ["client"],
-        referralId: detail.id,
-        referralPrefill: {
-          full_name: detail.referred_name,
-          phone_number: detail.referred_phone,
-          referred_email: detail.referred_email,
-        },
-      },
+  const openDetails = (row) => {
+    navigate(`/admin/referrals/${row.id}`, {
+      state: { backTo: "/admin/referrals" },
     });
   };
 
@@ -223,31 +145,27 @@ export default function AdminReferralsPane() {
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-        <table className="w-full min-w-[900px] text-sm" data-testid="referrals-table">
+        <table className="w-full min-w-[640px] text-sm" data-testid="referrals-table">
           <thead>
             <tr className="border-b border-gray-200 dark:border-gray-800 text-left text-[10px] uppercase tracking-wider text-gray-500">
               <th className="px-3 py-2.5 font-medium">Name</th>
-              <th className="px-3 py-2.5 font-medium">Phone</th>
-              <th className="px-3 py-2.5 font-medium">Email</th>
-              <th className="px-3 py-2.5 font-medium">Age</th>
-              <th className="px-3 py-2.5 font-medium">Health goal</th>
-              <th className="px-3 py-2.5 font-medium">Referred by</th>
-              <th className="px-3 py-2.5 font-medium">Date</th>
+              <th className="px-3 py-2.5 font-medium">Referred By</th>
               <th className="px-3 py-2.5 font-medium">Status</th>
               <th className="px-3 py-2.5 font-medium">Actions</th>
+              <th className="px-3 py-2.5 font-medium">Details</th>
             </tr>
           </thead>
           <tbody>
             {loading && filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-10 text-center text-gray-400">
+                <td colSpan={5} className="px-3 py-10 text-center text-gray-400">
                   Loading…
                 </td>
               </tr>
             )}
             {!loading && filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-10 text-center text-gray-400">
+                <td colSpan={5} className="px-3 py-10 text-center text-gray-400">
                   No referrals in this view.
                 </td>
               </tr>
@@ -260,18 +178,6 @@ export default function AdminReferralsPane() {
               >
                 <td className="px-3 py-2.5 font-medium text-gray-900 dark:text-gray-100">
                   {r.referred_name}
-                </td>
-                <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 font-mono text-xs">
-                  {r.referred_phone}
-                </td>
-                <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs">
-                  {r.referred_email || "—"}
-                </td>
-                <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400">
-                  {r.referred_age ?? "—"}
-                </td>
-                <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400 text-xs max-w-[140px] truncate">
-                  {healthGoalLabel(r.health_goal, r.health_goal_other)}
                 </td>
                 <td className="px-3 py-2.5">
                   <span className="text-xs font-medium text-gray-800 dark:text-gray-200">
@@ -287,9 +193,6 @@ export default function AdminReferralsPane() {
                     {r.referred_by_type}
                   </span>
                 </td>
-                <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">
-                  {formatReferredDate(r.created_at)}
-                </td>
                 <td className="px-3 py-2.5">
                   <span
                     className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${referralStatusBadgeClass(r.status)}`}
@@ -298,110 +201,22 @@ export default function AdminReferralsPane() {
                   </span>
                 </td>
                 <td className="px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-8 rounded-full text-xs"
-                      onClick={() => openDetail(r)}
-                      data-testid={`referral-view-${r.id}`}
-                    >
-                      View
-                    </Button>
-                    <Select
-                      value={r.status}
-                      onValueChange={async (v) => {
-                        try {
-                          const res = await api.patch(`/admin/referrals/${r.id}`, { status: v });
-                          setItems((prev) =>
-                            prev.map((x) => (x.id === r.id ? res.data : x)),
-                          );
-                          toast.success("Status updated");
-                          void load();
-                        } catch (err) {
-                          toast.error(formatApiError(err));
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="h-8 w-[110px] rounded-full text-xs">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {REFERRAL_STATUSES.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" data-testid="referral-detail-dialog">
-          {detail && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="font-display text-lg">{detail.referred_name}</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 text-sm">
-                <div className="flex items-center gap-3 rounded-xl border border-gray-200 dark:border-gray-800 p-3">
-                  <Avatar
-                    name={detail.referrer?.full_name}
-                    avatarUrl={detail.referrer?.avatar_url}
-                    size={44}
-                  />
-                  <div>
-                    <p className="text-[10px] uppercase text-gray-500">Referred by</p>
-                    <p className="font-semibold text-gray-900 dark:text-gray-100">
-                      {detail.referred_by_name || detail.referrer?.full_name}
-                    </p>
-                    <p className="text-xs text-gray-500 capitalize">{detail.referred_by_type}</p>
-                    <p className="text-[10px] font-mono text-gray-400">{detail.referred_by_id}</p>
-                  </div>
-                </div>
-
-                <dl className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <dt className="text-gray-500">Phone</dt>
-                    <dd className="font-mono">{detail.referred_phone}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-gray-500">Email</dt>
-                    <dd>{detail.referred_email || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-gray-500">Age</dt>
-                    <dd>{detail.referred_age ?? "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-gray-500">Health goal</dt>
-                    <dd>{healthGoalLabel(detail.health_goal, detail.health_goal_other)}</dd>
-                  </div>
-                  <div className="col-span-2">
-                    <dt className="text-gray-500">Referrer notes</dt>
-                    <dd className="text-gray-700 dark:text-gray-300">{detail.notes || "—"}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-gray-500">Submitted</dt>
-                    <dd>{formatReferredDate(detail.created_at)}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-gray-500">Last updated</dt>
-                    <dd>{formatReferredDate(detail.updated_at)}</dd>
-                  </div>
-                </dl>
-
-                <div>
-                  <Label className="text-xs">Status</Label>
-                  <Select value={statusDraft} onValueChange={setStatusDraft}>
-                    <SelectTrigger className="mt-1 rounded-lg">
+                  <Select
+                    value={r.status}
+                    onValueChange={async (v) => {
+                      try {
+                        const res = await api.patch(`/admin/referrals/${r.id}`, { status: v });
+                        setItems((prev) =>
+                          prev.map((x) => (x.id === r.id ? res.data : x)),
+                        );
+                        toast.success("Status updated");
+                        void load();
+                      } catch (err) {
+                        toast.error(formatApiError(err));
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-[110px] rounded-full text-xs" data-testid={`referral-status-${r.id}`}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -412,49 +227,24 @@ export default function AdminReferralsPane() {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-
-                <div>
-                  <Label className="text-xs">Internal admin note (not visible to referrer)</Label>
-                  <Textarea
-                    value={adminNote}
-                    onChange={(e) => setAdminNote(e.target.value)}
-                    rows={3}
-                    className="mt-1 rounded-lg"
-                    placeholder="Private notes for admin team…"
-                    data-testid="referral-admin-note"
-                  />
-                </div>
-
-                <div className="flex flex-col gap-2 pt-2">
+                </td>
+                <td className="px-3 py-2.5">
                   <Button
                     type="button"
-                    className="rounded-lg text-white"
-                    style={{ backgroundColor: COMPANY_PRIMARY }}
-                    disabled={saving}
-                    onClick={() => void saveDetail()}
-                    data-testid="referral-save-btn"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 rounded-full text-xs"
+                    onClick={() => openDetails(r)}
+                    data-testid={`referral-details-${r.id}`}
                   >
-                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save changes"}
+                    Details
                   </Button>
-                  {statusDraft === "converted" && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="rounded-lg"
-                      onClick={createClientFromReferral}
-                      data-testid="referral-create-client-btn"
-                    >
-                      <UserPlus className="h-4 w-4 mr-2" />
-                      Create Client Account
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

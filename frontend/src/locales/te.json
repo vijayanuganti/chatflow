@@ -29,7 +29,7 @@
     "medical": "వైద్యం",
     "diet": "ఆహారం",
     "folders": "ఫోల్డర్లు",
-    "settings": "సెట్టింగ్స్",
+    "settings": "టూల్స్",
     "chats": "చాట్‌లు",
     "chat": "చాట్",
     "home": "హోమ్",
@@ -103,10 +103,11 @@
     "clientChat": "చాట్",
     "clientDiet": "ఆహారం",
     "clientFolders": "ఫోల్డర్లు",
-    "clientSettings": "సెట్టింగ్స్",
+    "clientSettings": "టూల్స్",
+    "tools": "టూల్స్",
     "employeeChats": "చాట్‌లు",
     "employeeFolders": "ఫోల్డర్లు",
-    "employeeSettings": "సెట్టింగ్స్",
+    "employeeSettings": "టూల్స్",
     "adminOverview": "అవలోకనం",
     "adminPermissions": "అనుమతులు",
     "adminBatches": "బ్యాచ్‌లు",
@@ -118,13 +119,13 @@
     "adminReports": "రిపోర్ట్‌లు",
     "adminComplaints": "ఫిర్యాదులు",
     "adminStorage": "నిల్వ",
-    "adminMore": "సెట్టింగ్స్ & మరిన్ని",
+    "adminMore": "టూల్స్",
     "adminArchive": "ఆర్కైవ్",
     "adminLoggedInAs": "లాగిన్",
     "adminHome": "హోమ్",
     "adminChats": "చాట్‌లు",
     "adminContacts": "పరిచయాలు",
-    "adminSettings": "సెట్టింగ్స్"
+    "adminSettings": "టూల్స్"
   },
   "sidebar": {
     "batchBoards": "బ్యాచ్ బోర్డ్‌లు",
@@ -235,6 +236,10 @@
     "yesterday": "నిన్న {{time}} కనిపించారు",
     "date": "{{date}} {{time}} కనిపించారు"
   },
+  "tools": {
+    "pageDesc": "షార్ట్‌కట్‌లు మరియు సౌలభ్యాలు",
+    "hint": "ప్రొఫైల్ మరియు ప్రాధాన్యతలు యాప్ పైన ⋮ మెనూ నుండి అందుబాటులో ఉంటాయి."
+  },
   "settings": {
     "pageTitle": "ప్రొఫైల్ & సెట్టింగ్స్",
     "pageDesc": "ChatFlowలో మీ గుర్తింపు నిర్వహించండి.",
@@ -280,7 +285,7 @@
     "statDropped": "వదిలివేసినవి",
     "statOpenComplaints": "తెరిచి ఫిర్యాదులు",
     "moreEyebrow": "టూల్స్",
-    "moreTitle": "సెట్టింగ్స్ & అడ్మిన్",
+    "moreTitle": "టూల్స్",
     "moreSubtitle": "మానిటరింగ్, బ్యాచ్‌లు మరియు ఖాతా టూల్స్.",
     "moreMonitor": "చాట్ మానిటర్",
     "moreMonitorSub": "అన్ని సంభాషణలు",

@@ -29,7 +29,7 @@
     "medical": "चिकित्सा",
     "diet": "आहार",
     "folders": "फ़ोल्डर",
-    "settings": "सेटिंग्स",
+    "settings": "टूल्स",
     "chats": "चैट",
     "chat": "चैट",
     "home": "होम",
@@ -103,10 +103,11 @@
     "clientChat": "चैट",
     "clientDiet": "आहार",
     "clientFolders": "फ़ोल्डर",
-    "clientSettings": "सेटिंग्स",
+    "clientSettings": "टूल्स",
+    "tools": "टूल्स",
     "employeeChats": "चैट",
     "employeeFolders": "फ़ोल्डर",
-    "employeeSettings": "सेटिंग्स",
+    "employeeSettings": "टूल्स",
     "adminOverview": "अवलोकन",
     "adminPermissions": "अनुमतियाँ",
     "adminBatches": "बैच",
@@ -118,13 +119,13 @@
     "adminReports": "रिपोर्ट",
     "adminComplaints": "शिकायतें",
     "adminStorage": "स्टोरेज",
-    "adminMore": "सेटिंग्स और अधिक",
+    "adminMore": "टूल्स",
     "adminArchive": "संग्रह",
     "adminLoggedInAs": "लॉग इन",
     "adminHome": "होम",
     "adminChats": "चैट",
     "adminContacts": "संपर्क",
-    "adminSettings": "सेटिंग्स"
+    "adminSettings": "टूल्स"
   },
   "sidebar": {
     "batchBoards": "बैच बोर्ड",
@@ -235,6 +236,10 @@
     "yesterday": "कल {{time}} बजे देखा",
     "date": "{{date}} को {{time}} बजे देखा"
   },
+  "tools": {
+    "pageDesc": "शॉर्टकट और उपयोगिताएँ",
+    "hint": "प्रोफ़ाइल और प्राथमिकताएँ ऐप के ऊपर ⋮ मेनू से उपलब्ध हैं।"
+  },
   "settings": {
     "pageTitle": "प्रोफ़ाइल और सेटिंग्स",
     "pageDesc": "ChatFlow पर अपनी पहचान प्रबंधित करें।",
@@ -280,7 +285,7 @@
     "statDropped": "छोड़े गए",
     "statOpenComplaints": "खुली शिकायतें",
     "moreEyebrow": "उपकरण",
-    "moreTitle": "सेटिंग्स और एडमिन",
+    "moreTitle": "टूल्स",
     "moreSubtitle": "मॉनिटरिंग, बैच और खाता उपकरण।",
     "moreMonitor": "चैट मॉनिटर",
     "moreMonitorSub": "सभी बातचीत",
