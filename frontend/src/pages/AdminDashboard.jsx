@@ -228,6 +228,14 @@ export default function AdminDashboard() {
   const [mobileChatStep, setMobileChatStep] = useState("list"); // list | chat
   const [allConvs, setAllConvs] = useState([]); // admin monitoring
   const [myConvs, setMyConvs] = useState([]);   // admin's own chats
+  const monitoringConvs = useMemo(
+    () => filterMonitoringConversations(allConvs),
+    [allConvs],
+  );
+  const adminMyChatsConvs = useMemo(
+    () => filterAdminMyChatConversations(myConvs),
+    [myConvs],
+  );
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState({});
@@ -934,14 +942,6 @@ export default function AdminDashboard() {
     enabled: Boolean(user?.id),
   });
 
-  const monitoringConvs = useMemo(
-    () => filterMonitoringConversations(allConvs),
-    [allConvs],
-  );
-  const adminMyChatsConvs = useMemo(
-    () => filterAdminMyChatConversations(myConvs),
-    [myConvs],
-  );
   const isSelectedAdminChat = selected && myConvs.find((c) => c.id === selected.id);
   const currentConvs = tab === "mychats" ? adminMyChatsConvs : monitoringConvs;
 
