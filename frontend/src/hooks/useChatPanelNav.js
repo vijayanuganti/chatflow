@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { MessageSquare, UtensilsCrossed, Settings, Folder, MessageCircle } from "lucide-react";
 import { dietPlanPath, profilePath } from "@/lib/appRoutes";
@@ -9,6 +10,7 @@ import { saveChatListScroll } from "@/lib/chatListScroll";
  * Desktop sidebar + mobile bottom nav items for employee / client chat portal.
  */
 export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const pathname = location.pathname;
@@ -27,7 +29,7 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
     () => [
       {
         id: "chats",
-        label: "Chat",
+        label: t("nav.clientChat"),
         icon: MessageSquare,
         active: isActive("chats"),
         badge: unreadTotal,
@@ -36,7 +38,7 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
       },
       {
         id: "diet",
-        label: "Diet",
+        label: t("nav.clientDiet"),
         icon: UtensilsCrossed,
         active: isActive("diet"),
         testId: "client-nav-diet",
@@ -50,7 +52,7 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
       },
       {
         id: "folders",
-        label: "Folders",
+        label: t("nav.clientFolders"),
         icon: Folder,
         active: isActive("folders"),
         testId: "client-nav-folders",
@@ -58,21 +60,21 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
       },
       {
         id: "settings",
-        label: "Settings",
+        label: t("nav.clientSettings"),
         icon: Settings,
         active: isActive("settings"),
         testId: "client-nav-settings",
         onClick: () => navigate("/chat/profile", { push: true }),
       },
     ],
-    [navigate, unreadTotal, pathname, listScrollRef],
+    [navigate, unreadTotal, pathname, listScrollRef, t],
   );
 
   const employeeItems = useMemo(
     () => [
       {
         id: "chats",
-        label: "Chats",
+        label: t("nav.employeeChats"),
         icon: MessageSquare,
         active: isActive("chats"),
         badge: unreadTotal,
@@ -81,7 +83,7 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
       },
       {
         id: "folders",
-        label: "Folders",
+        label: t("nav.employeeFolders"),
         icon: Folder,
         active: isActive("folders"),
         testId: "employee-nav-folders",
@@ -89,14 +91,14 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
       },
       {
         id: "settings",
-        label: "Settings",
+        label: t("nav.employeeSettings"),
         icon: Settings,
         active: isActive("settings"),
         testId: "employee-nav-settings",
         onClick: () => navigate("/chat/profile", { push: true }),
       },
     ],
-    [navigate, unreadTotal, pathname],
+    [navigate, unreadTotal, pathname, t],
   );
 
   return {
@@ -129,6 +131,7 @@ export function ChatPanelNavButton({ icon: Icon, label, active, onClick, testId,
 }
 
 export function ChatPanelSidebar({ items, user }) {
+  const { t } = useTranslation();
   return (
     <nav
       className="hidden md:flex w-20 lg:w-56 shrink-0 bg-emerald-950 text-emerald-100 flex-col py-6 px-3"
@@ -138,7 +141,7 @@ export function ChatPanelSidebar({ items, user }) {
         <div className="h-10 w-10 rounded-xl bg-emerald-700/40 flex items-center justify-center shrink-0">
           <MessageCircle className="h-5 w-5" strokeWidth={1.5} />
         </div>
-        <span className="font-display text-lg font-semibold hidden lg:inline truncate">ChatFlow</span>
+        <span className="font-display text-lg font-semibold hidden lg:inline truncate">{t("common.appName")}</span>
       </div>
       {items.map((item) => (
         <ChatPanelNavButton key={item.id} {...item} />

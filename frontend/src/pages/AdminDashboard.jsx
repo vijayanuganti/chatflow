@@ -1,4 +1,5 @@
 ﻿import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useLocation, useSearchParams } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
@@ -150,6 +151,7 @@ function StatCard({ icon: Icon, label, value, testId, accent, onClick }) {
 
 export default function AdminDashboard() {
   useMobileChatViewport();
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { setActiveConversationId, clearActiveConversation } = useChat();
   const navigate = useNavigate();
@@ -163,6 +165,22 @@ export default function AdminDashboard() {
     if (!section) return "overview";
     return ADMIN_TAB_IDS.has(section) ? section : "overview";
   }, [section]);
+
+  const usersListTabs = useMemo(
+    () => USERS_LIST_TABS.map((tab) => ({
+      ...tab,
+      label: t(`admin.usersTab.${tab.id}`),
+    })),
+    [t],
+  );
+
+  const batchListTabs = useMemo(
+    () => BATCH_LIST_TABS.map((tab) => ({
+      ...tab,
+      label: t(`admin.batchTab.${tab.id}`),
+    })),
+    [t],
+  );
 
   useEffect(() => {
     if (section && !ADMIN_TAB_IDS.has(section)) {
@@ -982,11 +1000,11 @@ export default function AdminDashboard() {
 
   const usersTabCounts = useMemo(() => {
     const counts = {};
-    USERS_LIST_TABS.forEach((t) => {
-      counts[t.id] = countUsersForTab(users, t.id);
+    usersListTabs.forEach((tab) => {
+      counts[tab.id] = countUsersForTab(users, tab.id);
     });
     return counts;
-  }, [users]);
+  }, [users, usersListTabs]);
 
   const filteredEmployeeBatches = useMemo(
     () => (employeeBatches || []).filter((b) => filterBatchForTab(b, batchStatusTab)),
@@ -995,11 +1013,11 @@ export default function AdminDashboard() {
 
   const batchTabCounts = useMemo(() => {
     const counts = {};
-    BATCH_LIST_TABS.forEach((t) => {
-      counts[t.id] = (employeeBatches || []).filter((b) => filterBatchForTab(b, t.id)).length;
+    batchListTabs.forEach((tab) => {
+      counts[tab.id] = (employeeBatches || []).filter((b) => filterBatchForTab(b, tab.id)).length;
     });
     return counts;
-  }, [employeeBatches]);
+  }, [employeeBatches, batchListTabs]);
 
   const usersById = useMemo(() => {
     const m = {};
@@ -1153,21 +1171,21 @@ export default function AdminDashboard() {
             </div>
             <span className="font-display text-lg font-semibold hidden lg:inline">ChatFlow</span>
           </div>
-        <NavButton icon={LayoutDashboard} label="Overview" active={tab === "overview"} onClick={() => goToTab("overview")} testId="admin-nav-overview" />
-        <NavButton icon={ShieldCheck} label="Permissions" active={tab === "permissions"} onClick={() => goToTab("permissions")} testId="admin-nav-permissions" />
-        <NavButton icon={Layers} label="Batches" active={tab === "batches"} onClick={() => goToTab("batches")} testId="admin-nav-batches" />
-        <NavButton icon={Eye} label="Monitor Chats" active={tab === "chats"} onClick={() => goToTab("chats")} testId="admin-nav-chats" />
-        <NavButton icon={MessageSquare} label="My Chats" active={tab === "mychats"} onClick={() => goToTab("mychats")} testId="admin-nav-mychats" />
-        <NavButton icon={Users} label="Users" active={tab === "users"} onClick={() => goToTab("users")} testId="admin-nav-users" />
-        <NavButton icon={UserPlus} label="Referrals" active={tab === "referrals"} onClick={() => goToTab("referrals")} testId="admin-nav-referrals" />
-        <NavButton icon={Folder} label="Folders" active={tab === "folders"} onClick={() => goToTab("folders")} testId="admin-nav-folders" />
-        <NavButton icon={FileBarChart} label="Reports" active={tab === "reports"} onClick={() => goToTab("reports")} testId="admin-nav-reports" />
-        <NavButton icon={Inbox} label="Complaints" active={tab === "complaints"} onClick={() => goToTab("complaints")} testId="admin-nav-complaints" badge={stats?.complaints_pending || 0} />
-        <NavButton icon={HardDrive} label="Storage" active={tab === "storage"} onClick={() => goToTab("storage")} testId="admin-nav-storage" />
-        <NavButton icon={Settings} label="Settings & more" active={tab === "more"} onClick={() => goToTab("more")} testId="admin-nav-more" />
-        <div className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-[0.2em] text-emerald-200/50 hidden lg:block">Archive</div>
+        <NavButton icon={LayoutDashboard} label={t("nav.adminOverview")} active={tab === "overview"} onClick={() => goToTab("overview")} testId="admin-nav-overview" />
+        <NavButton icon={ShieldCheck} label={t("nav.adminPermissions")} active={tab === "permissions"} onClick={() => goToTab("permissions")} testId="admin-nav-permissions" />
+        <NavButton icon={Layers} label={t("nav.adminBatches")} active={tab === "batches"} onClick={() => goToTab("batches")} testId="admin-nav-batches" />
+        <NavButton icon={Eye} label={t("nav.adminMonitorChats")} active={tab === "chats"} onClick={() => goToTab("chats")} testId="admin-nav-chats" />
+        <NavButton icon={MessageSquare} label={t("nav.adminMyChats")} active={tab === "mychats"} onClick={() => goToTab("mychats")} testId="admin-nav-mychats" />
+        <NavButton icon={Users} label={t("nav.adminUsers")} active={tab === "users"} onClick={() => goToTab("users")} testId="admin-nav-users" />
+        <NavButton icon={UserPlus} label={t("nav.adminReferrals")} active={tab === "referrals"} onClick={() => goToTab("referrals")} testId="admin-nav-referrals" />
+        <NavButton icon={Folder} label={t("nav.adminFolders")} active={tab === "folders"} onClick={() => goToTab("folders")} testId="admin-nav-folders" />
+        <NavButton icon={FileBarChart} label={t("nav.adminReports")} active={tab === "reports"} onClick={() => goToTab("reports")} testId="admin-nav-reports" />
+        <NavButton icon={Inbox} label={t("nav.adminComplaints")} active={tab === "complaints"} onClick={() => goToTab("complaints")} testId="admin-nav-complaints" badge={stats?.complaints_pending || 0} />
+        <NavButton icon={HardDrive} label={t("nav.adminStorage")} active={tab === "storage"} onClick={() => goToTab("storage")} testId="admin-nav-storage" />
+        <NavButton icon={Settings} label={t("nav.adminMore")} active={tab === "more"} onClick={() => goToTab("more")} testId="admin-nav-more" />
+        <div className="mt-3 mb-1 px-3 text-[10px] uppercase tracking-[0.2em] text-emerald-200/50 hidden lg:block">{t("nav.adminArchive")}</div>
         <div className="mt-auto px-2 py-2 text-[10px] text-emerald-200/70 hidden lg:block">
-          Logged in as <span className="font-medium text-emerald-100">{user?.full_name}</span>
+          {t("nav.adminLoggedInAs")} <span className="font-medium text-emerald-100">{user?.full_name}</span>
         </div>
         </nav>
 
@@ -1176,21 +1194,23 @@ export default function AdminDashboard() {
         {tab === "overview" && (
           <div className="p-4 sm:p-6 lg:p-10 space-y-6 overflow-y-auto overflow-x-hidden w-full min-w-0 max-w-full" data-testid="admin-overview-pane">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Admin panel</div>
-              <h1 className="font-display text-2xl sm:text-4xl font-semibold mt-1 dark:text-gray-100">Hi, {user?.full_name?.split(" ")[0] || "Admin"}.</h1>
-              <p className="text-gray-500 dark:text-gray-400 mt-1">Monitor conversations and chat with anyone on the platform.</p>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">{t("admin.panel")}</div>
+              <h1 className="font-display text-2xl sm:text-4xl font-semibold mt-1 dark:text-gray-100">
+                {t("admin.greeting", { name: user?.full_name?.split(" ")[0] || t("admin.greetingFallback") })}
+              </h1>
+              <p className="text-gray-500 dark:text-gray-400 mt-1">{t("admin.overviewSubtitle")}</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
               <StatCard
                 icon={Users}
-                label="Total users"
+                label={t("admin.statTotalUsers")}
                 value={formatStatValue(stats?.total_users)}
                 testId="stat-total-users"
                 onClick={() => goToUsersFilter("all")}
               />
               <StatCard
                 icon={UserCheck}
-                label="Active employees"
+                label={t("admin.statActiveEmployees")}
                 value={formatStatValue(stats?.active_employees)}
                 testId="stat-active-employees"
                 accent="bg-emerald-50 text-emerald-900"
@@ -1198,7 +1218,7 @@ export default function AdminDashboard() {
               />
               <StatCard
                 icon={UserX}
-                label="Inactive employees"
+                label={t("admin.statInactiveEmployees")}
                 value={formatStatValue(stats?.inactive_employees)}
                 testId="stat-inactive-employees"
                 accent="bg-amber-50 text-amber-900"
@@ -1206,7 +1226,7 @@ export default function AdminDashboard() {
               />
               <StatCard
                 icon={UserCheck}
-                label="Active clients"
+                label={t("admin.statActiveClients")}
                 value={formatStatValue(stats?.active_clients)}
                 testId="stat-active-clients"
                 accent="bg-sky-50 text-sky-900"
@@ -1214,7 +1234,7 @@ export default function AdminDashboard() {
               />
               <StatCard
                 icon={UserX}
-                label="Inactive clients"
+                label={t("admin.statInactiveClients")}
                 value={formatStatValue(stats?.inactive_clients)}
                 testId="stat-inactive-clients"
                 accent="bg-rose-50 text-rose-900"
@@ -1222,7 +1242,7 @@ export default function AdminDashboard() {
               />
               <StatCard
                 icon={PowerOff}
-                label="Dropped"
+                label={t("admin.statDropped")}
                 value={formatStatValue(stats?.dropped_clients)}
                 testId="stat-dropped-clients"
                 accent="bg-violet-50 text-violet-900"
@@ -1230,7 +1250,7 @@ export default function AdminDashboard() {
               />
               <StatCard
                 icon={Inbox}
-                label="Open complaints"
+                label={t("admin.statOpenComplaints")}
                 value={formatStatValue(stats?.complaints_pending)}
                 testId="stat-complaints-open"
                 accent="bg-rose-50 text-rose-900"
@@ -1243,19 +1263,19 @@ export default function AdminDashboard() {
         {tab === "more" && (
           <div className="mx-auto w-full max-w-lg space-y-5 overflow-y-auto p-4 sm:p-6" data-testid="admin-more-pane">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">Tools</div>
-              <h1 className="mt-1 font-display text-2xl font-semibold dark:text-gray-100">Settings & admin</h1>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Jump to monitoring, batches, and account tools.</p>
+              <div className="text-[10px] uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-300">{t("admin.moreEyebrow")}</div>
+              <h1 className="mt-1 font-display text-2xl font-semibold dark:text-gray-100">{t("admin.moreTitle")}</h1>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("admin.moreSubtitle")}</p>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <AdminMoreTile icon={Eye} title="Monitor chats" subtitle="All conversations" onClick={() => goToTab("chats", { mobileChatStep: "list", historyMode: "push" })} testId="more-monitor" />
-              <AdminMoreTile icon={Layers} title="Batches" subtitle="Teams & clients" onClick={() => goToTab("batches", { mobileBatchesStep: "employees", historyMode: "push" })} testId="more-batches" />
-              <AdminMoreTile icon={Folder} title="Folders" subtitle="Media library" onClick={() => goToTab("folders", { historyMode: "push" })} testId="more-folders" />
-              <AdminMoreTile icon={FileBarChart} title="Reports" subtitle="User reports & PDF" onClick={() => goToTab("reports", { historyMode: "push" })} testId="more-reports" />
-              <AdminMoreTile icon={ShieldCheck} title="Permissions" subtitle="Who can create clients" onClick={() => goToTab("permissions", { historyMode: "push" })} testId="more-permissions" />
-              <AdminMoreTile icon={UserPlus} title="Referrals" subtitle="Client referrals" onClick={() => goToTab("referrals", { historyMode: "push" })} testId="more-referrals" />
-              <AdminMoreTile icon={Inbox} title="Complaints" subtitle={stats?.complaints_pending ? `${stats.complaints_pending} open` : "Inbox"} onClick={() => goToTab("complaints", { historyMode: "push" })} testId="more-complaints" />
-              <AdminMoreTile icon={HardDrive} title="Storage" subtitle="Usage & quotas" onClick={() => goToTab("storage", { historyMode: "push" })} testId="more-storage" />
+              <AdminMoreTile icon={Eye} title={t("admin.moreMonitor")} subtitle={t("admin.moreMonitorSub")} onClick={() => goToTab("chats", { mobileChatStep: "list", historyMode: "push" })} testId="more-monitor" />
+              <AdminMoreTile icon={Layers} title={t("nav.adminBatches")} subtitle={t("admin.moreBatchesSub")} onClick={() => goToTab("batches", { mobileBatchesStep: "employees", historyMode: "push" })} testId="more-batches" />
+              <AdminMoreTile icon={Folder} title={t("nav.adminFolders")} subtitle={t("admin.moreFoldersSub")} onClick={() => goToTab("folders", { historyMode: "push" })} testId="more-folders" />
+              <AdminMoreTile icon={FileBarChart} title={t("nav.adminReports")} subtitle={t("admin.moreReportsSub")} onClick={() => goToTab("reports", { historyMode: "push" })} testId="more-reports" />
+              <AdminMoreTile icon={ShieldCheck} title={t("nav.adminPermissions")} subtitle={t("admin.morePermissionsSub")} onClick={() => goToTab("permissions", { historyMode: "push" })} testId="more-permissions" />
+              <AdminMoreTile icon={UserPlus} title={t("nav.adminReferrals")} subtitle={t("admin.moreReferralsSub")} onClick={() => goToTab("referrals", { historyMode: "push" })} testId="more-referrals" />
+              <AdminMoreTile icon={Inbox} title={t("nav.adminComplaints")} subtitle={stats?.complaints_pending ? t("admin.moreComplaintsOpen", { count: stats.complaints_pending }) : t("admin.moreComplaintsSub")} onClick={() => goToTab("complaints", { historyMode: "push" })} testId="more-complaints" />
+              <AdminMoreTile icon={HardDrive} title={t("nav.adminStorage")} subtitle={t("admin.moreStorageSub")} onClick={() => goToTab("storage", { historyMode: "push" })} testId="more-storage" />
             </div>
             <button
               type="button"
@@ -1264,7 +1284,7 @@ export default function AdminDashboard() {
               data-testid="more-profile-btn"
             >
               <UserCircle2 className="h-5 w-5" strokeWidth={1.5} />
-              Profile & preferences
+              {t("admin.moreProfile")}
             </button>
           </div>
         )}
@@ -1356,20 +1376,20 @@ export default function AdminDashboard() {
               </div>
               {selectedEmployee ? (
                 <div className="flex flex-wrap gap-1.5 border-b border-gray-100 dark:border-gray-800 px-3 py-2" data-testid="batch-status-tabs">
-                  {BATCH_LIST_TABS.map((t) => (
+                  {batchListTabs.map((tab) => (
                     <button
-                      key={t.id}
+                      key={tab.id}
                       type="button"
-                      onClick={() => setBatchStatusTab(t.id)}
+                      onClick={() => setBatchStatusTab(tab.id)}
                       className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] ${
-                        batchStatusTab === t.id
+                        batchStatusTab === tab.id
                           ? "border-emerald-800 bg-emerald-900 text-white"
                           : "border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-400"
                       }`}
-                      data-testid={`batch-tab-${t.id}`}
+                      data-testid={`batch-tab-${tab.id}`}
                     >
-                      {t.label}
-                      <span className="tabular-nums opacity-80">{batchTabCounts[t.id] ?? 0}</span>
+                      {tab.label}
+                      <span className="tabular-nums opacity-80">{batchTabCounts[tab.id] ?? 0}</span>
                     </button>
                   ))}
                 </div>
@@ -1840,7 +1860,7 @@ export default function AdminDashboard() {
                   className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                   data-testid="users-role-filter"
                 >
-                  {USERS_LIST_TABS.map((opt) => (
+                  {usersListTabs.map((opt) => (
                     <button
                       key={opt.id}
                       type="button"
@@ -1864,7 +1884,7 @@ export default function AdminDashboard() {
               </div>
               {/* Desktop: wrapped filter chips */}
               <div className="hidden md:flex flex-wrap gap-1.5" data-testid="users-role-filter-desktop">
-                {USERS_LIST_TABS.map((opt) => (
+                {usersListTabs.map((opt) => (
                   <button
                     key={opt.id}
                     type="button"
@@ -2310,14 +2330,14 @@ export default function AdminDashboard() {
       >
         <BottomNavButton
           icon={LayoutDashboard}
-          label="Home"
+          label={t("nav.adminHome")}
           active={tab === "overview"}
           onClick={() => goToTab("overview", { historyMode: "push" })}
           testId="admin-nav-mobile-home"
         />
         <BottomNavButton
           icon={MessageSquare}
-          label="Chats"
+          label={t("nav.adminChats")}
           active={tab === "mychats"}
           badge={unreadTotal}
           onClick={() => goToTab("mychats", { mobileChatStep: "list", historyMode: "push" })}
@@ -2325,14 +2345,14 @@ export default function AdminDashboard() {
         />
         <BottomNavButton
           icon={Users}
-          label="Contacts"
+          label={t("nav.adminContacts")}
           active={tab === "users"}
           onClick={() => goToTab("users", { historyMode: "push" })}
           testId="admin-nav-mobile-contacts"
         />
         <BottomNavButton
           icon={Settings}
-          label="Settings"
+          label={t("nav.adminSettings")}
           active={
             tab === "more" ||
             ["permissions", "batches", "chats", "folders", "reports", "complaints", "storage", "inactive", "referrals"].includes(tab)

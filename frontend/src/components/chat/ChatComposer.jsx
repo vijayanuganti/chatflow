@@ -1,4 +1,5 @@
 import React, { useCallback, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Image as ImageIcon, Video as VideoIcon, FileText, Music } from "lucide-react";
 import {
   Popover,
@@ -41,6 +42,7 @@ export default function ChatComposer({
   editingMessage = null,
   onCancelEdit,
 }) {
+  const { t } = useTranslation();
   const [voiceRecording, setVoiceRecording] = useState(false);
 
   const handleVoiceRecordingChange = useCallback((active) => {
@@ -71,7 +73,7 @@ export default function ChatComposer({
       } catch (err) {
         const msg = (err && (err.message || String(err))) || "";
         if (!/cancel|dismiss|denied|User cancelled/i.test(msg)) {
-          toast.error(formatApiError(err) || "Could not pick photo");
+          toast.error(formatApiError(err) || t("composer.pickPhotoError"));
         }
       }
       return;
@@ -98,7 +100,7 @@ export default function ChatComposer({
       } catch (err) {
         const msg = (err && (err.message || String(err))) || "";
         if (!/cancel|dismiss|denied|User cancelled/i.test(msg)) {
-          toast.error(formatApiError(err) || "Could not open camera");
+          toast.error(formatApiError(err) || t("composer.cameraError"));
         }
       }
       return;
@@ -173,7 +175,7 @@ export default function ChatComposer({
               onComposerFocus?.();
             }}
             onBlur={onComposerBlur}
-            placeholder="Message"
+            placeholder={t("composer.placeholder")}
             rows={1}
             data-testid="chat-input"
             disabled={disabled}
@@ -188,7 +190,7 @@ export default function ChatComposer({
                 disabled={disabled}
                 className="h-10 w-10 shrink-0 rounded-full text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center touch-manipulation"
                 data-testid="chat-attach-btn"
-                aria-label="Attach"
+                aria-label={t("composer.attach")}
               >
                 <IconAttach className="h-[22px] w-[22px]" />
               </button>
@@ -196,19 +198,19 @@ export default function ChatComposer({
             <PopoverContent side="top" align="end" sideOffset={10} className="w-64 p-2 rounded-2xl" data-testid="chat-attach-menu">
               <button type="button" onClick={() => void openPicker("photo")} className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-gray-800" data-testid="chat-attach-photos">
                 <span className="h-9 w-9 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center"><ImageIcon className="h-4 w-4" /></span>
-                <span className="text-sm font-medium">Photos</span>
+                <span className="text-sm font-medium">{t("composer.photos")}</span>
               </button>
               <button type="button" onClick={() => void openPicker("video")} className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-gray-800" data-testid="chat-attach-videos">
                 <span className="h-9 w-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center"><VideoIcon className="h-4 w-4" /></span>
-                <span className="text-sm font-medium">Videos</span>
+                <span className="text-sm font-medium">{t("composer.videos")}</span>
               </button>
               <button type="button" onClick={() => void openPicker("document")} className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-gray-800" data-testid="chat-attach-documents">
                 <span className="h-9 w-9 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center"><FileText className="h-4 w-4" /></span>
-                <span className="text-sm font-medium">Documents</span>
+                <span className="text-sm font-medium">{t("composer.documents")}</span>
               </button>
               <button type="button" onClick={() => void openPicker("audio")} className="w-full flex items-center gap-3 px-2 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-gray-800" data-testid="chat-attach-audio">
                 <span className="h-9 w-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center"><Music className="h-4 w-4" /></span>
-                <span className="text-sm font-medium">Audio</span>
+                <span className="text-sm font-medium">{t("composer.audio")}</span>
               </button>
             </PopoverContent>
           </Popover>
@@ -218,7 +220,7 @@ export default function ChatComposer({
             onClick={() => void handleCamera()}
             className="h-10 w-10 shrink-0 rounded-full text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center touch-manipulation"
             data-testid="chat-camera-btn"
-            aria-label="Camera"
+            aria-label={t("composer.camera")}
           >
             <IconCamera className="h-[22px] w-[22px]" />
           </button>
@@ -234,7 +236,7 @@ export default function ChatComposer({
             onPointerDown={(e) => e.preventDefault()}
             className="h-12 w-12 shrink-0 rounded-full flex items-center justify-center bg-emerald-600 hover:bg-emerald-700 text-white shadow-md touch-manipulation transition-transform duration-200 active:scale-95"
             data-testid="chat-send-btn"
-            aria-label="Send"
+            aria-label={t("composer.send")}
           >
             <IconSend className="h-5 w-5" />
           </button>

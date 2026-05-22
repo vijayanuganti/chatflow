@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { NO_SELECT_STYLE } from "@/lib/noSelectStyles";
 import {
   Search,
@@ -22,14 +23,14 @@ import { hapticSelectionStart } from "@/lib/selectionHaptics";
 import ComposeIcon from "@/components/icons/ComposeIcon";
 import { getLastMsgPreview, LastMessageTicks } from "@/lib/chatListPreview";
 
-function formatLastTime(iso) {
+function formatLastTime(iso, t) {
   if (!iso) return "";
   const d = new Date(iso);
   const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
   if (sameDay) return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const yesterday = new Date(now.getTime() - 86400000).toDateString() === d.toDateString();
-  if (yesterday) return "Yesterday";
+  if (yesterday) return t("sidebar.yesterday");
   return d.toLocaleDateString();
 }
 
@@ -45,6 +46,7 @@ function ConversationRow({
   readOnlyPrefs,
   currentUserId,
 }) {
+  const { t } = useTranslation();
   const longPressRef = useRef(null);
   const didLongPressRef = useRef(false);
   const isGroup = c.type === "group";
@@ -54,7 +56,7 @@ function ConversationRow({
     ? c.name
     : adminView
       ? (c.participants_info || []).map((p) => p?.full_name || "?").join(" ↔ ")
-      : (other?.full_name || "Unknown");
+      : (other?.full_name || t("common.unknown"));
   const isOnline = adminView || isGroup ? false : !!onlineUsers[other?.id];
   const isSelectionHighlight = selectionModeId === c.id;
   const isActiveChat = activeChatId === c.id;
@@ -118,7 +120,7 @@ function ConversationRow({
             onClick={handleAvatarClick}
             className="shrink-0 rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
             data-testid={`conv-avatar-${c.id}`}
-            aria-label={`View ${title} profile`}
+            aria-label={t("sidebar.viewProfile", { name: title })}
           >
             <Avatar
               name={title}
@@ -135,17 +137,17 @@ function ConversationRow({
               {c.is_pinned && <Pin className="h-3 w-3 text-emerald-700 dark:text-emerald-400 shrink-0" aria-hidden />}
               {title}
               {c.is_muted && (
-                <VolumeX className="h-3.5 w-3.5 text-gray-400 shrink-0" data-testid={`conv-muted-${c.id}`} aria-label="Muted" />
+                <VolumeX className="h-3.5 w-3.5 text-gray-400 shrink-0" data-testid={`conv-muted-${c.id}`} aria-label={t("sidebar.mutedAria")} />
               )}
             </span>
             <div className="flex items-center gap-2 shrink-0">
               {unreadCount > 0 && (
                 <span className="h-5 min-w-[20px] px-1.5 rounded-full bg-emerald-600 text-white text-[10px] font-semibold flex items-center justify-center">
-                  {unreadCount > 99 ? "99+" : unreadCount}
+                  {unreadCount > 99 ? t("common.badgeOverflow") : unreadCount}
                 </span>
               )}
               <span className={`text-[11px] ${unreadCount > 0 ? "text-emerald-700 dark:text-emerald-300 font-medium" : "text-gray-400"}`}>
-                {formatLastTime(c.last_message_at)}
+                {formatLastTime(c.last_message_at, t)}
               </span>
             </div>
           </div>
@@ -158,7 +160,7 @@ function ConversationRow({
             <span
               className={`truncate ${unreadCount > 0 ? "text-gray-800 dark:text-gray-200 font-medium" : "text-gray-500 dark:text-gray-400"}`}
             >
-              {getLastMsgPreview(c) || (adminView ? "Monitoring" : "Say hello 👋")}
+              {getLastMsgPreview(c) || (adminView ? t("sidebar.monitoring") : t("sidebar.sayHello"))}
             </span>
           </div>
         </div>
@@ -168,16 +170,19 @@ function ConversationRow({
 }
 
 function SelectionActionBar({ conversation, selectionCount = 1, onClear, onPreferenceChange }) {
+  const { t } = useTranslation();
   if (!conversation) return null;
   const run = (patch) => onPreferenceChange?.(conversation.id, patch);
-  const countLabel = selectionCount === 1 ? "1 selected" : `${selectionCount} selected`;
+  const countLabel = selectionCount === 1
+    ? t("common.selectedOne")
+    : t("common.selected", { count: selectionCount });
 
   return (
     <div
       className="flex items-center gap-0.5 px-2 py-2 bg-emerald-900 text-white min-h-[58px]"
       data-testid="chat-list-selection-bar"
       role="toolbar"
-      aria-label="Conversation selection"
+      aria-label={t("sidebar.conversationSelection")}
     >
       <Button
         type="button"
@@ -186,7 +191,7 @@ function SelectionActionBar({ conversation, selectionCount = 1, onClear, onPrefe
         className="h-10 w-10 shrink-0 rounded-full text-white hover:bg-white/15 touch-manipulation"
         onClick={onClear}
         data-testid="chat-list-selection-clear"
-        aria-label="Clear selection"
+        aria-label={t("sidebar.clearSelection")}
       >
         <ArrowLeft className="h-5 w-5" />
       </Button>
@@ -200,7 +205,7 @@ function SelectionActionBar({ conversation, selectionCount = 1, onClear, onPrefe
         className={`h-10 w-10 rounded-full hover:bg-white/15 ${conversation.is_pinned ? "text-amber-300" : "text-white"}`}
         onClick={() => run({ is_pinned: !conversation.is_pinned })}
         data-testid="selection-action-pin"
-        title={conversation.is_pinned ? "Unpin" : "Pin"}
+        title={conversation.is_pinned ? t("sidebar.unpin") : t("sidebar.pin")}
       >
         <Pin className="h-5 w-5" />
       </Button>
@@ -211,7 +216,7 @@ function SelectionActionBar({ conversation, selectionCount = 1, onClear, onPrefe
         className={`h-10 w-10 rounded-full hover:bg-white/15 ${conversation.is_muted ? "text-rose-300" : "text-white"}`}
         onClick={() => run({ is_muted: !conversation.is_muted })}
         data-testid="selection-action-mute"
-        title={conversation.is_muted ? "Unmute" : "Mute"}
+        title={conversation.is_muted ? t("sidebar.unmute") : t("sidebar.mute")}
       >
         {conversation.is_muted ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
       </Button>
@@ -222,7 +227,7 @@ function SelectionActionBar({ conversation, selectionCount = 1, onClear, onPrefe
         className="h-10 w-10 rounded-full text-white hover:bg-white/15"
         onClick={() => run({ is_archived: !conversation.is_archived })}
         data-testid="selection-action-archive"
-        title={conversation.is_archived ? "Unarchive" : "Archive"}
+        title={conversation.is_archived ? t("sidebar.unarchive") : t("sidebar.archive")}
       >
         <Archive className="h-5 w-5" />
       </Button>
@@ -247,6 +252,7 @@ export default function ChatSidebar({
   onAvatarPress,
   listScrollRef: externalListScrollRef,
 }) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [q, setQ] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -324,10 +330,10 @@ export default function ChatSidebar({
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
               <LayoutGrid className="h-4 w-4" />
-              Batch boards
+              {t("sidebar.batchBoards")}
             </div>
-            <div className="text-[10px] text-gray-400" title="Batches are managed by an admin">
-              Managed by admin
+            <div className="text-[10px] text-gray-400" title={t("sidebar.managedByAdmin")}>
+              {t("sidebar.managedByAdmin")}
             </div>
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1">
@@ -339,7 +345,7 @@ export default function ChatSidebar({
               }`}
               data-testid="batch-chip-all"
             >
-              All
+              {t("sidebar.all")}
             </button>
             {(batches || []).map((b) => (
               <button
@@ -369,7 +375,7 @@ export default function ChatSidebar({
             data-testid="archived-chats-toggle"
           >
             {showArchived ? <ChevronLeft className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
-            {showArchived ? "Back to chats" : `Archived chats (${archivedList.length})`}
+            {showArchived ? t("sidebar.backToChats") : t("sidebar.archivedCount", { count: archivedList.length })}
           </button>
         </div>
       )}
@@ -390,7 +396,7 @@ export default function ChatSidebar({
                 data-testid="chat-search-input"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder={showArchived ? "Search archived" : "Search conversations"}
+                placeholder={showArchived ? t("sidebar.searchArchived") : t("sidebar.searchConversations")}
                 className="pl-9 h-10 rounded-xl bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500"
                 type="search"
               />
@@ -401,18 +407,18 @@ export default function ChatSidebar({
 
       {showArchived && !inSelectionMode && (
         <div className="px-4 py-2 text-[10px] uppercase tracking-[0.2em] text-gray-400 border-b border-gray-50 dark:border-gray-800">
-          Archived chats
+          {t("sidebar.archivedSection")}
         </div>
       )}
 
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto" data-testid="chat-list-scroll">
         {filtered.length === 0 ? (
           <div className="p-8 text-center text-gray-400 text-sm" data-testid="no-conversations">
-            {showArchived ? "No archived conversations." : "No conversations yet."}
+            {showArchived ? t("sidebar.noArchived") : t("sidebar.noConversations")}
             {!adminView && !showArchived && !inSelectionMode && (
               <div className="mt-3">
-                <Button onClick={onNewChat} variant="outline" className="rounded-full" data-testid="empty-state-new-chat-btn" title="New chat">
-                  <ComposeIcon className="mr-1.5" width={18} height={18} /> Start a chat
+                <Button onClick={onNewChat} variant="outline" className="rounded-full" data-testid="empty-state-new-chat-btn" title={t("chat.newChat")}>
+                  <ComposeIcon className="mr-1.5" width={18} height={18} /> {t("sidebar.startChat")}
                 </Button>
               </div>
             )}

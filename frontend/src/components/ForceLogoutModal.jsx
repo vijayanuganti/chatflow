@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,10 +9,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { getForceLogoutMessage } from "@/lib/forcedLogout";
-
-export default function ForceLogoutModal({ open, onConfirm, reason }) {
-  const message = getForceLogoutMessage(reason);
+export default function ForceLogoutModal({ open, onConfirm }) {
+  const { t } = useTranslation();
 
   return (
     <Dialog open={open} onOpenChange={() => {}}>
@@ -27,10 +26,10 @@ export default function ForceLogoutModal({ open, onConfirm, reason }) {
           </div>
           <DialogHeader className="space-y-2 text-center sm:text-center">
             <DialogTitle className="text-[18px] font-bold text-[#1A1A2E] dark:text-gray-100">
-              Logged Out
+              {t("forceLogout.title")}
             </DialogTitle>
             <DialogDescription className="text-sm text-[#6B7280] dark:text-gray-400 leading-relaxed">
-              {message}
+              {t("forceLogout.message")}
             </DialogDescription>
           </DialogHeader>
           <Button
@@ -39,7 +38,7 @@ export default function ForceLogoutModal({ open, onConfirm, reason }) {
             onClick={onConfirm}
             data-testid="force-logout-ok"
           >
-            Back to Login
+            {t("forceLogout.backToLogin")}
           </Button>
         </div>
       </DialogContent>

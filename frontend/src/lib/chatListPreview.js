@@ -1,12 +1,15 @@
 import React from "react";
+import i18n from "@/i18n";
 
 export function getLastMsgPreview(msg) {
   if (!msg) return "";
   const type = msg.message_type || msg.last_message_type;
-  if (type === "image") return "📷 Photo";
-  if (type === "video") return "🎥 Video";
-  if (type === "file" || type === "document") return `📄 ${msg.file_name || "Document"}`;
-  if (type === "audio") return "🎤 Voice message";
+  if (type === "image") return i18n.t("preview.photo");
+  if (type === "video") return i18n.t("preview.video");
+  if (type === "file" || type === "document") {
+    return msg.file_name ? `📄 ${msg.file_name}` : i18n.t("preview.document");
+  }
+  if (type === "audio") return i18n.t("preview.voice");
   const text = (msg.content || msg.last_message || "").trim();
   return text;
 }

@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useSearchParams, useOutletContext } from "react-router-dom";
 import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
@@ -77,6 +78,7 @@ import {
 
 export default function ChatApp() {
   useMobileChatViewport();
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { setActiveConversationId, clearActiveConversation } = useChat();
   const location = useLocation();
@@ -864,7 +866,7 @@ export default function ChatApp() {
         <main className={`${isClient || selected || chatConvIdFromUrl ? "flex" : "hidden md:flex"} min-h-0 flex-1 flex-col overflow-hidden`}>
           {isClient && !clientChatReady && !clientUnassigned ? (
             <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-gray-400" data-testid="client-chat-loading">
-              Loading chat…
+              {t("chat.loadingChat")}
             </div>
           ) : (
             <ChatWindow
@@ -893,14 +895,14 @@ export default function ChatApp() {
           type="button"
           onClick={openNewConversation}
           data-testid="new-chat-fab"
-          title="New chat"
-          aria-label="New chat"
+          title={t("chat.newChat")}
+          aria-label={t("chat.newChatAria")}
           className={`fixed z-30 h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white shadow-lg flex items-center justify-center right-[max(1rem,calc(1rem+env(safe-area-inset-right,0px)))] sm:right-[max(1.5rem,calc(1.5rem+env(safe-area-inset-bottom,0px)))] ${
             showMobileFooter
               ? "bottom-[calc(3.5rem+env(safe-area-inset-bottom)+1rem)] md:bottom-[max(1rem,calc(1rem+env(safe-area-inset-bottom,0px)))]"
               : "bottom-[max(1rem,calc(1rem+env(safe-area-inset-bottom,0px)))] sm:bottom-[max(1.5rem,calc(1.5rem+env(safe-area-inset-bottom,0px)))]"
           }`}
-          title="New chat"
+          title={t("chat.newChat")}
         >
           <ComposeIcon width={22} height={22} className="sm:w-6 sm:h-6" />
         </button>

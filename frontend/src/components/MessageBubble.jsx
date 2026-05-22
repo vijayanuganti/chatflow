@@ -1,4 +1,5 @@
 import React, { useRef, memo, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { Check, CheckCheck, Clock, AlertCircle, Star } from "lucide-react";
 import { fileUrl } from "@/lib/api";
 import { NO_SELECT_STYLE } from "@/lib/noSelectStyles";
@@ -49,20 +50,21 @@ function highlightText(text, query) {
 }
 
 function ReceiptTicks({ mine, showReceipts, message, tickStatus }) {
+  const { t } = useTranslation();
   if (!mine || !showReceipts) return null;
   if (message.__pending) {
-    return <Clock className="h-3 w-3 text-gray-400 shrink-0" strokeWidth={2} aria-label="Sending" />;
+    return <Clock className="h-3 w-3 text-gray-400 shrink-0" strokeWidth={2} aria-label={t("message.sending")} />;
   }
   if (message.__error) {
-    return <AlertCircle className="h-3 w-3 text-rose-500 shrink-0" strokeWidth={2} aria-label="Failed to send" />;
+    return <AlertCircle className="h-3 w-3 text-rose-500 shrink-0" strokeWidth={2} aria-label={t("message.failed")} />;
   }
   if (tickStatus === "seen") {
-    return <CheckCheck className="h-3 w-3 text-sky-500 shrink-0" strokeWidth={2} aria-label="Read" />;
+    return <CheckCheck className="h-3 w-3 text-sky-500 shrink-0" strokeWidth={2} aria-label={t("message.read")} />;
   }
   if (tickStatus === "delivered") {
-    return <CheckCheck className="h-3 w-3 text-gray-400 shrink-0" strokeWidth={2} aria-label="Delivered" />;
+    return <CheckCheck className="h-3 w-3 text-gray-400 shrink-0" strokeWidth={2} aria-label={t("message.delivered")} />;
   }
-  return <Check className="h-3 w-3 text-gray-400 shrink-0" strokeWidth={2} aria-label="Sent" />;
+  return <Check className="h-3 w-3 text-gray-400 shrink-0" strokeWidth={2} aria-label={t("message.sent")} />;
 }
 
 function MessageBubble({
@@ -85,6 +87,7 @@ function MessageBubble({
   bubbleRef,
   viewerUserId,
 }) {
+  const { t } = useTranslation();
   const longPressRef = useRef(null);
   const didLongPressRef = useRef(false);
   const [videoLightboxOpen, setVideoLightboxOpen] = useState(false);
@@ -215,7 +218,7 @@ function MessageBubble({
             <Star
               className="absolute bottom-1 right-1.5 h-2.5 w-2.5 text-primary fill-primary z-[3] pointer-events-none"
               strokeWidth={2}
-              aria-label="Starred"
+              aria-label={t("message.starred")}
             />
           )}
 
@@ -224,7 +227,7 @@ function MessageBubble({
               className="message-sender-name px-3 pt-2 text-[11px] font-semibold text-emerald-800 dark:text-emerald-400"
               data-testid={`sender-name-${message.id}`}
             >
-              {message.sender_name || "User"}
+              {message.sender_name || t("common.user")}
             </div>
           )}
 
@@ -235,7 +238,7 @@ function MessageBubble({
                 viewerUserId &&
                 String(message.original_sender_id) !== String(viewerUserId) && (
                 <p className="text-[10px] italic text-gray-500 dark:text-gray-400 mb-0.5" data-testid={`message-forwarded-${message.id}`}>
-                  ↪ Forwarded
+                  {t("message.forwarded")}
                 </p>
               )}
               {(message.reply_to_id || message.reply_to_snippet) && (
@@ -359,7 +362,7 @@ function MessageBubble({
                   }`}
                   data-testid={`message-edited-${message.id}`}
                 >
-                  edited
+                  {t("message.edited")}
                 </p>
               )}
             </>
@@ -377,7 +380,7 @@ function MessageBubble({
                   className="mb-1 text-[10px] font-medium text-rose-600 dark:text-rose-400 touch-manipulation"
                   data-testid={`message-retry-${message.id}`}
                 >
-                  ⚠ Retry
+                  {t("message.retry")}
                 </button>
               ) : null}
               {timestampRow}
@@ -394,7 +397,7 @@ function MessageBubble({
                   className="mb-1 text-[10px] font-medium text-rose-600 dark:text-rose-400 touch-manipulation"
                   data-testid={`message-retry-${message.id}`}
                 >
-                  ⚠ Retry
+                  {t("message.retry")}
                 </button>
               ) : null}
               {timestampRow}

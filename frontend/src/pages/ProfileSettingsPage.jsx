@@ -1,4 +1,5 @@
 ﻿import React, { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -33,10 +34,10 @@ import {
 import LoginHistorySection from "@/components/LoginHistorySection";
 
 const STATUS_OPTIONS = [
-  { value: "available", label: "Available", color: "bg-emerald-500" },
-  { value: "busy", label: "Busy", color: "bg-rose-500" },
-  { value: "away", label: "Away", color: "bg-amber-500" },
-  { value: "dnd", label: "Do not disturb", color: "bg-gray-800" },
+  { value: "available", labelKey: "settings.statusAvailable", color: "bg-emerald-500" },
+  { value: "busy", labelKey: "settings.statusBusy", color: "bg-rose-500" },
+  { value: "away", labelKey: "settings.statusAway", color: "bg-amber-500" },
+  { value: "dnd", labelKey: "settings.statusDnd", color: "bg-gray-800" },
 ];
 
 /** Mini gradient swatches for chat theme cards (approximate; real chat uses `data-chat-theme` CSS). */
@@ -51,6 +52,7 @@ const CHAT_THEME_SWATCH = {
 };
 
 export default function ProfileSettingsPage({ panelLayout = false }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { user, setUser } = useAuth();
   const { theme, setTheme, chatTheme, setChatTheme } = useTheme();
@@ -113,7 +115,7 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
     try {
       const res = await api.put("/users/me", form);
       setUser(res.data);
-      toast.success("Profile updated");
+      toast.success(t("settings.profileUpdated"));
       navigate(backTo);
     } catch (err) {
       toast.error(formatApiError(err));
@@ -123,11 +125,11 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
   };
 
   const changePassword = async () => {
-    if (!passForm.current_password || !passForm.new_password) return toast.error("Fill both fields");
+    if (!passForm.current_password || !passForm.new_password) return toast.error(t("settings.fillBothPasswords"));
     setSaving(true);
     try {
       await api.post("/users/me/password", passForm);
-      toast.success("Password changed");
+      toast.success(t("settings.passwordChanged"));
       setPassForm({ current_password: "", new_password: "" });
     } catch (err) {
       toast.error(formatApiError(err));
@@ -180,8 +182,8 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
   return (
     <MobilePageShell
       embedded={panelLayout}
-      title="Profile & Settings"
-      description="Manage your identity on ChatFlow."
+      title={t("settings.pageTitle")}
+      description={t("settings.pageDesc")}
       onBack={handleBack}
       testId="profile-settings-page"
     >
@@ -192,21 +194,21 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
               data-testid="profile-tab-profile"
               className={tabTrig}
             >
-              Profile
+              {t("settings.tabProfile")}
             </TabsTrigger>
             <TabsTrigger
               value="status"
               data-testid="profile-tab-status"
               className={tabTrig}
             >
-              Status
+              {t("settings.tabStatus")}
             </TabsTrigger>
             <TabsTrigger
               value="themes"
               data-testid="profile-tab-themes"
               className={tabTrig}
             >
-              Themes
+              {t("settings.tabThemes")}
             </TabsTrigger>
             <TabsTrigger
               value="alerts"
@@ -215,7 +217,7 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
             >
               <span className="inline-flex items-center justify-center gap-1">
                 <Bell className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                <span>Alerts</span>
+                <span>{t("settings.tabAlerts")}</span>
               </span>
             </TabsTrigger>
             <TabsTrigger
@@ -223,7 +225,7 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
               data-testid="profile-tab-security"
               className={tabTrig}
             >
-              Security
+              {t("settings.tabSecurity")}
             </TabsTrigger>
           </TabsList>
 
@@ -235,38 +237,38 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
                   onClick={() => void openAvatarPicker()}
                   data-testid="upload-avatar-btn"
                   className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full bg-emerald-900 text-white flex items-center justify-center shadow-md hover:bg-emerald-950"
-                  title="Upload photo"
+                  title={t("settings.uploadPhoto")}
                 >
                   {uploadingAvatar ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
                 </button>
                 <input ref={fileRef} type="file" className="hidden" accept="image/*" onChange={uploadAvatar} data-testid="avatar-file-input" />
               </div>
               <div>
-                <div className="font-display font-semibold text-lg dark:text-gray-100">{form.full_name || "Your name"}</div>
+                <div className="font-display font-semibold text-lg dark:text-gray-100">{form.full_name || t("settings.yourName")}</div>
                 <div className="text-sm text-gray-500 dark:text-gray-400 capitalize">@{user?.username} | {user?.role}</div>
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Full name</Label>
+              <Label>{t("settings.fullName")}</Label>
               <Input data-testid="profile-fullname-input" value={form.full_name} onChange={(e) => update("full_name", e.target.value)} className="w-full h-11 rounded-xl" />
             </div>
             <div className="space-y-2">
-              <Label>Phone number</Label>
+              <Label>{t("settings.phone")}</Label>
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" />
                 <Input data-testid="profile-phone-input" value={user?.phone_number || ""} disabled readOnly className="w-full pl-10 h-11 rounded-xl bg-gray-50 dark:bg-gray-900 dark:text-gray-300" />
               </div>
               <p className="text-[11px] text-gray-400 dark:text-gray-500">
-                Phone numbers are managed by your administrator. Contact them to change yours.
+                {t("settings.phoneHelp")}
               </p>
             </div>
             <div className="space-y-2">
-              <Label>Bio</Label>
-              <Textarea data-testid="profile-bio-input" value={form.bio} onChange={(e) => update("bio", e.target.value)} rows={3} maxLength={200} className="w-full rounded-xl" placeholder="A little about yourself" />
+              <Label>{t("settings.bio")}</Label>
+              <Textarea data-testid="profile-bio-input" value={form.bio} onChange={(e) => update("bio", e.target.value)} rows={3} maxLength={200} className="w-full rounded-xl" placeholder={t("settings.bioPlaceholder")} />
               <div className="text-xs text-gray-400 dark:text-gray-500 text-right">{(form.bio || "").length}/200</div>
             </div>
             <Button onClick={saveProfile} disabled={saving} data-testid="save-profile-btn" className="w-full rounded-full bg-emerald-900 hover:bg-emerald-950 h-11">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save changes"}
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : t("settings.saveChanges")}
             </Button>
             {isClient && (
               <button
@@ -277,8 +279,8 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
               >
                 <Stethoscope className="h-5 w-5 text-emerald-800 dark:text-emerald-300 shrink-0" />
                 <span className="flex-1 min-w-0">
-                  <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">Medical profile</span>
-                  <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">View your health details</span>
+                  <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">{t("settings.medicalTitle")}</span>
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t("settings.medicalSubtitle")}</span>
                 </span>
                 <ChevronRight className="h-5 w-5 text-gray-400 shrink-0" />
               </button>
@@ -286,7 +288,7 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
           </TabsContent>
 
           <TabsContent value="status" className="mt-4 space-y-3">
-            <p className="text-sm text-gray-500 dark:text-gray-400">Let others know if you're around.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{t("settings.statusIntro")}</p>
             <div className="space-y-2">
               {STATUS_OPTIONS.map((opt) => (
                 <button
@@ -300,12 +302,12 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
                   }`}
                 >
                   <span className={`h-3 w-3 rounded-full ${opt.color}`} />
-                  <span className="font-medium">{opt.label}</span>
+                  <span className="font-medium">{t(opt.labelKey)}</span>
                 </button>
               ))}
             </div>
             <Button onClick={saveProfile} disabled={saving} data-testid="save-status-btn" className="w-full rounded-full bg-emerald-900 hover:bg-emerald-950 h-11">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save status"}
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : t("settings.saveStatus")}
             </Button>
           </TabsContent>
 
@@ -518,9 +520,9 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
           </TabsContent>
 
           <TabsContent value="security" className="mt-4 space-y-4">
-            <p className="text-sm text-gray-500 dark:text-gray-400">Change your password. Use at least 6 characters.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{t("settings.securityIntro")}</p>
             <div className="space-y-2">
-              <Label>Current password</Label>
+              <Label>{t("settings.currentPassword")}</Label>
               <PasswordInput
                 data-testid="current-password-input"
                 leftIcon={null}
@@ -530,7 +532,7 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
               />
             </div>
             <div className="space-y-2">
-              <Label>New password</Label>
+              <Label>{t("settings.newPassword")}</Label>
               <PasswordInput
                 data-testid="new-password-input"
                 leftIcon={null}
@@ -540,7 +542,7 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
               />
             </div>
             <Button onClick={changePassword} disabled={saving} data-testid="change-password-btn" className="w-full rounded-full bg-emerald-900 hover:bg-emerald-950 h-11">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Update password"}
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : t("settings.updatePassword")}
             </Button>
             <div className="border-t border-gray-100 dark:border-gray-800 pt-4">
               <LoginHistorySection />

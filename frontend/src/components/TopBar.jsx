@@ -1,7 +1,11 @@
 import React, { useState } from "react";
-import { ArrowLeft, MessageCircle, MoreVertical, Settings, LogOut, UserPlus, Sun, Moon, ShieldAlert, RefreshCw, Info } from "lucide-react";
+import { ArrowLeft, MessageCircle, MoreVertical, Settings, LogOut, UserPlus, Sun, Moon, ShieldAlert, RefreshCw, Info, Languages } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import AboutSheet from "@/components/AboutSheet";
+import LanguageSheet from "@/components/LanguageSheet";
 import ReferClientSheet from "@/components/ReferClientSheet";
+import { languageDisplayCode, normalizeLanguage } from "@/lib/appLanguage";
+import i18n from "@/i18n";
 import { Button } from "@/components/ui/button";
 import Avatar from "@/components/Avatar";
 import {
@@ -26,8 +30,11 @@ export default function TopBar({
 }) {
   const { user, logout } = useAuth();
   const { toggleTheme, isDark } = useTheme();
+  const { t } = useTranslation();
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [languageOpen, setLanguageOpen] = useState(false);
   const [referOpen, setReferOpen] = useState(false);
+  const langCode = languageDisplayCode(normalizeLanguage(i18n.language));
   const canReferClient =
     user?.role === "employee" || user?.role === "client";
   const canCreateAccounts =
@@ -69,10 +76,10 @@ export default function TopBar({
             className="rounded-full hidden sm:inline-flex border-emerald-200 bg-white text-emerald-900 hover:bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/25"
             onClick={onCreateAccount}
             data-testid="topbar-create-account-btn"
-            title="Create a new account"
+            title={t("topbar.createAccountTitle")}
           >
             <UserPlus className="h-4 w-4 mr-1.5" />
-            Create account
+            {t("topbar.createAccount")}
           </Button>
         )}
         <Button
@@ -81,7 +88,7 @@ export default function TopBar({
           className="h-10 w-10 touch-manipulation rounded-full"
           onClick={toggleTheme}
           data-testid="topbar-theme-toggle"
-          title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+          title={isDark ? t("topbar.themeLight") : t("topbar.themeDark")}
         >
           {isDark
             ? <Sun className="h-5 w-5" strokeWidth={1.5} />
@@ -92,43 +99,49 @@ export default function TopBar({
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="icon" variant="ghost" className="h-10 w-10 touch-manipulation rounded-full" data-testid="topbar-menu-btn" title="Menu">
+            <Button size="icon" variant="ghost" className="h-10 w-10 touch-manipulation rounded-full" data-testid="topbar-menu-btn" title={t("topbar.menu")}>
               <MoreVertical className="h-5 w-5" strokeWidth={1.5} />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             {canCreateAccounts && (
               <DropdownMenuItem onClick={() => onCreateAccount?.()} data-testid="topbar-create-account-item">
-                <UserPlus /> Create account
+                <UserPlus /> {t("topbar.createAccount")}
               </DropdownMenuItem>
             )}
             {canRaiseComplaint && (
               <DropdownMenuItem onClick={() => onRaiseComplaint?.()} data-testid="topbar-complaint-item">
-                <ShieldAlert /> Raise a complaint
+                <ShieldAlert /> {t("topbar.raiseComplaint")}
               </DropdownMenuItem>
             )}
             {onRefresh && (
               <DropdownMenuItem onClick={() => onRefresh?.()} data-testid="topbar-refresh-item">
-                <RefreshCw /> Refresh
+                <RefreshCw /> {t("common.refresh")}
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onClick={() => onOpenSettings?.()} data-testid="topbar-settings-item">
-              <Settings /> Profile & settings
+              <Settings /> {t("topbar.profileSettings")}
             </DropdownMenuItem>
             {canReferClient && (
               <DropdownMenuItem onClick={() => setReferOpen(true)} data-testid="topbar-refer-item">
-                <UserPlus /> Refer a Client
+                <UserPlus /> {t("topbar.referClient")}
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => { logout(); }} data-testid="topbar-logout-item">
-              <LogOut /> Logout
+              <LogOut /> {t("common.logout")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setLanguageOpen(true)} data-testid="topbar-language-item">
+              <Languages />
+              <span className="flex-1">{t("language.menu")}</span>
+              <span className="text-xs text-gray-400 ml-2 tabular-nums">{langCode}</span>
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setAboutOpen(true)} data-testid="topbar-about-item">
-              <Info /> About
+              <Info /> {t("topbar.about")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <LanguageSheet open={languageOpen} onOpenChange={setLanguageOpen} />
         <AboutSheet open={aboutOpen} onOpenChange={setAboutOpen} />
         {canReferClient && (
           <ReferClientSheet open={referOpen} onOpenChange={setReferOpen} />

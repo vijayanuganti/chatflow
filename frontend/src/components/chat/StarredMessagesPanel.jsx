@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { ArrowLeft, Star } from "lucide-react";
 import { fileUrl } from "@/lib/api";
 import { messageReplySnippet } from "@/lib/messageReply";
@@ -19,9 +20,10 @@ function formatDateTime(iso) {
 }
 
 function StarredRow({ item, onSelect }) {
+  const { t } = useTranslation();
   const isImage = item.message_type === "image" && item.file_url;
   const isVideo = item.message_type === "video" && item.file_url;
-  const preview = item.content || messageReplySnippet(item) || "[Media]";
+  const preview = item.content || messageReplySnippet(item) || t("starred.mediaFallback");
 
   return (
     <button
@@ -45,7 +47,7 @@ function StarredRow({ item, onSelect }) {
       )}
       <div className="min-w-0 flex-1">
         <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-400 truncate">
-          {item.sender_name || "User"}
+          {item.sender_name || t("common.user")}
         </p>
         <p className="text-sm text-gray-800 dark:text-gray-200 line-clamp-2 mt-0.5">{preview}</p>
         <p className="text-[11px] text-gray-500 mt-1">{formatDateTime(item.starred_at || item.created_at)}</p>
@@ -61,6 +63,7 @@ export default function StarredMessagesPanel({
   onBack,
   onSelectMessage,
 }) {
+  const { t } = useTranslation();
   if (!open) return null;
 
   return (
@@ -75,21 +78,21 @@ export default function StarredMessagesPanel({
           className="rounded-full shrink-0"
           onClick={onBack}
           data-testid="starred-messages-back"
-          aria-label="Back to chat"
+          aria-label={t("starred.back")}
         >
           <ArrowLeft className="h-5 w-5" />
         </Button>
-        <h2 className="font-display font-semibold text-sm sm:text-base dark:text-gray-100">Starred Messages</h2>
+        <h2 className="font-display font-semibold text-sm sm:text-base dark:text-gray-100">{t("starred.title")}</h2>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {loading ? (
-          <p className="text-center text-sm text-gray-500 py-12">Loading…</p>
+          <p className="text-center text-sm text-gray-500 py-12">{t("common.loadingEllipsis")}</p>
         ) : items.length === 0 ? (
           <p
             className="text-center text-sm text-gray-500 dark:text-gray-400 py-16 px-6"
             data-testid="starred-messages-empty"
           >
-            No starred messages yet.
+            {t("starred.empty")}
           </p>
         ) : (
           items.map((item) => (

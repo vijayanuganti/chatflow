@@ -752,10 +752,19 @@ def direct_conv_id(user_a: str, user_b: str) -> str:
     return f"direct_{pair[0]}_{pair[1]}"
 
 
+SUPPORTED_LANGUAGES = frozenset({"en", "hi", "te"})
+
+
+def normalize_language(code: Optional[str]) -> str:
+    c = (code or "en").strip().lower()
+    return c if c in SUPPORTED_LANGUAGES else "en"
+
+
 def clean_user(u: dict) -> dict:
     u = dict(u)
     u.pop("_id", None)
     u.pop("password_hash", None)
+    u["language"] = normalize_language(u.get("language"))
     if u.get("role") == "client":
         u["client_status"] = normalize_client_status(u)
     return u
@@ -1720,6 +1729,38 @@ async def get_user_public_profile(user_id: str, viewer: dict = Depends(get_curre
         "online": target.get("online"),
         "last_seen": target.get("last_seen"),
     }
+
+
+class UserPreferencesPatchBody(BaseModel):
+    language: Optional[str] = None
+
+
+@api_router.patch("/users/me/preferences")
+async def patch_user_preferences_me(
+    body: UserPreferencesPatchBody,
+    user: dict = Depends(get_current_user),
+):
+    """Update viewer preferences (e.g. UI language)."""
+    update: Dict[str, object] = {}
+    if body.language is not None:
+        update["language"] = normalize_language(body.language)
+    if update:
+        await db.users.update_one({"id": user["id"]}, {"$set": update})
+    fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0, "password_hash": 0})
+    if not fresh:
+        raise HTTPException(status_code=404, detail="User not found")
+    return clean_user(fresh)
+
+
+@api_router.patch("/users/{user_id}/preferences")
+async def patch_user_preferences(
+    user_id: str,
+    body: UserPreferencesPatchBody,
+    user: dict = Depends(get_current_user),
+):
+    if user_id != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only update your own preferences")
+    return await patch_user_preferences_me(body, user)
 
 
 @api_router.put("/users/me")

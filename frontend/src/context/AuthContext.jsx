@@ -14,6 +14,7 @@ import { syncNativeAuthForPush } from "../lib/nativeAuthSync";
 import { get401LogoutReason, performForcedLogout, clearSessionLocally } from "../lib/forcedLogout";
 import { executeLogout } from "../lib/logoutFlow";
 import { runLoggedOutNotificationGuard } from "../lib/logoutCleanup";
+import { setAppLanguage, normalizeLanguage } from "../lib/appLanguage";
 
 const AuthContext = React.createContext(null);
 
@@ -71,6 +72,9 @@ export function AuthProvider({ children }) {
         if (!cancelled && generation === bootGenerationRef.current) {
           const u = normalizeUser(res.data?.user || null);
           setUserState(u);
+          if (u?.language) {
+            await setAppLanguage(u.language, { skipServer: true });
+          }
           if (u) {
             const remember = (() => {
               try {
@@ -180,10 +184,14 @@ export function AuthProvider({ children }) {
       syncBrowserIdFromToken(accessToken);
       setStoredAccessToken(accessToken, staySignedIn);
     }
-    if (userData) setStoredUser(userData, staySignedIn);
+    const normalized = normalizeUser(userData) || null;
+    if (normalized) setStoredUser(normalized, staySignedIn);
     else clearAuthSession();
-    setUserState(normalizeUser(userData) || null);
+    setUserState(normalized);
     setLoading(false);
+    if (normalized?.language) {
+      void setAppLanguage(normalized.language, { skipServer: true });
+    }
     void syncNativeAuthForPush();
   }, []);
 

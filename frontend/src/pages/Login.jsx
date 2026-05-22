@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import { SplashScreen } from "@capacitor/splash-screen";
@@ -37,6 +38,7 @@ function digitsOnly(value) {
 }
 
 export default function LoginPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { login, user, loading } = useAuth();
   const [countryCode, setCountryCode] = useState(DEFAULT_COUNTRY_CODE);
@@ -101,8 +103,8 @@ export default function LoginPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     const trimmed = (identifier || "").trim();
-    if (!trimmed) return toast.error("Enter your phone number or username");
-    if (!password) return toast.error("Enter your password");
+    if (!trimmed) return toast.error(t("login.toastIdentifier"));
+    if (!password) return toast.error(t("login.toastPassword"));
 
     const localDigits = digitsOnly(trimmed);
     const looksLikePhone =
@@ -112,7 +114,7 @@ export default function LoginPage() {
       ? (trimmed.startsWith("+") ? trimmed : `${country.dial}${localDigits}`)
       : trimmed;
     if (looksLikePhone && !localDigits) {
-      return toast.error("Enter a valid phone number or username");
+      return toast.error(t("login.toastInvalid"));
     }
     // Send legacy fields too — production API may not have `identifier` until backend is redeployed.
     const payload = {
@@ -138,7 +140,7 @@ export default function LoginPage() {
       if (Capacitor.isNativePlatform()) {
         void SplashScreen.hide({ fadeOutDuration: 0 }).catch(() => {});
       }
-      toast.success(`Welcome back, ${res.data.user.full_name}!`);
+      toast.success(t("login.toastWelcome", { name: res.data.user.full_name }));
       if ((res.data.user.role || "").toLowerCase() === "admin") navigate("/admin", { replace: true });
       else navigate("/chat", { replace: true });
     } catch (err) {
@@ -163,24 +165,22 @@ export default function LoginPage() {
           <div className="h-10 w-10 rounded-xl bg-white/10 backdrop-blur flex items-center justify-center">
             <MessageCircle className="h-6 w-6" />
           </div>
-          <span className="font-display text-2xl font-semibold tracking-tight">ChatFlow</span>
+          <span className="font-display text-2xl font-semibold tracking-tight">{t("common.appName")}</span>
         </div>
 
         <div className="z-10 space-y-6">
           <h1 className="font-display text-5xl font-light leading-tight">
-            Conversations that
+            {t("login.headline1")}
             <br />
-            <span className="font-semibold">build trust.</span>
+            <span className="font-semibold">{t("login.headline2")}</span>
           </h1>
           <p className="text-emerald-100 text-lg max-w-md">
-            Real-time chat for teams, clients and administrators — controlled access,
-            audit-ready actions, modern messaging.
+            {t("login.subtitle")}
           </p>
           <div className="flex items-center gap-3 text-sm text-emerald-100/90">
             <ShieldCheck className="h-5 w-5 text-emerald-200" />
             <span>
-              Accounts are created and managed by your administrator. If you don't
-              have access, contact your admin.
+              {t("login.adminNotice")}
             </span>
           </div>
         </div>
@@ -198,17 +198,17 @@ export default function LoginPage() {
             <div className="h-10 w-10 rounded-xl bg-emerald-900 text-white flex items-center justify-center">
               <MessageCircle className="h-6 w-6" />
             </div>
-            <span className="font-display text-2xl font-semibold dark:text-gray-100">ChatFlow</span>
+            <span className="font-display text-2xl font-semibold dark:text-gray-100">{t("common.appName")}</span>
           </div>
 
-          <h2 className="font-display text-2xl sm:text-3xl font-semibold mb-2 dark:text-gray-100">Welcome back</h2>
+          <h2 className="font-display text-2xl sm:text-3xl font-semibold mb-2 dark:text-gray-100">{t("login.welcome")}</h2>
           <p className="text-gray-500 dark:text-gray-400 mb-6 sm:mb-8">
-            Sign in with your phone number or username.
+            {t("login.signInHint")}
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-5 w-full min-w-0" data-testid="login-form">
             <div className="space-y-2 w-full min-w-0">
-              <Label htmlFor="identifier">Phone number or username</Label>
+              <Label htmlFor="identifier">{t("login.identifier")}</Label>
               <div className="flex w-full min-w-0 items-stretch gap-2">
                 {/* Country code selector — disabled when the input looks like
                     a username (we don't need a dial code in that case). */}
@@ -223,8 +223,8 @@ export default function LoginPage() {
                       }`}
                       disabled={isUsername}
                       data-testid="login-country-trigger"
-                      aria-label="Country code"
-                      title={isUsername ? "Country code isn't used for usernames" : `${country.name} (${country.dial})`}
+                      aria-label={t("login.countryAria")}
+                      title={isUsername ? t("login.countryTitleDisabled") : `${country.name} (${country.dial})`}
                     >
                       <span className="text-base leading-none">{country.flag}</span>
                       <span className="tabular-nums">{country.dial}</span>
@@ -243,7 +243,7 @@ export default function LoginPage() {
                         autoFocus
                         value={countryQuery}
                         onChange={(e) => setCountryQuery(e.target.value)}
-                        placeholder="Search country or code"
+                        placeholder={t("login.countrySearch")}
                         className="flex-1 bg-transparent text-sm outline-none placeholder:text-gray-400 dark:placeholder:text-gray-500 dark:text-gray-100"
                         data-testid="login-country-search"
                         autoComplete="off"
@@ -253,7 +253,7 @@ export default function LoginPage() {
                     <div className="overflow-y-auto flex-1">
                       {filteredCountries.length === 0 && (
                         <div className="py-6 text-center text-xs text-gray-400 dark:text-gray-500">
-                          No matches.
+                          {t("login.countryNoMatches")}
                         </div>
                       )}
                       {filteredCountries.map((c) => (
@@ -289,7 +289,7 @@ export default function LoginPage() {
                     className="w-full pl-10 h-12 rounded-xl"
                     value={identifier}
                     onChange={(e) => setIdentifier(e.target.value)}
-                    placeholder="+91XXXXXXXXXX or username"
+                    placeholder={t("login.identifierPlaceholder")}
                     inputMode={isUsername ? "text" : "tel"}
                     autoComplete={isUsername ? "username" : "tel"}
                     required
@@ -298,13 +298,13 @@ export default function LoginPage() {
               </div>
               <p className="text-[11px] text-gray-400 dark:text-gray-500">
                 {isUsername
-                  ? "Logging in with your username. Switch to digits to use a phone number."
-                  : `We'll use ${country.dial} as the country code. Type letters if you'd rather use a username.`}
+                  ? t("login.hintUsername")
+                  : t("login.hintPhone", { dial: country.dial })}
               </p>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("login.password")}</Label>
               <PasswordInput
                 ref={passwordRef}
                 id="password"
@@ -317,7 +317,7 @@ export default function LoginPage() {
                     passwordRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
                   }, 300);
                 }}
-                placeholder="Enter your password"
+                placeholder={t("login.passwordPlaceholder")}
                 autoComplete="current-password"
                 required
               />
@@ -333,7 +333,7 @@ export default function LoginPage() {
               />
               <div className="space-y-1 min-w-0">
                 <Label htmlFor="stay-signed-in" className="text-sm font-medium cursor-pointer leading-snug">
-                  Stay signed in on this browser
+                  {t("login.staySignedIn")}
                 </Label>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
                   If unchecked, only this tab stays signed in. When checked, new tabs in this Chrome
@@ -351,7 +351,7 @@ export default function LoginPage() {
               data-testid="login-submit-btn"
               className="w-full h-12 rounded-full bg-emerald-900 hover:bg-emerald-950 text-white font-medium"
             >
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign in"}
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : t("login.submit")}
             </Button>
           </form>
 
@@ -361,11 +361,9 @@ export default function LoginPage() {
           >
             <ShieldCheck className="h-5 w-5 text-emerald-800 dark:text-emerald-300 shrink-0 mt-0.5" />
             <div>
-              <div className="font-medium text-gray-900 dark:text-gray-100">Need an account?</div>
+              <div className="font-medium text-gray-900 dark:text-gray-100">{t("login.needAccount")}</div>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                ChatFlow doesn't support self sign-up. Your administrator (or an
-                authorised team member) creates accounts and can reset your password
-                if you ever get locked out.
+                {t("login.noSelfSignup")}
               </p>
             </div>
           </div>

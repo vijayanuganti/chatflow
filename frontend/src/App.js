@@ -33,13 +33,16 @@ import { initSafeAreaInsets } from "@/lib/safeAreaInsets";
 import { syncConversationSoundsFromNative } from "@/lib/conversationSounds";
 import ForceLogoutBridge from "@/components/ForceLogoutBridge";
 import NotificationLaunchGuard from "@/components/NotificationLaunchGuard";
+import I18nGate from "@/components/I18nGate";
+import { useTranslation } from "react-i18next";
 
 function Protected({ children, roles }) {
   const { user, loading } = useAuth();
+  const { t } = useTranslation();
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen text-gray-500" data-testid="loading-screen">
-        Loading...
+        {t("common.loading")}
       </div>
     );
   }
@@ -50,12 +53,13 @@ function Protected({ children, roles }) {
 }
 
 function AuthLoadingScreen() {
+  const { t } = useTranslation();
   return (
     <div
       className="flex min-h-screen items-center justify-center bg-gray-50 text-gray-500 dark:bg-gray-950 dark:text-gray-400"
       data-testid="loading-screen"
     >
-      Loading...
+      {t("common.loading")}
     </div>
   );
 }
@@ -91,6 +95,7 @@ function App() {
   return (
     <div className="App min-h-0 overflow-x-hidden">
       <ServiceWorkerBootstrap />
+      <I18nGate>
       <ThemeProvider>
       <AuthProvider>
         <ForceLogoutBridge />
@@ -274,6 +279,7 @@ function App() {
         </ChatProvider>
       </AuthProvider>
       </ThemeProvider>
+      </I18nGate>
     </div>
   );
 }

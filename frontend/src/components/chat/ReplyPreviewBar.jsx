@@ -1,7 +1,9 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 
 export default function ReplyPreviewBar({ replyingTo, onCancel }) {
+  const { t } = useTranslation();
   if (!replyingTo) return null;
 
   const borderColor = replyingTo.mine ? "border-emerald-500" : "border-sky-500";
@@ -23,7 +25,7 @@ export default function ReplyPreviewBar({ replyingTo, onCancel }) {
         type="button"
         onClick={onCancel}
         className="shrink-0 px-3 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 touch-manipulation"
-        aria-label="Cancel reply"
+        aria-label={t("replyPreview.cancel")}
         data-testid="reply-preview-cancel"
       >
         <X className="h-4 w-4" />

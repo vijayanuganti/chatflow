@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Loader2, Search } from "lucide-react";
 import {
   Sheet,
@@ -12,9 +13,9 @@ import Avatar from "@/components/Avatar";
 import { api, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 
-function conversationLabel(c) {
-  if (c.type === "group") return c.name || "Group";
-  return c.other_user?.full_name || "Chat";
+function conversationLabel(c, t) {
+  if (c.type === "group") return c.name || t("common.group");
+  return c.other_user?.full_name || t("common.chat");
 }
 
 export default function ForwardMessageSheet({
@@ -25,6 +26,7 @@ export default function ForwardMessageSheet({
   currentConversationId,
   onDone,
 }) {
+  const { t } = useTranslation();
   const [q, setQ] = useState("");
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [sending, setSending] = useState(false);
@@ -33,8 +35,8 @@ export default function ForwardMessageSheet({
     const list = (conversations || []).filter((c) => c.id && c.id !== currentConversationId);
     const query = q.trim().toLowerCase();
     if (!query) return list;
-    return list.filter((c) => conversationLabel(c).toLowerCase().includes(query));
-  }, [conversations, currentConversationId, q]);
+    return list.filter((c) => conversationLabel(c, t).toLowerCase().includes(query));
+  }, [conversations, currentConversationId, q, t]);
 
   const toggle = (id) => {
     setSelectedIds((prev) => {
@@ -61,7 +63,9 @@ export default function ForwardMessageSheet({
         ),
       );
       toast.success(
-        selectedIds.size === 1 ? "Message forwarded" : `Forwarded to ${selectedIds.size} chats`,
+        selectedIds.size === 1
+          ? t("forward.toastOne")
+          : t("forward.toastMany", { count: selectedIds.size }),
       );
       setSelectedIds(new Set());
       onOpenChange(false);
@@ -77,7 +81,7 @@ export default function ForwardMessageSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="bottom" className="max-h-[85dvh] rounded-t-2xl flex flex-col p-0">
         <SheetHeader className="px-4 pt-4 pb-2 border-b border-gray-100 dark:border-gray-800">
-          <SheetTitle className="text-left font-display">Forward to…</SheetTitle>
+          <SheetTitle className="text-left font-display">{t("forward.title")}</SheetTitle>
         </SheetHeader>
         <div className="px-4 py-2">
           <div className="relative">
@@ -85,7 +89,7 @@ export default function ForwardMessageSheet({
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search conversations"
+              placeholder={t("forward.search")}
               className="pl-9 h-10 rounded-xl"
               data-testid="forward-search"
             />
@@ -93,7 +97,7 @@ export default function ForwardMessageSheet({
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
           {targets.length === 0 ? (
-            <p className="text-sm text-gray-500 text-center py-8">No conversations found.</p>
+            <p className="text-sm text-gray-500 text-center py-8">{t("forward.empty")}</p>
           ) : (
             targets.map((c) => {
               const checked = selectedIds.has(c.id);
@@ -108,12 +112,12 @@ export default function ForwardMessageSheet({
                   data-testid={`forward-target-${c.id}`}
                 >
                   <Avatar
-                    name={conversationLabel(c)}
+                    name={conversationLabel(c, t)}
                     avatarUrl={c.other_user?.avatar_url}
                     size={40}
                   />
                   <span className="flex-1 min-w-0 text-sm font-medium truncate dark:text-gray-100">
-                    {conversationLabel(c)}
+                    {conversationLabel(c, t)}
                   </span>
                   <span
                     className={`h-5 w-5 rounded-full border-2 flex items-center justify-center ${
@@ -132,7 +136,13 @@ export default function ForwardMessageSheet({
             onClick={() => void handleForward()}
             data-testid="forward-submit"
           >
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : `Forward${selectedIds.size ? ` (${selectedIds.size})` : ""}`}
+            {sending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : selectedIds.size ? (
+              t("forward.buttonCount", { count: selectedIds.size })
+            ) : (
+              t("forward.button")
+            )}
           </Button>
         </div>
       </SheetContent>

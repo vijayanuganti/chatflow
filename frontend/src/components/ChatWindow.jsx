@@ -1,4 +1,5 @@
 ﻿import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import {
   Send,
@@ -86,6 +87,7 @@ export default function ChatWindow({
   /** When true (e.g. admin full-screen chat with TopBar hidden), reserve space under the OS status bar. */
   statusBarInset = false,
 }) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { setActiveConversationId, setChatComposerActive } = useChat();
   const navigate = useNavigate();
@@ -354,7 +356,7 @@ export default function ChatWindow({
     const mine = message.sender_id === user?.id;
     setReplyingTo({
       id: message.id,
-      sender_name: mine ? "You" : (message.sender_name || "User"),
+      sender_name: mine ? t("common.you") : (message.sender_name || t("common.user")),
       snippet: messageReplySnippet(message),
       mine,
     });
@@ -366,7 +368,7 @@ export default function ChatWindow({
         composerRef.current?.focus();
       }
     });
-  }, [readOnly, user?.id]);
+  }, [readOnly, user?.id, t]);
 
   const messageKey = useCallback((m) => String(m?.id || m?.__tempId || ""), []);
 
@@ -754,15 +756,15 @@ export default function ChatWindow({
         >
           <div className="chat-header z-10 flex shrink-0 flex-col border-b border-gray-200 bg-white/90 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-950/80">
             <div className="flex items-center gap-2 px-3 py-2.5 sm:px-4">
-              <span className="font-display font-semibold text-sm sm:text-base dark:text-gray-100">Chat</span>
+              <span className="font-display font-semibold text-sm sm:text-base dark:text-gray-100">{t("common.chat")}</span>
             </div>
           </div>
           <div className="chat-bg flex min-h-0 flex-1 items-center justify-center px-6">
             <div className="text-center max-w-sm">
               <p className="text-[15px] text-[#6B7280] dark:text-gray-400 leading-relaxed" data-testid="client-unassigned-message">
-                No employee assigned yet.
+                {t("chat.unassignedLine1")}
                 <br />
-                Please contact admin for support.
+                {t("chat.unassignedLine2")}
               </p>
             </div>
           </div>
@@ -776,8 +778,8 @@ export default function ChatWindow({
             <div className="mx-auto h-20 w-20 rounded-2xl bg-white dark:bg-gray-900 shadow-sm flex items-center justify-center mb-4 border border-gray-100 dark:border-gray-800">
               <Send className="h-9 w-9 text-emerald-800 dark:text-emerald-300" strokeWidth={1.3} />
             </div>
-            <h3 className="font-display text-2xl font-semibold mb-1 dark:text-gray-100">Your conversations</h3>
-            <p className="text-gray-500 dark:text-gray-400 text-sm">Select a chat on the left, or start a new one.</p>
+            <h3 className="font-display text-2xl font-semibold mb-1 dark:text-gray-100">{t("chat.placeholderTitle")}</h3>
+            <p className="text-gray-500 dark:text-gray-400 text-sm">{t("chat.placeholderSubtitle")}</p>
           </div>
         </div>
       </div>
@@ -794,18 +796,18 @@ export default function ChatWindow({
   const othersTypingCount = typingArr.length;
 
   const headerStatusLine = (() => {
-    if (readOnly && !othersTypingCount) return { kind: "text", value: "Admin read-only view" };
+    if (readOnly && !othersTypingCount) return { kind: "text", value: t("chat.readOnlyView") };
     if (othersTypingCount > 0) return { kind: "typing" };
-    if (readOnly) return { kind: "text", value: "Admin read-only view" };
+    if (readOnly) return { kind: "text", value: t("chat.readOnlyView") };
     if (isGroup) {
       const count = conversation.participants?.length ?? 0;
-      return { kind: "text", value: `${count} members` };
+      return { kind: "text", value: t("common.members", { count }) };
     }
-    if (isOnline) return { kind: "text", value: "online" };
+    if (isOnline) return { kind: "text", value: t("common.online") };
     const lsIso = (otherUser?.id && lastSeenByUser[otherUser.id]) || otherUser?.last_seen;
     const lsText = formatWhatsAppLastSeen(lsIso);
     if (lsText) return { kind: "text", value: lsText };
-    return { kind: "text", value: "offline" };
+    return { kind: "text", value: t("common.offline") };
   })();
 
   // For read-receipts in groups
@@ -857,12 +859,14 @@ export default function ChatWindow({
               className="rounded-full shrink-0"
               onClick={() => setSelectedMessages([])}
               data-testid="message-selection-clear"
-              title="Clear"
+              title={t("common.clear")}
             >
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <span className="flex-1 text-sm font-medium tabular-nums dark:text-gray-100" data-testid="message-selection-count">
-              {selectedMessages.length} selected
+              {selectedMessages.length === 1
+                ? t("common.selectedOne")
+                : t("common.selected", { count: selectedMessages.length })}
             </span>
             <Button
               size="icon"
@@ -871,7 +875,7 @@ export default function ChatWindow({
               onClick={handleReply}
               disabled={selectedMessages.length !== 1}
               data-testid="message-selection-reply"
-              title="Reply"
+              title={t("common.reply")}
             >
               <Reply className="h-5 w-5" />
             </Button>
@@ -881,7 +885,7 @@ export default function ChatWindow({
               className="rounded-full text-emerald-700"
               onClick={handleForward}
               data-testid="message-selection-forward"
-              title="Forward"
+              title={t("common.forward")}
             >
               <Forward className="h-5 w-5" />
             </Button>
@@ -912,19 +916,19 @@ export default function ChatWindow({
             {headerName}
             {readOnly && (
               <span className="inline-flex items-center gap-1 text-[10px] tracking-[0.2em] uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-                <Eye className="h-3 w-3" /> Monitor
+                <Eye className="h-3 w-3" /> {t("common.monitor")}
               </span>
             )}
             {isGroup && (
               <span className="inline-flex items-center gap-1 text-[10px] tracking-[0.2em] uppercase bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full">
-                <Users className="h-3 w-3" /> Group
+                <Users className="h-3 w-3" /> {t("common.group")}
               </span>
             )}
           </div>
           <div className="text-xs text-gray-500 truncate min-h-[1rem] flex items-center gap-1">
             {headerStatusLine.kind === "typing" ? (
               <span className="inline-flex items-center gap-1 text-emerald-800/90" data-testid="header-typing">
-                <span>typing...</span>
+                <span>{t("common.typing")}</span>
                 <span className="inline-flex items-center gap-0.5 translate-y-px">
                   <span className="typing-dot typing-dot-header" />
                   <span className="typing-dot typing-dot-header" />
@@ -937,7 +941,7 @@ export default function ChatWindow({
           </div>
         </div>
         </button>
-        <Button size="icon" variant="ghost" className="rounded-full shrink-0" onClick={() => setThreadSearchOpen((v) => !v)} data-testid="chat-thread-search-toggle" title="Search in chat">
+        <Button size="icon" variant="ghost" className="rounded-full shrink-0" onClick={() => setThreadSearchOpen((v) => !v)} data-testid="chat-thread-search-toggle" title={t("chat.searchInChat")}>
           <Search className="h-5 w-5" />
         </Button>
         {!readOnly && (
@@ -947,7 +951,7 @@ export default function ChatWindow({
             className="rounded-full shrink-0 text-primary"
             onClick={openStarredPanel}
             data-testid="chat-starred-messages-btn"
-            title="Starred messages"
+            title={t("chat.starredMessages")}
           >
             <Star className="h-5 w-5" strokeWidth={2} />
           </Button>
@@ -965,10 +969,10 @@ export default function ChatWindow({
                 navigate(medicalPath(user?.role, otherUser.id), { state: subPageState() })
               }
               data-testid="chat-header-medical-btn"
-              title="View medical profile"
+              title={t("chat.viewMedical")}
             >
               <Stethoscope className="h-4 w-4 sm:mr-1.5" />
-              <span className="hidden md:inline">Medical</span>
+              <span className="hidden md:inline">{t("common.medical")}</span>
             </Button>
             <Button
               size="icon"
@@ -978,7 +982,7 @@ export default function ChatWindow({
                 navigate(medicalPath(user?.role, otherUser.id), { state: subPageState() })
               }
               data-testid="chat-header-medical-btn-mobile"
-              title="View medical profile"
+              title={t("chat.viewMedical")}
             >
               <Stethoscope className="h-4 w-4" />
             </Button>
@@ -999,10 +1003,10 @@ export default function ChatWindow({
               className="rounded-full hidden sm:inline-flex"
               onClick={openDietPlan}
               data-testid="chat-header-diet-btn"
-              title="Diet log"
+              title={t("chat.dietLog")}
             >
               <UtensilsCrossed className="h-4 w-4 sm:mr-1.5" />
-              <span className="hidden md:inline">Diet</span>
+              <span className="hidden md:inline">{t("common.diet")}</span>
             </Button>
             <Button
               size="icon"
@@ -1010,7 +1014,7 @@ export default function ChatWindow({
               className="rounded-full sm:hidden"
               onClick={openDietPlan}
               data-testid="chat-header-diet-btn-mobile"
-              title="Diet log"
+              title={t("chat.dietLog")}
             >
               <UtensilsCrossed className="h-4 w-4" />
             </Button>
@@ -1026,7 +1030,7 @@ export default function ChatWindow({
               <Input
                 value={threadSearchQuery}
                 onChange={(e) => setThreadSearchQuery(e.target.value)}
-                placeholder="Search in conversation"
+                placeholder={t("chat.searchConversation")}
                 className="pl-9 h-9 rounded-xl"
                 data-testid="chat-thread-search-input"
                 autoFocus
@@ -1058,7 +1062,7 @@ export default function ChatWindow({
         >
         {visibleMessages.length === 0 && (
           <div className="text-center text-sm text-gray-400 py-10" data-testid="empty-messages">
-            No messages yet. {readOnly ? "Conversation is quiet." : "Say hi!"}
+            {readOnly ? t("chat.noMessagesQuiet") : t("chat.noMessagesSayHi")}
           </div>
         )}
         {displayItems.map((item) => {
@@ -1145,7 +1149,7 @@ export default function ChatWindow({
             onClick={scrollToLatest}
             className="absolute bottom-4 right-3 z-20 flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white text-emerald-800 shadow-lg ring-2 ring-white/80 active:scale-95 dark:border-gray-600 dark:bg-gray-900 dark:text-emerald-300 dark:ring-gray-950/80"
             data-testid="scroll-to-bottom-btn"
-            aria-label="Jump to latest messages"
+            aria-label={t("chat.scrollLatest")}
           >
             <ChevronDown className="h-6 w-6" strokeWidth={2.5} />
           </button>

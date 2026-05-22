@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Pencil, Star } from "lucide-react";
 
 /**
@@ -14,6 +15,7 @@ export default function MessageContextMenu({
   onEdit,
   onToggleStar,
 }) {
+  const { t } = useTranslation();
   const menuRef = useRef(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
 
@@ -76,7 +78,7 @@ export default function MessageContextMenu({
             data-testid="message-action-edit"
           >
             <Pencil className="h-4 w-4 shrink-0 text-emerald-800 dark:text-emerald-400" strokeWidth={2} />
-            Edit
+            {t("messageMenu.edit")}
           </button>
           <div className="h-px bg-[#E5E7EB] dark:bg-gray-700" aria-hidden />
         </>
@@ -95,7 +97,7 @@ export default function MessageContextMenu({
           className={`h-4 w-4 shrink-0 ${isStarred ? "fill-amber-400 text-amber-500" : "text-emerald-800 dark:text-emerald-400"}`}
           strokeWidth={2}
         />
-        {isStarred ? "Unstar" : "Star"}
+        {isStarred ? t("messageMenu.unstar") : t("messageMenu.star")}
       </button>
     </div>
   );
