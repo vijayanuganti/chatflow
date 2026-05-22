@@ -632,12 +632,31 @@ export default function ChatApp() {
     setMessages((prev) => (selectedIdRef.current === id ? [] : prev));
   }, []);
 
+  const { sendMessage: handleSendMessage, patchMessage, updateMessageById } = useOptimisticMessageSend({
+    user,
+    selectedIdRef,
+    setMessages,
+    setConversations,
+    conversations,
+    onConversationMissing: loadConversations,
+  });
+
+  const handleMessageUpdated = useCallback((msg) => {
+    if (!msg?.id) return;
+    updateMessageById(msg.id, {
+      content: msg.content,
+      is_edited: msg.is_edited ?? true,
+      edited_at: msg.edited_at,
+    });
+  }, [updateMessageById]);
+
   const { sendTyping: wsSendTyping } = useChatSocket({
     onMessage: handleIncomingMessage,
     onTyping: handleTyping,
     onPresence: handlePresence,
     onReadReceipt: handleReadReceipt,
     onStatusUpdate: handleStatusUpdate,
+    onMessageUpdated: handleMessageUpdated,
     onConversationRemoved: handleConversationRemoved,
     enabled: Boolean(user?.id),
   });
@@ -706,15 +725,6 @@ export default function ChatApp() {
   const sendTyping = useCallback((conversationId, isTyping) => {
     wsSendTyping(conversationId, isTyping);
   }, [wsSendTyping]);
-
-  const { sendMessage: handleSendMessage, patchMessage } = useOptimisticMessageSend({
-    user,
-    selectedIdRef,
-    setMessages,
-    setConversations,
-    conversations,
-    onConversationMissing: loadConversations,
-  });
 
   const filteredConversations = React.useMemo(() => {
     // Inactive clients shouldn't clutter chat lists for anyone except admin
@@ -863,6 +873,7 @@ export default function ChatApp() {
               conversations={isClient ? (selected ? [selected] : []) : conversations}
               onSendMessage={handleSendMessage}
               onPatchMessage={patchMessage}
+              onUpdateMessage={updateMessageById}
               typingUsers={(selected && typingUsers[selected.id]) || {}}
               onlineUsers={onlineUsers}
               lastSeenByUser={lastSeenByUser}

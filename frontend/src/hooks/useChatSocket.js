@@ -8,6 +8,7 @@ export default function useChatSocket({
   onPresence,
   onReadReceipt,
   onStatusUpdate,
+  onMessageUpdated,
   onProfile,
   onConversationRemoved,
   onForceLogout,
@@ -26,6 +27,7 @@ export default function useChatSocket({
     onPresence,
     onReadReceipt,
     onStatusUpdate,
+    onMessageUpdated,
     onProfile,
     onConversationRemoved,
     onForceLogout,
@@ -121,11 +123,13 @@ export default function useChatSocket({
           onPresence,
           onReadReceipt,
           onStatusUpdate,
+          onMessageUpdated,
           onProfile,
           onConversationRemoved,
           onForceLogout,
         } = handlersRef.current;
         if (data.type === "message" && onMessage) onMessage(data.message);
+        else if (data.type === "message_updated" && onMessageUpdated) onMessageUpdated(data.message);
         else if (data.type === "typing" && onTyping) onTyping(data);
         else if (data.type === "presence" && onPresence) onPresence(data);
         else if (data.type === "read_receipt" && onReadReceipt) onReadReceipt(data);

@@ -253,10 +253,9 @@ function onRegistration(token) {
   persistDevicePushToken(token.value);
   console.log(`DEBUG_TOKEN_VAL: ${token.value}`);
   logPush("FCM registration received, length=", token.value.length);
+  void postFcmTokenToApi(token);
   if (previous && previous !== token.value) {
     void patchFcmTokenOnServer(previous, token.value);
-  } else {
-    void postFcmTokenToApi(token);
   }
 }
 
@@ -301,7 +300,6 @@ export function teardownCapacitorPush() {
   onNotificationActionRef = null;
   onMarkReadRef = null;
   lastRegistrationToken = null;
-  clearPersistedDevicePushToken();
 }
 
 /**
@@ -512,4 +510,15 @@ export async function initCapacitorPush(userId, onNotificationAction, onMarkRead
   } catch (err) {
     console.error("[push] PushNotifications.register() threw:", err);
   }
+
+  // Registration event can be delayed after unregister(); ensure server has the token.
+  window.setTimeout(() => {
+    if (!activeUserId || !getStoredAccessToken()) return;
+    const t = getDevicePushToken();
+    if (t) {
+      void postFcmTokenToApi({ value: t });
+      return;
+    }
+    void PushNotifications.register().catch(() => {});
+  }, 2500);
 }

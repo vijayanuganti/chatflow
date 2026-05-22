@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner";
 import { formatApiError } from "@/lib/api";
 import ReplyPreviewBar from "@/components/chat/ReplyPreviewBar";
+import EditPreviewBar from "@/components/chat/EditPreviewBar";
 
 /**
  * WhatsApp-style composer: pill (emoji | text | attach | camera) + mic/send FAB.
@@ -37,6 +38,8 @@ export default function ChatComposer({
   onEmojiOpenChange,
   replyingTo = null,
   onCancelReply,
+  editingMessage = null,
+  onCancelEdit,
 }) {
   const [voiceRecording, setVoiceRecording] = useState(false);
 
@@ -124,7 +127,11 @@ export default function ChatComposer({
 
   return (
     <div className="flex w-full flex-col">
-      <ReplyPreviewBar replyingTo={replyingTo} onCancel={onCancelReply} />
+      {editingMessage ? (
+        <EditPreviewBar onCancel={onCancelEdit} />
+      ) : (
+        <ReplyPreviewBar replyingTo={replyingTo} onCancel={onCancelReply} />
+      )}
       <input ref={photoInputRef} type="file" className="hidden" accept="image/*" onChange={handleFileInput} />
       <input ref={videoInputRef} type="file" className="hidden" accept="video/*" onChange={handleFileInput} />
       <input ref={audioInputRef} type="file" className="hidden" accept="audio/*" onChange={handleFileInput} />

@@ -2,7 +2,7 @@ import { Capacitor } from "@capacitor/core";
 import { api, clearAuthSession, getStoredAccessToken } from "./api";
 import { clearStoredActiveConversationId } from "./activeConversationStorage";
 import { clearInAppNotificationState } from "./inAppNotifications";
-import { clearNativeAuth } from "./nativeAuthSync";
+import { clearNativeAuth, ChatFlowNative } from "./nativeAuthSync";
 import {
   cancelAllLocalNotifications,
   clearNotificationBadge,
@@ -29,6 +29,14 @@ export async function runLogoutNotificationCleanup({ skipServer = false } = {}) 
   teardownCapacitorPush();
   clearInAppNotificationState();
   await clearNotificationBadge();
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await ChatFlowNative.setAppForeground({ foreground: false });
+      await ChatFlowNative.setActiveChat({ inChat: false, conversationId: "" });
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 /**

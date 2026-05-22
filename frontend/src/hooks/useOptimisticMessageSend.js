@@ -195,5 +195,12 @@ export function useOptimisticMessageSend({
     commitMessages,
   ]);
 
-  return { sendMessage, patchMessage };
+  const updateMessageById = useCallback((messageId, patch) => {
+    if (!messageId) return;
+    commitMessages(selectedIdRef.current, (prev) => (
+      prev.map((m) => (String(m.id) === String(messageId) ? { ...m, ...patch } : m))
+    ));
+  }, [commitMessages, selectedIdRef]);
+
+  return { sendMessage, patchMessage, updateMessageById };
 }

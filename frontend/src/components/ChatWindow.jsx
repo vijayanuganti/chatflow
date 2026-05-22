@@ -12,6 +12,8 @@ import {
   X,
   Reply,
   Forward,
+  MoreVertical,
+  Star,
 } from "lucide-react";
 import SwipeableMessageRow from "@/components/chat/SwipeableMessageRow";
 import ForwardModal from "@/components/chat/ForwardModal";
@@ -21,8 +23,14 @@ import { sortMessagesChronologically } from "@/lib/optimisticMessages";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  getStarredIds,
-} from "@/lib/starredMessages";
+  editMessageContent,
+  starMessage,
+  unstarMessage,
+  fetchStarredMessages,
+} from "@/lib/messageActionsApi";
+import { hapticMessageLongPress } from "@/lib/messageActionHaptics";
+import MessageContextMenu from "@/components/chat/MessageContextMenu";
+import StarredMessagesPanel from "@/components/chat/StarredMessagesPanel";
 import { formatApiError } from "@/lib/api";
 import { inferMessageTypeFromFile, createVideoPosterFromFile } from "@/lib/chatMedia";
 import { uploadChatFile } from "@/lib/chatUpload";
@@ -47,11 +55,18 @@ import { setActiveChatState, clearActiveChatState } from "@/lib/activeChatState"
 import { fcmGroupKeyForSender } from "@/lib/notificationDisplay";
 import { ChatFlowNative } from "@/lib/nativeAuthSync";
 
+function messageCanEdit(message, userId) {
+  if (!message?.id || !userId) return false;
+  if (String(message.sender_id) !== String(userId)) return false;
+  return (message.message_type || "text") === "text";
+}
+
 export default function ChatWindow({
   conversation,
   messages,
   onSendMessage,
   onPatchMessage,
+  onUpdateMessage,
   conversations = [],
   typingUsers, // Map of userId -> name for users currently typing (excluding self)
   onlineUsers,
@@ -103,7 +118,15 @@ export default function ChatWindow({
   const [replyingTo, setReplyingTo] = useState(null);
   const [showForwardModal, setShowForwardModal] = useState(false);
   const [forwardMessages, setForwardMessages] = useState([]);
-  const [starredIds, setStarredIds] = useState(() => getStarredIds(user?.id));
+  const [starredIds, setStarredIds] = useState(() => new Set());
+  const [actionMessageId, setActionMessageId] = useState(null);
+  const [messageMenuOpen, setMessageMenuOpen] = useState(false);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [showStarredPanel, setShowStarredPanel] = useState(false);
+  const [starredList, setStarredList] = useState([]);
+  const [starredLoading, setStarredLoading] = useState(false);
+  const [flashMessageId, setFlashMessageId] = useState(null);
+  const messageMenuAnchorRef = useRef(null);
   const [text, setText] = useState("");
   const [composerFocused, setComposerFocused] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -261,11 +284,31 @@ export default function ChatWindow({
     setThreadSearchOpen(false);
     setThreadSearchQuery("");
     setSelectedMessages([]);
+    setActionMessageId(null);
+    setMessageMenuOpen(false);
+    setEditingMessage(null);
+    setShowStarredPanel(false);
+    setFlashMessageId(null);
   }, [conversation?.id]);
 
+  const refreshStarredIds = useCallback(async () => {
+    if (!conversation?.id || readOnly) return;
+    try {
+      const list = await fetchStarredMessages(conversation.id);
+      setStarredIds(new Set(list.map((m) => String(m.id))));
+    } catch {
+      setStarredIds(new Set());
+    }
+  }, [conversation?.id, readOnly]);
+
   useEffect(() => {
-    if (user?.id) setStarredIds(getStarredIds(user.id));
-  }, [user?.id]);
+    refreshStarredIds();
+  }, [refreshStarredIds]);
+
+  const dismissActionMenu = useCallback(() => {
+    setMessageMenuOpen(false);
+    setActionMessageId(null);
+  }, []);
 
   /* Keep typing=true refreshed while the composer is focused (mobile WS / idle gaps). */
   useEffect(() => {
@@ -336,14 +379,121 @@ export default function ChatWindow({
     });
   }, []);
 
-  const handleLongPressSelect = useCallback(
+  const handleLongPressMessage = useCallback(
     (message) => {
       const key = messageKey(message);
-      if (!key || readOnly) return;
-      setSelectedMessages((prev) => (prev.includes(key) ? prev : [...prev, key]));
+      if (!key || readOnly || !message.id) return;
+      void hapticMessageLongPress();
+
+      if (selectedMessages.length > 0) {
+        setSelectedMessages((prev) => (prev.includes(key) ? prev : [...prev, key]));
+        return;
+      }
+
+      if (actionMessageId && actionMessageId !== key) {
+        setMessageMenuOpen(false);
+        setActionMessageId(null);
+        setSelectedMessages((prev) => {
+          const next = new Set([...prev, actionMessageId, key]);
+          return [...next];
+        });
+        return;
+      }
+
+      setActionMessageId(key);
+      setMessageMenuOpen(false);
     },
-    [messageKey, readOnly],
+    [messageKey, readOnly, selectedMessages.length, actionMessageId],
   );
+
+  const openMessageActionMenu = useCallback((anchorEl) => {
+    messageMenuAnchorRef.current = anchorEl;
+    setMessageMenuOpen(true);
+  }, []);
+
+  const actionMessage = useMemo(() => {
+    if (!actionMessageId) return null;
+    return visibleMessages.find((m) => messageKey(m) === actionMessageId) || null;
+  }, [actionMessageId, visibleMessages, messageKey]);
+
+  const showEditInMenu = useMemo(
+    () => messageCanEdit(actionMessage, user?.id),
+    [actionMessage, user?.id],
+  );
+
+  const handleStartEdit = useCallback(() => {
+    if (!actionMessage?.id || actionMessage.message_type !== "text") return;
+    setEditingMessage(actionMessage);
+    setText(actionMessage.content || "");
+    setReplyingTo(null);
+    dismissActionMenu();
+    requestAnimationFrame(() => {
+      try {
+        composerRef.current?.focus({ preventScroll: true });
+      } catch {
+        composerRef.current?.focus();
+      }
+    });
+  }, [actionMessage, dismissActionMenu]);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessage(null);
+    setText("");
+  }, []);
+
+  const handleToggleStar = useCallback(async () => {
+    const msg = actionMessage;
+    if (!msg?.id) return;
+    const id = String(msg.id);
+    const wasStarred = starredIds.has(id);
+    try {
+      if (wasStarred) {
+        await unstarMessage(msg.id);
+        setStarredIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      } else {
+        await starMessage(msg.id);
+        setStarredIds((prev) => new Set([...prev, id]));
+      }
+      dismissActionMenu();
+    } catch (err) {
+      toast.error(formatApiError(err));
+    }
+  }, [actionMessage, starredIds, dismissActionMenu]);
+
+  const openStarredPanel = useCallback(async () => {
+    if (!conversation?.id) return;
+    setShowStarredPanel(true);
+    setStarredLoading(true);
+    try {
+      const list = await fetchStarredMessages(conversation.id);
+      setStarredList(list);
+      setStarredIds(new Set(list.map((m) => String(m.id))));
+    } catch (err) {
+      toast.error(formatApiError(err));
+      setStarredList([]);
+    } finally {
+      setStarredLoading(false);
+    }
+  }, [conversation?.id]);
+
+  const scrollToMessage = useCallback((messageId) => {
+    if (!messageId) return;
+    const el = scrollRef.current?.querySelector(`[data-testid="message-${messageId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    setFlashMessageId(String(messageId));
+    setTimeout(() => setFlashMessageId(null), 1000);
+  }, []);
+
+  const handleStarredMessageSelect = useCallback((item) => {
+    setShowStarredPanel(false);
+    requestAnimationFrame(() => scrollToMessage(item.id));
+  }, [scrollToMessage]);
 
   const startReplyRef = useRef(startReply);
   startReplyRef.current = startReply;
@@ -398,6 +548,27 @@ export default function ChatWindow({
   const handleSendText = () => {
     const value = text.trim();
     if (!value || !conversation) return;
+
+    if (editingMessage?.id) {
+      const msgId = editingMessage.id;
+      (async () => {
+        try {
+          const updated = await editMessageContent(msgId, value);
+          onUpdateMessage?.(msgId, {
+            content: updated.content,
+            is_edited: true,
+            edited_at: updated.edited_at,
+          });
+          setEditingMessage(null);
+          setText("");
+          flushTypingStop();
+        } catch (err) {
+          toast.error(formatApiError(err));
+        }
+      })();
+      return;
+    }
+
     onSendMessage(buildSendPayload({
       conversation_id: conversation.id,
       content: value,
@@ -769,6 +940,18 @@ export default function ChatWindow({
         <Button size="icon" variant="ghost" className="rounded-full shrink-0" onClick={() => setThreadSearchOpen((v) => !v)} data-testid="chat-thread-search-toggle" title="Search in chat">
           <Search className="h-5 w-5" />
         </Button>
+        {!readOnly && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="rounded-full shrink-0 text-primary"
+            onClick={openStarredPanel}
+            data-testid="chat-starred-messages-btn"
+            title="Starred messages"
+          >
+            <Star className="h-5 w-5" strokeWidth={2} />
+          </Button>
+        )}
 
         {/* Medical profile shortcut - visible to admins and the assigned employee
             when chatting with a client. Backend enforces the actual ACL. */}
@@ -858,10 +1041,20 @@ export default function ChatWindow({
 
       {/* Messages */}
       <div className="relative min-h-0 flex-1">
+        <StarredMessagesPanel
+          open={showStarredPanel}
+          items={starredList}
+          loading={starredLoading}
+          onBack={() => setShowStarredPanel(false)}
+          onSelectMessage={handleStarredMessageSelect}
+        />
         <div
           ref={scrollRef}
           className="chat-bg h-full space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 sm:px-4 sm:py-5"
           data-testid="messages-container"
+          onClick={() => {
+            if (messageMenuOpen || actionMessageId) dismissActionMenu();
+          }}
         >
         {visibleMessages.length === 0 && (
           <div className="text-center text-sm text-gray-400 py-10" data-testid="empty-messages">
@@ -889,30 +1082,55 @@ export default function ChatWindow({
             mine = m.sender_id === user?.id;
           }
           const mKey = messageKey(m);
+          const isActionTarget = actionMessageId === mKey;
           const bubble = (
-            <MessageBubble
-              message={m}
-              mine={mine}
-              showSenderName={showSenderNames}
-              totalRecipients={totalRecipients}
-              showReceipts={!readOnly}
-              onImageClick={handleImageClick}
-              selected={selectedMessages.includes(mKey)}
-              starred={m.id ? starredIds.has(String(m.id)) : false}
-              searchQuery={threadSearchQuery}
-              selectionMode={isSelectionMode}
-              onLongPress={readOnly ? undefined : handleLongPressSelect}
-              onToggleSelect={readOnly ? undefined : toggleSelect}
-              dimmed={isSelectionMode && !selectedMessages.includes(mKey)}
-              onRetry={readOnly ? undefined : handleRetryMessage}
-              viewerUserId={user?.id}
-            />
+            <div
+              className={`relative flex w-full ${mine ? "justify-end" : "justify-start"} items-center gap-1`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <MessageBubble
+                message={m}
+                mine={mine}
+                showSenderName={showSenderNames}
+                totalRecipients={totalRecipients}
+                showReceipts={!readOnly}
+                onImageClick={handleImageClick}
+                selected={selectedMessages.includes(mKey)}
+                actionSelected={isActionTarget}
+                flashHighlight={flashMessageId && String(m.id) === flashMessageId}
+                starred={m.id ? starredIds.has(String(m.id)) : false}
+                searchQuery={threadSearchQuery}
+                selectionMode={isSelectionMode}
+                onLongPress={readOnly ? undefined : handleLongPressMessage}
+                onToggleSelect={readOnly ? undefined : toggleSelect}
+                dimmed={
+                  (isSelectionMode && !selectedMessages.includes(mKey))
+                  || (actionMessageId && !isActionTarget)
+                }
+                onRetry={readOnly ? undefined : handleRetryMessage}
+                viewerUserId={user?.id}
+              />
+              {isActionTarget && !readOnly && (
+                <button
+                  type="button"
+                  className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full text-gray-600 hover:bg-gray-200/80 dark:text-gray-300 dark:hover:bg-gray-800 touch-manipulation"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openMessageActionMenu(e.currentTarget);
+                  }}
+                  data-testid="message-action-menu-trigger"
+                  aria-label="Message actions"
+                >
+                  <MoreVertical className="h-5 w-5" strokeWidth={2} />
+                </button>
+              )}
+            </div>
           );
           return (
             <SwipeableMessageRow
               key={m.__tempId || m.id}
               isSent={mine}
-              disabled={readOnly || isSelectionMode}
+              disabled={readOnly || isSelectionMode || !!actionMessageId}
               selectionModeRef={isSelectionModeActive}
               onSwipeReply={() => startReplyRef.current(m)}
             >
@@ -969,6 +1187,8 @@ export default function ChatWindow({
             onEmojiOpenChange={setEmojiPanelOpen}
             replyingTo={replyingTo}
             onCancelReply={() => setReplyingTo(null)}
+            editingMessage={editingMessage}
+            onCancelEdit={handleCancelEdit}
           />
         </div>
       )}
@@ -979,6 +1199,16 @@ export default function ChatWindow({
         messages={forwardMessages}
         conversations={conversations}
         currentConversationId={conversation?.id}
+      />
+
+      <MessageContextMenu
+        open={messageMenuOpen && !!actionMessage}
+        anchorRef={messageMenuAnchorRef}
+        onClose={dismissActionMenu}
+        showEdit={showEditInMenu}
+        isStarred={actionMessage?.id ? starredIds.has(String(actionMessage.id)) : false}
+        onEdit={handleStartEdit}
+        onToggleStar={handleToggleStar}
       />
     </div>
   );

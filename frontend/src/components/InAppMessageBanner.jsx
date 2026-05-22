@@ -1,10 +1,15 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { subscribeInAppMessageBanner } from "@/lib/inAppNotifications";
+import { useAuth } from "@/context/AuthContext";
+import {
+  subscribeInAppMessageBanner,
+  IN_APP_BANNER_DISMISS_EVENT,
+} from "@/lib/inAppNotifications";
 
 const DISMISS_MS = 4500;
 const SWIPE_THRESHOLD_PX = 100;
 
 export default function InAppMessageBanner() {
+  const { user } = useAuth();
   const [banner, setBanner] = useState(null);
   const [offsetX, setOffsetX] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -44,6 +49,7 @@ export default function InAppMessageBanner() {
   }, [dismiss]);
 
   useEffect(() => {
+    if (!user?.id) return undefined;
     return subscribeInAppMessageBanner((payload) => {
       if (timerRef.current) window.clearTimeout(timerRef.current);
       setIsExiting(false);
@@ -53,7 +59,13 @@ export default function InAppMessageBanner() {
       setBanner(payload);
       scheduleAutoDismiss();
     });
-  }, [scheduleAutoDismiss]);
+  }, [user?.id, scheduleAutoDismiss]);
+
+  useEffect(() => {
+    const onDismiss = () => dismiss();
+    window.addEventListener(IN_APP_BANNER_DISMISS_EVENT, onDismiss);
+    return () => window.removeEventListener(IN_APP_BANNER_DISMISS_EVENT, onDismiss);
+  }, [dismiss]);
 
   useEffect(() => () => {
     if (timerRef.current) window.clearTimeout(timerRef.current);

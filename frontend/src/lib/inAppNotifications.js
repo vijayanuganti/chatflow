@@ -1,5 +1,7 @@
 /** Lightweight pub/sub for foreground in-app message banners (WhatsApp-style dropdown). */
 
+export const IN_APP_BANNER_DISMISS_EVENT = "chatflow:dismiss-in-app-banner";
+
 const listeners = new Set();
 
 export function subscribeInAppMessageBanner(listener) {
@@ -21,7 +23,16 @@ export function showInAppMessageBanner(payload) {
   });
 }
 
-/** Drop all in-app banner subscribers on logout. */
+/** Hide any visible banner on logout (keeps UI subscribers registered). */
+export function dismissInAppMessageBanner() {
+  try {
+    window.dispatchEvent(new CustomEvent(IN_APP_BANNER_DISMISS_EVENT));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Logout cleanup — dismiss tray only; do not clear subscribers (banner stays mounted). */
 export function clearInAppNotificationState() {
-  listeners.clear();
+  dismissInAppMessageBanner();
 }

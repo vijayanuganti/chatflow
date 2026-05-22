@@ -73,6 +73,8 @@ function MessageBubble({
   showReceipts = true,
   onImageClick,
   selected = false,
+  actionSelected = false,
+  flashHighlight = false,
   starred = false,
   searchQuery = "",
   onLongPress,
@@ -187,7 +189,15 @@ function MessageBubble({
                 : NO_SELECT_STYLE
           }
         >
-          {selected && (
+          {(actionSelected || flashHighlight) && (
+            <div
+              className={`pointer-events-none absolute inset-0 z-[1] rounded-[inherit] bg-primary/10 ring-1 ring-primary/25 ${
+                flashHighlight ? "animate-pulse" : ""
+              }`}
+              aria-hidden
+            />
+          )}
+          {selected && !actionSelected && (
             <>
               <div
                 className="pointer-events-none absolute inset-0 z-[1] rounded-[inherit] bg-emerald-500/15"
@@ -202,7 +212,11 @@ function MessageBubble({
             </>
           )}
           {starred && (
-            <Star className="absolute -top-1 -right-1 h-3.5 w-3.5 text-amber-500 fill-amber-400 z-10" aria-hidden />
+            <Star
+              className="absolute bottom-1 right-1.5 h-2.5 w-2.5 text-primary fill-primary z-[3] pointer-events-none"
+              strokeWidth={2}
+              aria-label="Starred"
+            />
           )}
 
           {showSenderName && !mine && (
@@ -330,13 +344,25 @@ function MessageBubble({
           )}
 
           {message.content && !isAudio ? (
-            <p
-              className={`message-text whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100 leading-relaxed ${
-                isImage || isVideo ? "px-3 py-1.5" : ""
-              }`}
-            >
-              {highlightText(message.content, searchQuery)}
-            </p>
+            <>
+              <p
+                className={`message-text whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100 leading-relaxed ${
+                  isImage || isVideo ? "px-3 py-1.5" : ""
+                }`}
+              >
+                {highlightText(message.content, searchQuery)}
+              </p>
+              {(message.is_edited || message.edited_at) && (
+                <p
+                  className={`text-[9px] italic text-gray-400 dark:text-gray-500 ${
+                    isImage || isVideo ? "px-3 pb-0.5" : "px-3 -mt-0.5 pb-0.5"
+                  }`}
+                  data-testid={`message-edited-${message.id}`}
+                >
+                  edited
+                </p>
+              )}
+            </>
           ) : null}
 
           {!isMediaBubble && !isAudio ? (
@@ -386,6 +412,8 @@ function messageBubblePropsEqual(prev, next) {
   if (prev.mine !== next.mine) return false;
   if (prev.showSenderName !== next.showSenderName) return false;
   if (prev.selected !== next.selected) return false;
+  if (prev.actionSelected !== next.actionSelected) return false;
+  if (prev.flashHighlight !== next.flashHighlight) return false;
   if (prev.starred !== next.starred) return false;
   if (prev.dimmed !== next.dimmed) return false;
   if (prev.selectionMode !== next.selectionMode) return false;
@@ -401,6 +429,8 @@ function messageBubblePropsEqual(prev, next) {
   if (a?.__error !== b?.__error) return false;
   if (a?.__uploadProgress !== b?.__uploadProgress) return false;
   if (a?.content !== b?.content) return false;
+  if (a?.is_edited !== b?.is_edited) return false;
+  if (a?.edited_at !== b?.edited_at) return false;
   if (a?.is_forwarded !== b?.is_forwarded) return false;
   if (a?.original_sender_id !== b?.original_sender_id) return false;
   if (a?.reply_to_id !== b?.reply_to_id) return false;

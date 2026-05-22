@@ -881,23 +881,33 @@ export default function AdminDashboard() {
     api.get("/admin/stats").then((r) => setStats(r.data)).catch(() => {});
   }, []);
 
-  const { sendTyping } = useChatSocket({
-    onMessage: handleIncoming,
-    onTyping: handleTypingEvent,
-    onPresence: handlePresence,
-    onReadReceipt: handleReadReceipt,
-    onStatusUpdate: handleStatusUpdate,
-    onConversationRemoved: handleConversationRemoved,
-    enabled: Boolean(user?.id),
-  });
-
-  const { sendMessage: handleSendMessage, patchMessage } = useOptimisticMessageSend({
+  const { sendMessage: handleSendMessage, patchMessage, updateMessageById } = useOptimisticMessageSend({
     user,
     selectedIdRef,
     setMessages,
     setConversations: setMyConvs,
     conversations: myConvs,
     onConversationMissing: loadOverview,
+  });
+
+  const handleMessageUpdated = useCallback((msg) => {
+    if (!msg?.id) return;
+    updateMessageById(msg.id, {
+      content: msg.content,
+      is_edited: msg.is_edited ?? true,
+      edited_at: msg.edited_at,
+    });
+  }, [updateMessageById]);
+
+  const { sendTyping } = useChatSocket({
+    onMessage: handleIncoming,
+    onTyping: handleTypingEvent,
+    onPresence: handlePresence,
+    onReadReceipt: handleReadReceipt,
+    onStatusUpdate: handleStatusUpdate,
+    onMessageUpdated: handleMessageUpdated,
+    onConversationRemoved: handleConversationRemoved,
+    enabled: Boolean(user?.id),
   });
 
   const isSelectedAdminChat = selected && myConvs.find((c) => c.id === selected.id);
@@ -1485,6 +1495,7 @@ export default function AdminDashboard() {
                 conversations={myConvs}
                 onSendMessage={handleSendMessage}
                 onPatchMessage={patchMessage}
+                onUpdateMessage={updateMessageById}
                 typingUsers={(selected && typingUsers[selected.id]) || {}}
                 onlineUsers={onlineUsers}
                 lastSeenByUser={lastSeenByUser}
@@ -1536,6 +1547,7 @@ export default function AdminDashboard() {
                 conversations={tab === "chats" ? allConvs : myConvs}
                 onSendMessage={handleSendMessage}
                 onPatchMessage={patchMessage}
+                onUpdateMessage={updateMessageById}
                 typingUsers={(selected && typingUsers[selected.id]) || {}}
                 onlineUsers={onlineUsers}
                 lastSeenByUser={lastSeenByUser}

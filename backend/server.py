@@ -1052,6 +1052,10 @@ class UpdateMessageStatusBatchBody(BaseModel):
     status: str = Field(..., pattern="^(sent|delivered|seen)$")
 
 
+class PatchMessageContentBody(BaseModel):
+    content: str = Field(..., min_length=1, max_length=8000)
+
+
 MESSAGE_STATUS_ORDER = {"sent": 0, "delivered": 1, "seen": 2}
 
 
@@ -2295,6 +2299,7 @@ async def admin_delete_conversation(
     keys = await _collect_message_file_keys(conv_id)
     deleted_s3 = await _delete_s3_keys(keys)
     dr = await db.messages.delete_many({"conversation_id": conv_id})
+    await db.starred_messages.delete_many({"conversation_id": conv_id})
     await db.conversations.delete_one({"id": conv_id})
     await log_audit(
         actor_user_id=actor["id"],
@@ -3565,6 +3570,147 @@ async def send_message(body: MessageBody, user: dict = Depends(get_current_user)
     return msg
 
 
+async def _assert_message_participant(msg: dict, user: dict, write: bool = False) -> dict:
+    """Load conversation and verify the user may access (and optionally write to) the message thread."""
+    conv_id = (msg.get("conversation_id") or "").strip()
+    if not conv_id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv = await db.conversations.find_one({"id": conv_id}, {"_id": 0})
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if user["role"] != "admin" and user["id"] not in conv.get("participants", []):
+        raise HTTPException(status_code=403, detail="Access denied")
+    await _assert_client_conversation_policy(user, conv, write=write)
+    return conv
+
+
+@api_router.patch("/messages/{message_id}")
+async def patch_message_content(
+    message_id: str,
+    body: PatchMessageContentBody,
+    user: dict = Depends(get_current_user),
+):
+    """Edit a text message (sender only)."""
+    msg = await db.messages.find_one({"id": message_id}, {"_id": 0})
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if msg.get("sender_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="Only the sender can edit this message")
+    if (msg.get("message_type") or "text") != "text":
+        raise HTTPException(status_code=403, detail="Only text messages can be edited")
+
+    conv = await _assert_message_participant(msg, user, write=True)
+    new_content = body.content.strip()
+    edited_at = now_iso()
+    await db.messages.update_one(
+        {"id": message_id},
+        {"$set": {"content": new_content, "edited_at": edited_at, "is_edited": True}},
+    )
+    fresh = await db.messages.find_one({"id": message_id}, {"_id": 0})
+    if not fresh:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    latest = await db.messages.find_one(
+        {"conversation_id": conv["id"]},
+        {"_id": 0, "id": 1},
+        sort=[("created_at", -1)],
+    )
+    if latest and latest.get("id") == message_id:
+        preview = new_content
+        if conv["type"] == "group":
+            preview = f"{user['full_name']}: {preview}"
+        await db.conversations.update_one(
+            {"id": conv["id"]},
+            {"$set": {"last_message": preview}},
+        )
+
+    await manager.broadcast_message_updated(fresh, conv)
+    return fresh
+
+
+@api_router.post("/messages/{message_id}/star")
+async def star_message(message_id: str, user: dict = Depends(get_current_user)):
+    msg = await db.messages.find_one({"id": message_id}, {"_id": 0})
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    await _assert_message_participant(msg, user, write=False)
+
+    existing = await db.starred_messages.find_one(
+        {"user_id": user["id"], "message_id": message_id},
+        {"_id": 0, "id": 1},
+    )
+    if existing:
+        return {"starred": True, "message_id": message_id}
+
+    doc = {
+        "id": str(uuid.uuid4()),
+        "message_id": message_id,
+        "user_id": user["id"],
+        "conversation_id": msg["conversation_id"],
+        "starred_at": now_iso(),
+    }
+    await db.starred_messages.insert_one(doc)
+    return {"starred": True, "message_id": message_id}
+
+
+@api_router.delete("/messages/{message_id}/star")
+async def unstar_message(message_id: str, user: dict = Depends(get_current_user)):
+    msg = await db.messages.find_one({"id": message_id}, {"_id": 0})
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    await _assert_message_participant(msg, user, write=False)
+    await db.starred_messages.delete_many({"user_id": user["id"], "message_id": message_id})
+    return {"starred": False, "message_id": message_id}
+
+
+@api_router.get("/chats/{chat_id}/starred")
+@api_router.get("/conversations/{chat_id}/starred")
+async def list_starred_messages(chat_id: str, user: dict = Depends(get_current_user)):
+    conv = await db.conversations.find_one({"id": chat_id}, {"_id": 0})
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if user["role"] != "admin" and user["id"] not in conv.get("participants", []):
+        raise HTTPException(status_code=403, detail="Access denied")
+    await _assert_client_conversation_policy(user, conv, write=False)
+
+    stars = await db.starred_messages.find(
+        {"user_id": user["id"], "conversation_id": chat_id},
+        {"_id": 0},
+    ).sort("starred_at", -1).to_list(500)
+    if not stars:
+        return []
+
+    msg_ids = [s["message_id"] for s in stars if s.get("message_id")]
+    if not msg_ids:
+        return []
+
+    msg_docs = await db.messages.find(
+        {"id": {"$in": msg_ids}, "conversation_id": chat_id},
+        {"_id": 0},
+    ).to_list(len(msg_ids))
+    msg_by_id = {m["id"]: m for m in msg_docs}
+
+    sender_ids = {m.get("sender_id") for m in msg_docs if m.get("sender_id")}
+    users_by_id: Dict[str, dict] = {}
+    if sender_ids:
+        async for u in db.users.find({"id": {"$in": list(sender_ids)}}, {"_id": 0, "id": 1, "full_name": 1}):
+            users_by_id[u["id"]] = u
+
+    result = []
+    for star in stars:
+        mid = star.get("message_id")
+        m = msg_by_id.get(mid)
+        if not m:
+            continue
+        sender = users_by_id.get(m.get("sender_id") or "")
+        result.append({
+            **m,
+            "starred_at": star.get("starred_at"),
+            "sender_name": m.get("sender_name") or (sender or {}).get("full_name") or "User",
+        })
+    return result
+
+
 def _is_high_priority_notification_action(request: Request) -> bool:
     return (request.headers.get("X-Priority") or "").strip().lower() == "high"
 
@@ -4006,6 +4152,19 @@ class ConnectionManager:
             if a["id"] not in conv["participants"]:
                 await self.send_event(a["id"], event)
 
+    async def broadcast_message_updated(self, msg: dict, conv: dict):
+        event = {
+            "type": "message_updated",
+            "message": msg,
+            "conversation_id": conv["id"],
+        }
+        for pid in conv["participants"]:
+            await self.send_event(pid, event)
+        admin_ids = await db.users.find({"role": "admin"}, {"id": 1, "_id": 0}).to_list(100)
+        for a in admin_ids:
+            if a["id"] not in conv["participants"]:
+                await self.send_event(a["id"], event)
+
     async def broadcast_typing(self, sender_id: str, sender_name: str, conv_id: str, participants: List[str], is_typing: bool):
         event = {
             "type": "typing",
@@ -4321,6 +4480,10 @@ async def on_startup():
         await db.conversations.create_index("participants")
         await db.messages.create_index("conversation_id")
         await db.messages.create_index("created_at")
+        await db.starred_messages.create_index(
+            [("user_id", 1), ("message_id", 1)], unique=True
+        )
+        await db.starred_messages.create_index([("user_id", 1), ("conversation_id", 1)])
         await db.batches.create_index("employee_id")
         await db.batches.create_index([("employee_id", 1), ("name", 1)])
         await db.audit_logs.create_index([("timestamp", -1)])
