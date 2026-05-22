@@ -32,6 +32,7 @@ import { initAppForegroundSync } from "@/lib/activeChatState";
 import { initSafeAreaInsets } from "@/lib/safeAreaInsets";
 import { syncConversationSoundsFromNative } from "@/lib/conversationSounds";
 import ForceLogoutBridge from "@/components/ForceLogoutBridge";
+import NotificationLaunchGuard from "@/components/NotificationLaunchGuard";
 
 function Protected({ children, roles }) {
   const { user, loading } = useAuth();
@@ -93,6 +94,7 @@ function App() {
       <ThemeProvider>
       <AuthProvider>
         <ForceLogoutBridge />
+        <NotificationLaunchGuard />
         <ChatProvider>
         <NativeAuthBootstrap />
         <SplashScreenBootstrap />

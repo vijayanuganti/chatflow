@@ -410,6 +410,17 @@ public final class ChatFlowNotificationHelper {
         ChatFlowNotificationThreadStore.clear(context.getApplicationContext(), key);
     }
 
+    /** Remove every tray notification (logout / session end). */
+    public static void cancelAll(Context context) {
+        if (context == null) {
+            return;
+        }
+        Context appCtx = context.getApplicationContext();
+        ChatFlowNotificationCoalescer.cancelAll();
+        NotificationManagerCompat.from(appCtx).cancelAll();
+        ChatFlowNotificationThreadStore.clearAll(appCtx);
+    }
+
     public static int notificationIdFor(String messageId) {
         return stableHash("msg-" + messageId);
     }

@@ -5,6 +5,7 @@ import {
   api,
   getFcmApiBaseUrl,
   getFcmTokenPostUrl,
+  getStoredAccessToken,
   waitUntilAuthenticated,
 } from "./api";
 import {
@@ -27,6 +28,8 @@ export const FCM_MESSAGE_EVENT = "chatflow:fcm-message";
 export const NOTIFICATION_MARK_READ_EVENT = "chatflow:notification-mark-read";
 
 export const FCM_CHANNEL_ID = "chatflow_messages_actions";
+
+export const FCM_DEVICE_TOKEN_KEY = "cf_fcm_device_token";
 
 let activeUserId = null;
 let listeners = [];
@@ -75,8 +78,114 @@ async function ensureAndroidNotificationChannel() {
   }
 }
 
+export function persistDevicePushToken(tokenValue) {
+  if (!tokenValue) return;
+  try {
+    localStorage.setItem(FCM_DEVICE_TOKEN_KEY, String(tokenValue));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearPersistedDevicePushToken() {
+  try {
+    localStorage.removeItem(FCM_DEVICE_TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function getDevicePushToken() {
+  if (lastRegistrationToken?.value) return String(lastRegistrationToken.value);
+  try {
+    return (localStorage.getItem(FCM_DEVICE_TOKEN_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+export async function unregisterPushTokenFromServer(token) {
+  const tokenValue = (token || "").trim();
+  if (!tokenValue) return;
+  try {
+    await api.delete("/notifications/token", { data: { token: tokenValue } });
+    logPush("FCM token removed from server");
+  } catch (err) {
+    console.warn("[push] DELETE /notifications/token failed:", err?.response?.status || err?.message);
+  }
+}
+
+async function patchFcmTokenOnServer(oldToken, newToken) {
+  const oldVal = (oldToken || "").trim();
+  const newVal = (newToken || "").trim();
+  if (!oldVal || !newVal || oldVal === newVal) return;
+  try {
+    await waitUntilAuthenticated({ maxWaitMs: 10000 });
+    await api.patch("/notifications/token", { old_token: oldVal, new_token: newVal });
+    logPush("FCM token rotated on server");
+  } catch (err) {
+    console.warn("[push] PATCH /notifications/token failed:", err?.response?.status || err?.message);
+    void postFcmTokenToApi({ value: newVal }, 0);
+  }
+}
+
+export async function cancelAllLocalNotifications() {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await PushNotifications.removeAllDeliveredNotifications();
+    } catch (err) {
+      console.warn("[push] removeAllDeliveredNotifications failed:", err);
+    }
+    try {
+      await ChatFlowNative.clearAllNotifications();
+    } catch {
+      /* optional native helper */
+    }
+    return;
+  }
+
+  if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if (reg?.getNotifications) {
+        const list = await reg.getNotifications();
+        list.forEach((n) => {
+          try {
+            n.close();
+          } catch {
+            /* ignore */
+          }
+        });
+      }
+    } catch (err) {
+      console.warn("[push] clear web notifications failed:", err);
+    }
+  }
+}
+
+export async function clearNotificationBadge() {
+  try {
+    if (typeof navigator !== "undefined" && "clearAppBadge" in navigator) {
+      await navigator.clearAppBadge();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function unregisterDevicePush() {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await PushNotifications.unregister();
+    logPush("PushNotifications.unregister() done");
+  } catch (err) {
+    console.warn("[push] unregister failed:", err);
+  }
+  clearPersistedDevicePushToken();
+}
+
 async function postFcmTokenToApi(token, attempt = 0) {
-  const tokenValue = token?.value;
+  const tokenValue = token?.value ?? (typeof token === "string" ? token : "");
   if (!tokenValue) {
     console.warn("[push] postFcmTokenToApi: missing token.value", token);
     return;
@@ -124,6 +233,7 @@ async function postFcmTokenToApi(token, attempt = 0) {
       return;
     }
 
+    persistDevicePushToken(tokenValue);
     logPush("FCM token saved to API", res.status, res.data);
   } catch (err) {
     logFcmPostFailure(err, fullUrl, err?.response?.status, err?.response?.data);
@@ -138,14 +248,21 @@ function onRegistration(token) {
     console.warn("[push] registration event with empty token:", token);
     return;
   }
+  const previous = getDevicePushToken();
   lastRegistrationToken = token;
+  persistDevicePushToken(token.value);
   console.log(`DEBUG_TOKEN_VAL: ${token.value}`);
   logPush("FCM registration received, length=", token.value.length);
-  void postFcmTokenToApi(token);
+  if (previous && previous !== token.value) {
+    void patchFcmTokenOnServer(previous, token.value);
+  } else {
+    void postFcmTokenToApi(token);
+  }
 }
 
 async function refreshFcmRegistration(reason) {
   if (!Capacitor.isNativePlatform() || !activeUserId) return;
+  if (!getStoredAccessToken()) return;
   logPush("refreshFcmRegistration:", reason);
   try {
     await syncNativeAuthForPush();
@@ -184,6 +301,7 @@ export function teardownCapacitorPush() {
   onNotificationActionRef = null;
   onMarkReadRef = null;
   lastRegistrationToken = null;
+  clearPersistedDevicePushToken();
 }
 
 /**
@@ -375,7 +493,7 @@ export async function initCapacitorPush(userId, onNotificationAction, onMarkRead
 
   if (!appResumeListener) {
     App.addListener("appStateChange", ({ isActive }) => {
-      if (isActive) {
+      if (isActive && getStoredAccessToken()) {
         void refreshFcmRegistration("app foreground");
       }
     })

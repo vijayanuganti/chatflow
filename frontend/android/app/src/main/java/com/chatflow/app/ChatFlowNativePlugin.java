@@ -109,7 +109,15 @@ public class ChatFlowNativePlugin extends Plugin {
 
     @PluginMethod
     public void clearAuth(PluginCall call) {
-        ChatFlowAuthStore.clear(getContext().getApplicationContext());
+        Context ctx = getContext().getApplicationContext();
+        ChatFlowAuthStore.clear(ctx);
+        ChatFlowNotificationHelper.cancelAll(ctx);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void clearAllNotifications(PluginCall call) {
+        ChatFlowNotificationHelper.cancelAll(getContext().getApplicationContext());
         call.resolve();
     }
 

@@ -35,6 +35,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
     Query,
+    Body,
 )
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.cors import CORSMiddleware
@@ -1493,6 +1494,7 @@ async def login(body: LoginBody, request: Request):
     ).to_list(20)
     if old_sessions:
         await manager.send_force_logout(user["id"], SESSION_INVALID_REASON)
+        await clear_user_device_tokens(user["id"])
         await db.sessions.update_many(
             {"user_id": user["id"], "is_active": True},
             {"$set": {"is_active": False, "last_active": created_at}},
@@ -1557,20 +1559,32 @@ async def login(body: LoginBody, request: Request):
     return response
 
 
+class LogoutBody(BaseModel):
+    token: Optional[str] = Field(default=None, max_length=4096)
+
+
 @api_router.post("/auth/logout")
-async def logout(response: Response, request: Request):
+async def logout(
+    response: Response,
+    request: Request,
+    body: LogoutBody = Body(default_factory=LogoutBody),
+):
     # best-effort audit (no current user required for clearing cookie)
     try:
         token = _extract_jwt_from_request(request)
         if token:
             payload = decode_token(token)
+            user_id = payload.get("sub")
             jti = payload.get("jti")
             if jti:
                 await db.sessions.update_one(
                     {"token_jti": jti},
                     {"$set": {"is_active": False, "last_active": now_iso()}},
                 )
-            await log_audit(actor_user_id=payload.get("sub"), action="auth.logout")
+            push_token = (body.token or "").strip()
+            if user_id and push_token:
+                await remove_user_device_token(str(user_id), push_token)
+            await log_audit(actor_user_id=user_id, action="auth.logout")
     except Exception:
         pass
     _clear_auth_cookie(response)
@@ -1732,9 +1746,65 @@ async def update_profile(body: ProfileBody, user: dict = Depends(get_current_use
 
 class FcmTokenBody(BaseModel):
     token: str = Field(..., min_length=1, max_length=4096)
+    user_id: Optional[str] = None  # ignored; auth user is used
+
+
+class NotificationTokenPatchBody(BaseModel):
+    old_token: str = Field(..., min_length=1, max_length=4096)
+    new_token: str = Field(..., min_length=1, max_length=4096)
+    user_id: Optional[str] = None  # ignored; auth user is used
+
+
+async def clear_user_device_tokens(user_id: str) -> None:
+    """Remove all push tokens for a user (single-session / remote sign-out)."""
+    await db.users.update_one({"id": user_id}, {"$set": {"fcm_tokens": []}})
+
+
+async def remove_user_device_token(user_id: str, token: str) -> None:
+    t = (token or "").strip()
+    if not user_id or not t:
+        return
+    await db.users.update_one({"id": user_id}, {"$pull": {"fcm_tokens": t}})
+
+
+async def register_user_device_token(user_id: str, token: str) -> int:
+    """Keep one active device token per user (latest login device)."""
+    t = (token or "").strip()
+    if not user_id or not t:
+        return 0
+    await db.users.update_one({"id": user_id}, {"$set": {"fcm_tokens": [t]}})
+    return 1
+
+
+@api_router.delete("/notifications/token")
+async def delete_notification_token(
+    body: FcmTokenBody,
+    user: dict = Depends(get_current_user),
+):
+    token = body.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Token is required")
+    await remove_user_device_token(user["id"], token)
+    logger.info("FCM token removed for user %s on logout/unregister", user["id"])
+    return {"message": "Token removed", "removed": True}
+
+
+@api_router.patch("/notifications/token")
+async def patch_notification_token(
+    body: NotificationTokenPatchBody,
+    user: dict = Depends(get_current_user),
+):
+    old = body.old_token.strip()
+    new = body.new_token.strip()
+    if not old or not new:
+        raise HTTPException(status_code=400, detail="old_token and new_token are required")
+    await remove_user_device_token(user["id"], old)
+    await register_user_device_token(user["id"], new)
+    return {"message": "Token updated"}
 
 
 @app.post("/api/users/me/fcm-token", tags=["users"])
+@api_router.post("/users/me/fcm-token", tags=["users"])
 async def register_fcm_token(
     body: FcmTokenBody,
     user: dict = Depends(get_current_user),
@@ -1742,22 +1812,15 @@ async def register_fcm_token(
     token = body.token.strip()
     if not token:
         raise HTTPException(status_code=400, detail="Token is required")
-    result = await db.users.update_one(
-        {"id": user["id"]},
-        {"$addToSet": {"fcm_tokens": token}},
-    )
-    doc = await db.users.find_one({"id": user["id"]}, {"fcm_tokens": 1, "_id": 0})
-    token_count = len((doc or {}).get("fcm_tokens") or [])
+    token_count = await register_user_device_token(user["id"], token)
     logger.info(
-        "FCM token registered for user %s (matched=%s modified=%s total_tokens=%s)",
+        "FCM token registered for user %s (single active token, count=%s)",
         user["id"],
-        result.matched_count,
-        result.modified_count,
         token_count,
     )
     return {
         "message": "Token registered",
-        "stored": result.modified_count > 0 or result.matched_count > 0,
+        "stored": True,
         "token_count": token_count,
     }
 

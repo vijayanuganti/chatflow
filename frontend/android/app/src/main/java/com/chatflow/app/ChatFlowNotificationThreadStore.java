@@ -75,6 +75,13 @@ public final class ChatFlowNotificationThreadStore {
         prefs(context).edit().remove(groupKey).apply();
     }
 
+    public static void clearAll(Context context) {
+        if (context == null) {
+            return;
+        }
+        prefs(context).edit().clear().apply();
+    }
+
     private static SharedPreferences prefs(Context context) {
         return context.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }

@@ -538,11 +538,12 @@ export default function AdminDashboard() {
   useEffect(() => { loadEmployees(); }, [loadEmployees]);
 
   useEffect(() => {
+    if (!user?.id) return;
     void (async () => {
       await registerServiceWorker();
       await ensureNotificationPermission();
     })();
-  }, []);
+  }, [user?.id]);
 
   // Service worker tells us when the admin taps a chat notification - jump to
   // My Chats and focus that conversation.

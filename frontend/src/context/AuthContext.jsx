@@ -10,9 +10,10 @@ import {
   AUTH_USER_KEY,
   AUTH_REMEMBER_KEY,
 } from "../lib/api";
-import { syncNativeAuthForPush, clearNativeAuth } from "../lib/nativeAuthSync";
-import { clearStoredActiveConversationId } from "../lib/activeConversationStorage";
-import { get401LogoutReason, performForcedLogout } from "../lib/forcedLogout";
+import { syncNativeAuthForPush } from "../lib/nativeAuthSync";
+import { get401LogoutReason, performForcedLogout, clearSessionLocally } from "../lib/forcedLogout";
+import { executeLogout } from "../lib/logoutFlow";
+import { runLoggedOutNotificationGuard } from "../lib/logoutCleanup";
 
 const AuthContext = React.createContext(null);
 
@@ -57,6 +58,7 @@ export function AuthProvider({ children }) {
       const generation = ++bootGenerationRef.current;
 
       if (!getStoredAccessToken()) {
+        await runLoggedOutNotificationGuard();
         if (!cancelled && generation === bootGenerationRef.current) {
           setUserState(null);
           setLoading(false);
@@ -89,7 +91,8 @@ export function AuthProvider({ children }) {
           if (reason) {
             performForcedLogout({ reason, showModal: true });
           } else {
-            clearAuthSession();
+            clearSessionLocally();
+            await runLoggedOutNotificationGuard();
             setUserState(null);
           }
         }
@@ -136,7 +139,8 @@ export function AuthProvider({ children }) {
           }
         })
         .catch(() => {
-          clearAuthSession();
+          clearSessionLocally();
+          void runLoggedOutNotificationGuard();
           setUserState(null);
         });
     }
@@ -146,8 +150,10 @@ export function AuthProvider({ children }) {
       if (![AUTH_TOKEN_KEY, AUTH_USER_KEY, AUTH_REMEMBER_KEY].includes(e.key)) return;
 
       if (e.key === AUTH_TOKEN_KEY && !(e.newValue || "").trim()) {
-        clearAuthSession();
-        setUserState(null);
+        void runLoggedOutNotificationGuard().finally(() => {
+          clearSessionLocally();
+          setUserState(null);
+        });
         return;
       }
 
@@ -160,11 +166,8 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const onForceLogout = () => {
       bootGenerationRef.current += 1;
-      clearAuthSession();
-      clearStoredActiveConversationId();
       setUserState(null);
       setLoading(false);
-      void clearNativeAuth();
     };
     window.addEventListener("chatflow:force_logout", onForceLogout);
     return () => window.removeEventListener("chatflow:force_logout", onForceLogout);
@@ -185,15 +188,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(async () => {
-    try {
-      await api.post("/auth/logout");
-    } catch {
-      /* ignore */
-    }
-    clearAuthSession();
-    clearStoredActiveConversationId();
+    await executeLogout({ mode: "manual", showModal: false, navigateToLogin: true });
     setUserState(null);
-    void clearNativeAuth();
   }, []);
 
   return (

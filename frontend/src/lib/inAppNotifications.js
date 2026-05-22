@@ -20,3 +20,8 @@ export function showInAppMessageBanner(payload) {
     }
   });
 }
+
+/** Drop all in-app banner subscribers on logout. */
+export function clearInAppNotificationState() {
+  listeners.clear();
+}

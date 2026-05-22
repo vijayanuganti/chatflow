@@ -642,13 +642,14 @@ export default function ChatApp() {
     enabled: Boolean(user?.id),
   });
 
-  // Register SW first (Android WebView requires it for showNotification), then ask permission.
+  // Register SW first (Android WebView requires it for showNotification), then ask permission after login.
   useEffect(() => {
+    if (!user?.id) return;
     void (async () => {
       await registerServiceWorker();
       await ensureNotificationPermission();
     })();
-  }, []);
+  }, [user?.id]);
 
   // When the user clicks a notification, the SW asks us to focus the right
   // conversation. The SW also focused the tab/opened a new one.

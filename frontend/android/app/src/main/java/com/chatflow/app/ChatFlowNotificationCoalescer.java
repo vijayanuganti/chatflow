@@ -46,4 +46,13 @@ final class ChatFlowNotificationCoalescer {
             MAIN.removeCallbacks(existing);
         }
     }
+
+    static void cancelAll() {
+        for (String key : PENDING.keySet()) {
+            Runnable existing = PENDING.remove(key);
+            if (existing != null) {
+                MAIN.removeCallbacks(existing);
+            }
+        }
+    }
 }

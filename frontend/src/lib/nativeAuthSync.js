@@ -2,6 +2,7 @@ import { registerPlugin } from "@capacitor/core";
 import { Capacitor } from "@capacitor/core";
 import { App } from "@capacitor/app";
 import { getOrCreateBrowserId, getStoredAccessToken, getFcmApiBaseUrl, getApiBaseUrl } from "./api";
+import { runLoggedOutNotificationGuard } from "./logoutCleanup";
 
 const ChatFlowNative = registerPlugin("ChatFlowNative");
 
@@ -72,13 +73,22 @@ export async function clearNativeAuth() {
 export function initNativeAuthSync() {
   if (!Capacitor.isNativePlatform()) return;
 
+  if (!getStoredAccessToken()) {
+    void runLoggedOutNotificationGuard();
+    return;
+  }
+
   void syncNativeAuthForPush();
 
   if (appStateListener) return;
 
   App.addListener("appStateChange", ({ isActive }) => {
     if (isActive) {
-      void syncNativeAuthForPush();
+      if (getStoredAccessToken()) {
+        void syncNativeAuthForPush();
+      } else {
+        void runLoggedOutNotificationGuard();
+      }
     }
   }).then((handle) => {
     appStateListener = handle;
