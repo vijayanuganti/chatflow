@@ -362,13 +362,13 @@ export default function AdminDashboard() {
 
   /** Home/overview → Settings (more) → tool, so back matches the mobile stack spec. */
   const goToSettingsTool = useCallback(
-    (toolTab) => {
+    (toolTab, opts = {}) => {
       if (tab === "more") {
-        goToTab(toolTab, { historyMode: "push" });
+        goToTab(toolTab, { historyMode: "push", ...opts });
         return;
       }
       navigate(adminTabPath("more"), { push: true });
-      navigate(adminTabNavigateTarget(toolTab), { push: true });
+      goToTab(toolTab, { historyMode: "push", ...opts });
     },
     [tab, goToTab, navigate],
   );
@@ -1115,6 +1115,14 @@ export default function AdminDashboard() {
     setSelected(null);
   }, [batchEmployeeIdFromUrl, navigate]);
 
+  const backFromSettingsTool = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    goToTab("more", { replace: true });
+  }, [navigate, goToTab]);
+
   const handleAdminMobileBack = useCallback(() => {
     if (listSelection && (tab === "mychats" || tab === "chats") && mobileChatStep === "list") {
       setListSelection(null);
@@ -1146,17 +1154,35 @@ export default function AdminDashboard() {
       tab === "overview" && !adminHasDrillDownSearch(searchParams),
   });
 
-  const topbarOnBack = (() => {
+  const topbarOnBack = useMemo(() => {
+    if (listSelection && (tab === "chats" || tab === "mychats") && mobileChatStep === "list") {
+      return () => setListSelection(null);
+    }
     if (tab === "batches") {
       if (mobileBatchesStep === "chat") return closeBatchChat;
       if (mobileBatchesStep === "batches") return closeBatchEmployee;
-      return undefined;
+      return backFromSettingsTool;
     }
     if ((tab === "chats" || tab === "mychats") && mobileChatStep === "chat") {
       return closeAdminChat;
     }
+    if (tab === "chats" && mobileChatStep === "list") {
+      return backFromSettingsTool;
+    }
+    if (ADMIN_SETTINGS_TABS.has(tab)) {
+      return backFromSettingsTool;
+    }
     return undefined;
-  })();
+  }, [
+    listSelection,
+    tab,
+    mobileChatStep,
+    mobileBatchesStep,
+    closeBatchChat,
+    closeBatchEmployee,
+    closeAdminChat,
+    backFromSettingsTool,
+  ]);
 
   return (
     <div
@@ -1282,14 +1308,14 @@ export default function AdminDashboard() {
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("admin.moreSubtitle")}</p>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <AdminMoreTile icon={Eye} title={t("admin.moreMonitor")} subtitle={t("admin.moreMonitorSub")} onClick={() => goToTab("chats", { mobileChatStep: "list", historyMode: "push" })} testId="more-monitor" />
-              <AdminMoreTile icon={Layers} title={t("nav.adminBatches")} subtitle={t("admin.moreBatchesSub")} onClick={() => goToTab("batches", { mobileBatchesStep: "employees", historyMode: "push" })} testId="more-batches" />
-              <AdminMoreTile icon={Folder} title={t("nav.adminFolders")} subtitle={t("admin.moreFoldersSub")} onClick={() => goToTab("folders", { historyMode: "push" })} testId="more-folders" />
-              <AdminMoreTile icon={FileBarChart} title={t("nav.adminReports")} subtitle={t("admin.moreReportsSub")} onClick={() => goToTab("reports", { historyMode: "push" })} testId="more-reports" />
-              <AdminMoreTile icon={ShieldCheck} title={t("nav.adminPermissions")} subtitle={t("admin.morePermissionsSub")} onClick={() => goToTab("permissions", { historyMode: "push" })} testId="more-permissions" />
-              <AdminMoreTile icon={UserPlus} title={t("nav.adminReferrals")} subtitle={t("admin.moreReferralsSub")} onClick={() => goToTab("referrals", { historyMode: "push" })} testId="more-referrals" />
-              <AdminMoreTile icon={Inbox} title={t("nav.adminComplaints")} subtitle={stats?.complaints_pending ? t("admin.moreComplaintsOpen", { count: stats.complaints_pending }) : t("admin.moreComplaintsSub")} onClick={() => goToTab("complaints", { historyMode: "push" })} testId="more-complaints" />
-              <AdminMoreTile icon={HardDrive} title={t("nav.adminStorage")} subtitle={t("admin.moreStorageSub")} onClick={() => goToTab("storage", { historyMode: "push" })} testId="more-storage" />
+              <AdminMoreTile icon={Eye} title={t("admin.moreMonitor")} subtitle={t("admin.moreMonitorSub")} onClick={() => goToSettingsTool("chats", { mobileChatStep: "list" })} testId="more-monitor" />
+              <AdminMoreTile icon={Layers} title={t("nav.adminBatches")} subtitle={t("admin.moreBatchesSub")} onClick={() => goToSettingsTool("batches", { mobileBatchesStep: "employees" })} testId="more-batches" />
+              <AdminMoreTile icon={Folder} title={t("nav.adminFolders")} subtitle={t("admin.moreFoldersSub")} onClick={() => goToSettingsTool("folders")} testId="more-folders" />
+              <AdminMoreTile icon={FileBarChart} title={t("nav.adminReports")} subtitle={t("admin.moreReportsSub")} onClick={() => goToSettingsTool("reports")} testId="more-reports" />
+              <AdminMoreTile icon={ShieldCheck} title={t("nav.adminPermissions")} subtitle={t("admin.morePermissionsSub")} onClick={() => goToSettingsTool("permissions")} testId="more-permissions" />
+              <AdminMoreTile icon={UserPlus} title={t("nav.adminReferrals")} subtitle={t("admin.moreReferralsSub")} onClick={() => goToSettingsTool("referrals")} testId="more-referrals" />
+              <AdminMoreTile icon={Inbox} title={t("nav.adminComplaints")} subtitle={stats?.complaints_pending ? t("admin.moreComplaintsOpen", { count: stats.complaints_pending }) : t("admin.moreComplaintsSub")} onClick={() => goToSettingsTool("complaints")} testId="more-complaints" />
+              <AdminMoreTile icon={HardDrive} title={t("nav.adminStorage")} subtitle={t("admin.moreStorageSub")} onClick={() => goToSettingsTool("storage")} testId="more-storage" />
             </div>
           </div>
         )}
