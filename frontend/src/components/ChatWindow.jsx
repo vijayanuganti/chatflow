@@ -1049,7 +1049,8 @@ export default function ChatWindow({
         />
         <div
           ref={scrollRef}
-          className="chat-bg h-full space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 sm:px-4 sm:py-5"
+          className="chat-bg h-full space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain touch-pan-y px-3 py-4 sm:px-4 sm:py-5"
+          style={{ touchAction: "pan-y", WebkitOverflowScrolling: "touch" }}
           data-testid="messages-container"
           onClick={() => {
             if (messageMenuOpen || actionMessageId) dismissActionMenu();
