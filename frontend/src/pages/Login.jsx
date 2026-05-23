@@ -331,17 +331,10 @@ export default function LoginPage() {
                 data-testid="login-stay-signed-in"
                 className="mt-0.5"
               />
-              <div className="space-y-1 min-w-0">
+              <div className="min-w-0 flex-1">
                 <Label htmlFor="stay-signed-in" className="text-sm font-medium cursor-pointer leading-snug">
                   {t("login.staySignedIn")}
                 </Label>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
-                  If unchecked, only this tab stays signed in. When checked, new tabs in this Chrome
-                  profile stay signed in. Each Chrome <span className="font-medium">Person</span>{" "}
-                  (or another browser app) has its own storage — you must sign in there separately;
-                  a saved link alone cannot reuse this profile&apos;s session. Switching Gmail inside
-                  the same Chrome user is not a separate Person.
-                </p>
               </div>
             </div>
 
