@@ -51,12 +51,15 @@ public final class ChatFlowAuthStore {
     }
 
     public static void clear(Context context) {
+        Context appCtx = context.getApplicationContext();
         boolean ok = prefs(context).edit()
                 .remove(KEY_AUTH_TOKEN)
                 .remove(KEY_ACCESS_TOKEN)
                 .remove(KEY_API_BASE)
                 .remove(KEY_BROWSER_ID)
+                .remove(KEY_ACTIVE_CONVERSATION_ID)
                 .commit();
+        ChatFlowAppState.resetForLogout(appCtx);
         Log.i(TAG, "clear prefs=" + PREFS_NAME + " commit=" + ok);
     }
 

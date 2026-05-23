@@ -78,6 +78,19 @@ public final class ChatFlowAppState {
         return NotifyMode.SOFT;
     }
 
+    /** After logout so background FCM is not treated as foreground. */
+    public static void resetForLogout(Context context) {
+        if (context == null) {
+            return;
+        }
+        prefs(context)
+                .edit()
+                .putBoolean(KEY_APP_FOREGROUND, false)
+                .putBoolean(KEY_IN_CHAT, false)
+                .apply();
+        ChatFlowAuthStore.setActiveConversationId(context, "");
+    }
+
     private static SharedPreferences prefs(Context context) {
         return context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }

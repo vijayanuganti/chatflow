@@ -71,9 +71,12 @@ public class ChatFlowMessagingService extends FirebaseMessagingService {
         }
 
         if (foreground) {
-            Log.i(TAG, "App foreground — skip OS tray; WebView handles in-app alerts");
+            Log.i(TAG, "App foreground — soft tray + WebView in-app alerts");
             if (messageId != null && !messageId.isEmpty()) {
                 postDeliveredReceiptSync(messageId);
+            }
+            if (!suppressActiveChat) {
+                showSoftFromFcm(remoteMessage);
             }
             PushNotificationsPlugin.sendRemoteMessage(remoteMessage);
             return;
