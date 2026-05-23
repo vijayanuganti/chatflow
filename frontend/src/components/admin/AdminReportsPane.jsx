@@ -15,8 +15,6 @@ import { fileUrl, formatApiError } from "@/lib/api";
 import {
   downloadClientReportPdf,
   downloadEmployeeReportPdf,
-  openClientReportPdf,
-  openEmployeeReportPdf,
   fetchClientReport,
   fetchEmployeeReport,
   searchReportsUsers,
@@ -221,7 +219,6 @@ export default function AdminReportsPane() {
   const [report, setReport] = useState(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [openingPdf, setOpeningPdf] = useState(false);
 
   const runSearch = useCallback(async (q) => {
     const term = (q || "").trim();
@@ -272,24 +269,6 @@ export default function AdminReportsPane() {
       toast.error(formatApiError(err));
     } finally {
       setDownloading(false);
-    }
-  };
-
-  const handleOpenPdf = async (user) => {
-    setOpeningPdf(true);
-    try {
-      const name = (user.full_name || user.id).replace(/\s+/g, "_");
-      const fileName = `report_${name}.pdf`;
-      const onError = (msg) => toast.error(msg);
-      if (user.role === "employee") {
-        await openEmployeeReportPdf(user.id, fileName, onError);
-      } else {
-        await openClientReportPdf(user.id, fileName, onError);
-      }
-    } catch (err) {
-      toast.error(formatApiError(err));
-    } finally {
-      setOpeningPdf(false);
     }
   };
 
@@ -365,20 +344,9 @@ export default function AdminReportsPane() {
                 </Button>
                 <Button
                   size="sm"
-                  variant="outline"
-                  className="rounded-full flex-1 sm:flex-none"
-                  onClick={() => handleOpenPdf(u)}
-                  disabled={openingPdf || downloading}
-                  data-testid={`reports-open-${u.id}`}
-                >
-                  {openingPdf ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Eye className="h-3.5 w-3.5 mr-1" />}
-                  Open PDF
-                </Button>
-                <Button
-                  size="sm"
                   className="rounded-full bg-emerald-900 hover:bg-emerald-950 flex-1 sm:flex-none"
                   onClick={() => handleDownload(u)}
-                  disabled={downloading || openingPdf}
+                  disabled={downloading}
                   data-testid={`reports-download-${u.id}`}
                 >
                   {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
