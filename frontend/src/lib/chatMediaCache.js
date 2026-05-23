@@ -1,5 +1,5 @@
 import { Capacitor } from "@capacitor/core";
-import { fileUrl, getStoredAccessToken, mediaFetchUrl } from "@/lib/api";
+import { fileUrl, getMediaAuthHeaders, mediaFetchUrl } from "@/lib/api";
 import { safeMediaFileName } from "@/lib/mediaHandler";
 
 const CACHE_DIR = "chatflow-media";
@@ -35,9 +35,10 @@ function blobToBase64(blob) {
 
 async function fetchBlobWithProgress(url, { onProgress, signal }) {
   const fetchUrl = mediaFetchUrl(url);
-  const headers = {};
-  const token = getStoredAccessToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const headers = getMediaAuthHeaders();
+  if (!headers.Authorization) {
+    throw new Error("Not authenticated");
+  }
   const response = await fetch(fetchUrl, { signal, headers });
   if (!response.ok) throw new Error(`Download failed (${response.status})`);
   const total = Number(response.headers.get("content-length")) || 0;

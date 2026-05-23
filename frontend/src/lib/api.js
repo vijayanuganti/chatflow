@@ -432,6 +432,8 @@ export function mediaFetchUrl(pathOrUrl, opts = {}) {
     if (opts.attachToken) {
       const token = getStoredAccessToken();
       if (token) q.set("token", token);
+      const bid = getOrCreateBrowserId();
+      if (bid) q.set("bid", bid);
     }
     return `${apiBase}/media/stream?${q.toString()}`;
   }
@@ -439,6 +441,16 @@ export function mediaFetchUrl(pathOrUrl, opts = {}) {
     return pathOrUrl;
   }
   return fileUrl(pathOrUrl);
+}
+
+/** Headers required for /api/media/stream (JWT + browser binding, same as axios). */
+export function getMediaAuthHeaders() {
+  const headers = {};
+  const token = getStoredAccessToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const bid = getOrCreateBrowserId();
+  if (bid) headers[BROWSER_ID_HEADER] = bid;
+  return headers;
 }
 
 export function fileUrl(path) {

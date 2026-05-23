@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { fileUrl } from "@/lib/api";
+import { fileUrl, getStoredAccessToken } from "@/lib/api";
 import { downloadChatMedia, isChatMediaCached } from "@/lib/chatMediaCache";
 import { shouldAutoDownloadImage } from "@/lib/mediaAutoDownload";
 import UploadProgressRing from "@/components/chat/UploadProgressRing";
@@ -27,6 +27,7 @@ export default function ChatInlineImage({
 
   useEffect(() => {
     if (!src || uploading || mine) return undefined;
+    if (!getStoredAccessToken()) return undefined;
     if (!shouldAutoDownloadImage()) return undefined;
     let cancelled = false;
     (async () => {

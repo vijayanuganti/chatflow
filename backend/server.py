@@ -789,11 +789,30 @@ def _extract_jwt_from_request(request: Request) -> Optional[str]:
     return (cookie_token or "").strip() or None
 
 
-async def _user_from_bearer_token(request: Request, token: Optional[str]) -> dict:
+async def _user_from_bearer_token(
+    request: Request,
+    token: Optional[str],
+    *,
+    browser_id_query: Optional[str] = None,
+) -> dict:
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     payload = decode_token(token)
-    _assert_jwt_browser_binding(request, payload)
+    hdr_override = (browser_id_query or "").strip()[:128] or None
+    if hdr_override and not _browser_id_from_request(request):
+        bid_claim = payload.get("bid")
+        if bid_claim is None or str(bid_claim).strip() == "":
+            raise HTTPException(
+                status_code=401,
+                detail="Please sign in again (session update required).",
+            )
+        if hdr_override != str(bid_claim).strip():
+            raise HTTPException(
+                status_code=401,
+                detail="Please sign in again (browser session mismatch).",
+            )
+    else:
+        _assert_jwt_browser_binding(request, payload)
     await assert_active_session(payload.get("jti"))
     user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
     if not user:
@@ -809,10 +828,11 @@ async def get_current_user(request: Request) -> dict:
 async def get_current_user_media(
     request: Request,
     token: Optional[str] = Query(None, description="JWT for media elements that cannot send Authorization"),
+    bid: Optional[str] = Query(None, description="Browser id when Authorization header is unavailable"),
 ) -> dict:
-    """Like get_current_user; also accepts ?token= for video/img element requests."""
+    """Like get_current_user; also accepts ?token= and ?bid= for video/img element requests."""
     auth = _extract_jwt_from_request(request) or (token or "").strip() or None
-    return await _user_from_bearer_token(request, auth)
+    return await _user_from_bearer_token(request, auth, browser_id_query=bid)
 
 
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
