@@ -53,5 +53,27 @@
 	<string>ChatFlow needs photo library access to attach images.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>ChatFlow needs microphone access to record and send voice notes.</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>All Files</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.image</string>
+				<string>public.video</string>
+				<string>public.movie</string>
+				<string>public.data</string>
+				<string>com.adobe.pdf</string>
+				<string>public.plain-text</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>UISupportsDocumentBrowser</key>
+	<true/>
 </dict>
 </plist>

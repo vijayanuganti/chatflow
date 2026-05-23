@@ -34,9 +34,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        // Called when the app was launched with a url. Feel free to add additional processing here,
-        // but if you want the App API to support tracking app url opens, make sure to keep this call
-        return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
+        if url.isFileURL {
+            ChatFlowShareStore.ingestFileURL(url)
+        } else if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                  let text = components.queryItems?.first(where: { $0.name == "text" })?.value,
+                  !text.isEmpty {
+            ChatFlowShareStore.ingestText(text)
+        }
+        let handled = ApplicationDelegateProxy.shared.application(app, open: url, options: options)
+        return handled
     }
 
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {

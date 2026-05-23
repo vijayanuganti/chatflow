@@ -33,8 +33,10 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(ChatFlowNativePlugin.class);
+        registerPlugin(ChatFlowSharePlugin.class);
         super.onCreate(savedInstanceState);
         dismissTrayForIntent(getIntent());
+        ChatFlowSharePlugin.ingestIntent(this, getIntent());
         createNotificationChannel();
         ChatFlowNotificationHelper.ensureForegroundChannel(this);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
@@ -66,6 +68,7 @@ public class MainActivity extends BridgeActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         dismissTrayForIntent(intent);
+        ChatFlowSharePlugin.ingestIntent(this, intent);
     }
 
     private void dismissTrayForIntent(Intent intent) {

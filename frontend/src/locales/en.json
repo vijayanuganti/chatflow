@@ -238,7 +238,20 @@
   },
   "tools": {
     "pageDesc": "Shortcuts and utilities",
-    "hint": "Profile and preferences are available from the ⋮ menu at the top of the app."
+    "hint": "Profile and preferences are available from the ⋮ menu at the top of the app.",
+    "media": {
+      "title": "Media auto-download",
+      "subtitle": "Control when photos, videos, and documents download",
+      "currentNetwork": "Current connection: {{network}}",
+      "networkWifi": "Wi‑Fi",
+      "networkCellular": "Mobile data",
+      "networkUnknown": "Unknown",
+      "wifiAutoImages": "Auto-download photos on Wi‑Fi",
+      "wifiAutoImagesHint": "Images load inline in chat; this caches them quietly on Wi‑Fi only.",
+      "ruleWifiImages": "On Wi‑Fi: photos download automatically; videos and documents stay manual.",
+      "ruleManualVideoDoc": "Videos and documents always require a tap to download before opening.",
+      "ruleCellular": "On mobile data: all media stays manual (tap to download)."
+    }
   },
   "settings": {
     "pageTitle": "Profile & Settings",

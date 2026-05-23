@@ -9,6 +9,8 @@ $Frontend = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "..\fron
 Push-Location $Frontend
 
 Write-Host "==> npm run build:mobile (OCI API URLs from frontend/.env)" -ForegroundColor Cyan
+# CRA treats eslint warnings as errors when CI=true (e.g. left over from test runs).
+Remove-Item Env:CI -ErrorAction SilentlyContinue
 npm run build:mobile
 if ($LASTEXITCODE -ne 0) { Pop-Location; exit $LASTEXITCODE }
 

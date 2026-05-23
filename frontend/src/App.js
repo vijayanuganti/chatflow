@@ -35,6 +35,7 @@ import { initSafeAreaInsets } from "@/lib/safeAreaInsets";
 import { syncConversationSoundsFromNative } from "@/lib/conversationSounds";
 import ForceLogoutBridge from "@/components/ForceLogoutBridge";
 import NotificationLaunchGuard from "@/components/NotificationLaunchGuard";
+import ShareIntentProvider from "@/components/share/ShareIntentProvider";
 import I18nGate from "@/components/I18nGate";
 import NativeMediaOpenProgress from "@/components/NativeMediaOpenProgress";
 import { useTranslation } from "react-i18next";
@@ -103,6 +104,7 @@ function App() {
       <AuthProvider>
         <ForceLogoutBridge />
         <NotificationLaunchGuard />
+        <ShareIntentProvider>
         <ChatProvider>
         <NativeAuthBootstrap />
         <SplashScreenBootstrap />
@@ -290,6 +292,7 @@ function App() {
         <Toaster position="top-right" />
         <NativeMediaOpenProgress />
         </ChatProvider>
+        </ShareIntentProvider>
       </AuthProvider>
       </ThemeProvider>
       </I18nGate>

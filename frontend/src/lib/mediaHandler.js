@@ -1,5 +1,10 @@
 import { Capacitor } from "@capacitor/core";
 import { fileUrl } from "@/lib/api";
+import {
+  downloadChatMedia,
+  getChatMediaLocalUri,
+  isChatMediaCached,
+} from "@/lib/chatMediaCache";
 
 const CACHE_DIR = "chatflow-media";
 
@@ -204,6 +209,11 @@ export async function openMediaInNativeApp({
   const contentType = guessMimeType(name, mimeType, mediaKind);
 
   if (!Capacitor.isNativePlatform()) {
+    const webCached = await getChatMediaLocalUri(url, fileName);
+    if (webCached) {
+      openOnWeb(webCached, name);
+      return;
+    }
     openOnWeb(resolvedUrl, name);
     return;
   }
@@ -217,7 +227,7 @@ export async function openMediaInNativeApp({
   };
 
   try {
-    const cachedUri = await readCachedUri(relativePath);
+    const cachedUri = await getChatMediaLocalUri(url, fileName);
     if (cachedUri) {
       emitProgress({ open: true, fileName: name, percent: 100, phase: "opening" });
       await openNativeUri(cachedUri, contentType);
@@ -237,7 +247,9 @@ export async function openMediaInNativeApp({
     });
     showedProgress = true;
 
-    const blob = await fetchBlobWithProgress(resolvedUrl, {
+    const uri = await downloadChatMedia({
+      url,
+      fileName,
       signal,
       onProgress: (pct) => {
         emitProgress({
@@ -258,8 +270,7 @@ export async function openMediaInNativeApp({
       onCancel: undefined,
     });
 
-    const uri = await writeBlobToCache(relativePath, blob);
-    await openNativeUri(uri, blob.type && blob.type !== "application/octet-stream" ? blob.type : contentType);
+    await openNativeUri(uri, contentType);
   } catch (err) {
     reportError(err);
   } finally {

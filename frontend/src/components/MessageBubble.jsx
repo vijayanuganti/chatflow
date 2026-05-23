@@ -1,4 +1,4 @@
-import React, { useRef, memo, useState, useCallback } from "react";
+import React, { useRef, memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, CheckCheck, Clock, AlertCircle, Star } from "lucide-react";
 import { fileUrl } from "@/lib/api";
@@ -6,7 +6,8 @@ import { NO_SELECT_STYLE } from "@/lib/noSelectStyles";
 import VoiceNotePlayer, { parseVoiceNoteDurationLabel } from "@/components/VoiceNotePlayer";
 import UploadProgressRing from "@/components/chat/UploadProgressRing";
 import DocumentMessageBlock from "@/components/chat/DocumentMessageBlock";
-import { openVideoInNativeApp } from "@/lib/mediaHandler";
+import ChatInlineImage from "@/components/chat/ChatInlineImage";
+import ChatVideoBlock from "@/components/chat/ChatVideoBlock";
 import { toast } from "sonner";
 
 function formatTime(iso) {
@@ -16,13 +17,6 @@ function formatTime(iso) {
   } catch {
     return "";
   }
-}
-
-function formatVideoDuration(seconds) {
-  const s = Math.max(0, Math.floor(Number(seconds) || 0));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}:${String(r).padStart(2, "0")}`;
 }
 
 function resolveMessageStatus(message, readByOthers, readByAll) {
@@ -91,9 +85,8 @@ function MessageBubble({
   const { t } = useTranslation();
   const longPressRef = useRef(null);
   const didLongPressRef = useRef(false);
-  const [videoDurationLabel, setVideoDurationLabel] = useState("");
-
   const time = formatTime(message.created_at);
+  const mediaOnError = (msg) => toast.error(msg || "Could not open file");
   const bubbleClass = mine ? "bubble-sent" : "bubble-received";
   const align = mine ? "items-end" : "items-start";
 
@@ -137,13 +130,6 @@ function MessageBubble({
 
   const clearPress = () => clearTimeout(longPressRef.current);
 
-  const onVideoMetadata = useCallback((e) => {
-    const d = e.currentTarget.duration;
-    if (Number.isFinite(d) && d > 0) {
-      setVideoDurationLabel(formatVideoDuration(d));
-    }
-  }, []);
-
   const timestampRow = (
     <div className="message-timestamp-row">
       <span className="message-timestamp shrink-0">{time}</span>
@@ -186,9 +172,9 @@ function MessageBubble({
           }`}
           style={
             isImage || isVideo
-              ? { maxWidth: "260px", minWidth: "160px", ...NO_SELECT_STYLE }
+              ? { maxWidth: "65vw", width: "100%", ...NO_SELECT_STYLE }
               : isDocument
-                ? { minWidth: "220px", maxWidth: "280px", ...NO_SELECT_STYLE }
+                ? { minWidth: "220px", maxWidth: "min(65vw, 280px)", ...NO_SELECT_STYLE }
                 : NO_SELECT_STYLE
           }
         >
@@ -261,72 +247,27 @@ function MessageBubble({
 
           {isImage && (
             <div className="relative">
-              <button
-                type="button"
-                className="block w-full border-0 bg-transparent p-0 cursor-pointer touch-manipulation"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!uploading) onImageClick?.(mediaSrc, message.file_name || "image");
-                }}
-                data-testid={`message-image-${message.id}`}
-              >
-                <img
-                  src={mediaSrc}
-                  alt={message.file_name || "image"}
-                  className="block h-auto w-full object-cover"
-                  style={{ maxHeight: "300px", borderRadius: "12px 12px 0 0" }}
-                />
-              </button>
+              <ChatInlineImage
+                fileUrl={message.file_url}
+                fileName={message.file_name}
+                alt={message.file_name || "image"}
+                onImageClick={onImageClick}
+                uploading={uploading || (message.__pending && uploadPct < 100)}
+                uploadPct={uploadPct}
+                mine={mine}
+              />
               {!uploading && overlayTimestamp}
-              <UploadProgressRing progress={uploadPct} visible={uploading || (message.__pending && uploadPct < 100)} />
             </div>
           )}
 
           {isVideo && (
-            <div
-              className="relative cursor-pointer touch-manipulation"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (!uploading) {
-                  void openVideoInNativeApp(
-                    message.file_url,
-                    message.file_name || "video.mp4",
-                    message.__mimeType,
-                    (msg) => toast.error(msg),
-                  );
-                }
-              }}
-              data-testid={`message-video-${message.id}`}
-            >
-              <video
-                src={mediaSrc}
-                className="block w-full"
-                style={{ maxHeight: "300px", borderRadius: "12px 12px 0 0", objectFit: "cover" }}
-                preload="metadata"
-                muted
-                playsInline
-                poster={message.__videoPoster || undefined}
-                onLoadedMetadata={onVideoMetadata}
-              />
-              {!uploading && (
-                <>
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[12px] bg-black/20">
-                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-black/60">
-                      <svg viewBox="0 0 24 24" fill="white" className="ml-1 h-7 w-7" aria-hidden>
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
-                    </div>
-                  </div>
-                  {videoDurationLabel ? (
-                    <div className="absolute bottom-2 left-2 rounded bg-black/50 px-1 text-[10px] text-white">
-                      {videoDurationLabel}
-                    </div>
-                  ) : null}
-                  {overlayTimestamp}
-                </>
-              )}
-              <UploadProgressRing progress={uploadPct} visible={uploading || (message.__pending && uploadPct < 100)} />
-            </div>
+            <ChatVideoBlock
+              message={message}
+              uploading={uploading || (message.__pending && uploadPct < 100)}
+              uploadPct={uploadPct}
+              overlayTimestamp={!uploading ? overlayTimestamp : null}
+              onError={mediaOnError}
+            />
           )}
 
           {isAudio && (
@@ -348,6 +289,7 @@ function MessageBubble({
                 fileSize={message.file_size}
                 mimeType={message.__mimeType}
                 timestampRow={timestampRow}
+                onError={mediaOnError}
               />
               <UploadProgressRing progress={uploadPct} visible={uploading} />
             </div>
