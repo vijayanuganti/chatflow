@@ -40,7 +40,9 @@ import {
   getCachedMessages,
   setCachedMessages,
   mergeMessageLists,
-  loadCacheFromStorage,
+  hydrateMessageCacheFromStorage,
+  runConversationMessageLoad,
+  resetCacheLoadLog,
   patchCachedMessageStatus,
   patchCachedMessageStatuses,
 } from "@/lib/messageCache";
@@ -97,12 +99,16 @@ export default function ChatApp() {
   const selectedIdRef = useRef(null);
   const seenInflightRef = useRef(new Set());
   const restoreNavRef = useRef(false);
+  const userIdRef = useRef(user?.id);
+  const prevSelectedConvRef = useRef(null);
+  userIdRef.current = user?.id;
+
   useEffect(() => {
     selectedIdRef.current = selected?.id ?? null;
   }, [selected?.id]);
 
   useEffect(() => {
-    if (user?.id) loadCacheFromStorage(user.id);
+    if (user?.id) hydrateMessageCacheFromStorage(user.id);
   }, [user?.id]);
   const [selectedBatchId, setSelectedBatchId] = useState(null);
   const [batches, setBatches] = useState([]);
@@ -281,50 +287,54 @@ export default function ChatApp() {
 
   const syncMessagesToView = useCallback((convId, serverMessages) => {
     if (!isViewingConversation(convId, selectedIdRef.current)) return;
+    const uid = userIdRef.current;
     setMessages((prev) => {
       const next = mergeMessageLists(prev, serverMessages);
-      if (user?.id) setCachedMessages(user.id, convId, next);
+      if (uid) setCachedMessages(uid, convId, next);
       return next;
     });
-  }, [user?.id]);
+  }, []);
 
   const loadMessages = useCallback(async (convId) => {
     if (!convId) return;
-    try {
-      const res = await api.get(`/conversations/${convId}/messages`);
-      const cached = getCachedMessages(convId);
-      const merged = mergeMessageLists(cached, res.data);
-      console.log("ChatFlowCache -> Merged network + cache:", convId, merged.length, "messages");
-      syncMessagesToView(convId, merged);
-      if (user?.id) {
-        markOpponentMessagesSeen({
-          userId: user.id,
-          conversationId: convId,
-          messages: merged,
-          inflight: seenInflightRef.current,
-        });
+    return runConversationMessageLoad(convId, async () => {
+      try {
+        const res = await api.get(`/conversations/${convId}/messages`);
+        const cached = getCachedMessages(convId);
+        const merged = mergeMessageLists(cached, res.data);
+        console.log("ChatFlowCache -> Merged network + cache:", convId, merged.length, "messages");
+        syncMessagesToView(convId, merged);
+        const uid = userIdRef.current;
+        if (uid) {
+          markOpponentMessagesSeen({
+            userId: uid,
+            conversationId: convId,
+            messages: merged,
+            inflight: seenInflightRef.current,
+          });
+        }
+        api.post(`/conversations/${convId}/read`).catch(() => {});
+      } catch (err) {
+        if (!getCachedMessages(convId)) {
+          toast.error(formatApiError(err));
+        }
       }
-      api.post(`/conversations/${convId}/read`).catch(() => {});
-    } catch (err) {
-      if (!getCachedMessages(convId)) {
-        toast.error(formatApiError(err));
-      }
-    }
-  }, [user?.id, syncMessagesToView]);
+    });
+  }, [syncMessagesToView]);
 
   const handleRefresh = useCallback(async () => {
     const convId = selectedIdRef.current;
     if (user?.role === "client") {
       await loadClientAssignedChat();
       if (convId) await loadMessages(convId);
-      if (user?.id) loadCacheFromStorage(user.id);
+      if (user?.id) hydrateMessageCacheFromStorage(user.id);
       return;
     }
     await Promise.all([
       loadConversations(),
       convId ? loadMessages(convId) : Promise.resolve(),
     ]);
-    if (user?.id) loadCacheFromStorage(user.id);
+    if (user?.id) hydrateMessageCacheFromStorage(user.id);
   }, [user?.role, loadConversations, loadMessages, loadClientAssignedChat, user?.id]);
 
   useEffect(() => {
@@ -383,9 +393,11 @@ export default function ChatApp() {
   }, []);
   useEffect(() => { loadBatches(); }, [loadBatches]);
 
-  // Instant paint from in-memory cache (0ms) before network fetch.
+  // Instant cache paint + single network fetch per conversation open.
   useLayoutEffect(() => {
     if (!selected?.id) {
+      prevSelectedConvRef.current = null;
+      resetCacheLoadLog();
       setMessages([]);
       return;
     }
@@ -393,20 +405,24 @@ export default function ChatApp() {
     const cached = getCachedMessages(convId, { log: true });
     if (cached?.length) {
       setMessages(cached);
-      if (user?.id) {
+      const uid = userIdRef.current;
+      if (uid) {
         markOpponentMessagesSeen({
-          userId: user.id,
+          userId: uid,
           conversationId: convId,
           messages: cached,
           inflight: seenInflightRef.current,
         });
       }
     }
-  }, [selected?.id, user?.id]);
+  }, [selected?.id]);
 
   useEffect(() => {
     if (!selected?.id) return;
-    loadMessages(selected.id);
+    const convId = selected.id;
+    if (prevSelectedConvRef.current === convId) return;
+    prevSelectedConvRef.current = convId;
+    void loadMessages(convId);
   }, [selected?.id, loadMessages]);
 
   useEffect(() => {

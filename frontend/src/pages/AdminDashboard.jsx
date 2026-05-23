@@ -69,7 +69,8 @@ import {
   updateConversationPreferences,
 } from "@/lib/conversationPreferences";
 import {
-  loadCacheFromStorage,
+  hydrateMessageCacheFromStorage,
+  runConversationMessageLoad,
   mergeMessageLists,
   getCachedMessages,
   setCachedMessages,
@@ -479,20 +480,22 @@ export default function AdminDashboard() {
 
   const loadMessages = useCallback(async (convId) => {
     if (!convId) return;
-    try {
-      const res = await api.get(`/conversations/${convId}/messages`);
-      if (!isViewingConversation(convId, selectedIdRef.current)) return;
-      setMessages((prev) => {
-        const cached = getCachedMessages(convId);
-        const next = mergeMessageLists(cached || prev, res.data);
-        if (user?.id) setCachedMessages(user.id, convId, next);
-        return next;
-      });
-      const isMyChat = myConvsRef.current.find((c) => c.id === convId);
-      if (isMyChat) api.post(`/conversations/${convId}/read`).catch(() => {});
-    } catch (err) {
-      toast.error(formatApiError(err));
-    }
+    return runConversationMessageLoad(convId, async () => {
+      try {
+        const res = await api.get(`/conversations/${convId}/messages`);
+        if (!isViewingConversation(convId, selectedIdRef.current)) return;
+        setMessages((prev) => {
+          const cached = getCachedMessages(convId);
+          const next = mergeMessageLists(cached || prev, res.data);
+          if (user?.id) setCachedMessages(user.id, convId, next);
+          return next;
+        });
+        const isMyChat = myConvsRef.current.find((c) => c.id === convId);
+        if (isMyChat) api.post(`/conversations/${convId}/read`).catch(() => {});
+      } catch (err) {
+        toast.error(formatApiError(err));
+      }
+    });
   }, [user?.id]);
 
   /** Sync open chat from URL (?c=) after browser / system back. */
@@ -994,7 +997,7 @@ export default function AdminDashboard() {
         /* keep cached messages */
       }
     }
-    if (user?.id) loadCacheFromStorage(user.id);
+    if (user?.id) hydrateMessageCacheFromStorage(user.id);
   }, [loadOverview, tab, user?.id]);
 
   const filterUsersForTab = useCallback(

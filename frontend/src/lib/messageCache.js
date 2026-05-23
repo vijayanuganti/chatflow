@@ -14,6 +14,12 @@ const memory = new Map();
 const MAX_CONVERSATIONS = 40;
 const MAX_MESSAGES_PER_CONV = 500;
 
+/** Session guards — survive React StrictMode remounts (duplicate effects). */
+let storageHydratedForUser = null;
+let lastCacheLogConvId = null;
+let inflightConvLoadId = null;
+let inflightConvLoadPromise = null;
+
 function storageKey(userId) {
   return `cf_msg_cache_${userId || "anon"}`;
 }
@@ -64,7 +70,14 @@ export function mergeMessageLists(cached, fresh) {
 }
 
 export function loadCacheFromStorage(userId) {
+  hydrateMessageCacheFromStorage(userId);
+}
+
+/** Load localStorage into memory once per user per page session. */
+export function hydrateMessageCacheFromStorage(userId) {
   if (!userId || typeof localStorage === "undefined") return;
+  if (storageHydratedForUser === userId) return;
+  storageHydratedForUser = userId;
   try {
     const raw = localStorage.getItem(storageKey(userId));
     if (!raw) return;
@@ -79,6 +92,42 @@ export function loadCacheFromStorage(userId) {
   } catch (err) {
     console.warn("ChatFlowCache -> localStorage hydrate failed", err);
   }
+}
+
+/**
+ * Coalesce parallel / duplicate network loads for the same conversation.
+ * @template T
+ * @param {string} convId
+ * @param {() => Promise<T>} loader
+ * @returns {Promise<T|undefined>}
+ */
+export function runConversationMessageLoad(convId, loader) {
+  if (!convId) return Promise.resolve(undefined);
+  if (inflightConvLoadId === convId && inflightConvLoadPromise) {
+    return inflightConvLoadPromise;
+  }
+  inflightConvLoadId = convId;
+  inflightConvLoadPromise = Promise.resolve()
+    .then(loader)
+    .finally(() => {
+      if (inflightConvLoadId === convId) {
+        inflightConvLoadId = null;
+        inflightConvLoadPromise = null;
+      }
+    });
+  return inflightConvLoadPromise;
+}
+
+function resetSessionLoadGuards() {
+  storageHydratedForUser = null;
+  lastCacheLogConvId = null;
+  inflightConvLoadId = null;
+  inflightConvLoadPromise = null;
+}
+
+/** Allow cache-load log again when leaving a thread (e.g. back to list). */
+export function resetCacheLoadLog() {
+  lastCacheLogConvId = null;
 }
 
 function persistToStorage(userId) {
@@ -117,7 +166,8 @@ function schedulePersist(userId) {
 export function getCachedMessages(convId, opts = {}) {
   if (!convId) return null;
   const hit = memory.get(convId);
-  if (opts.log) {
+  if (opts.log && lastCacheLogConvId !== convId) {
+    lastCacheLogConvId = convId;
     console.log(
       "ChatFlowCache -> Loading from cache:",
       convId,
@@ -162,6 +212,7 @@ export function patchCachedMessageStatuses(userId, convId, messageIds, status) {
 
 export function clearMessageCacheForUser(userId) {
   memory.clear();
+  resetSessionLoadGuards();
   if (userId && typeof localStorage !== "undefined") {
     try {
       localStorage.removeItem(storageKey(userId));
