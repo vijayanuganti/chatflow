@@ -404,6 +404,43 @@ export function getWsUrl(explicitToken) {
   return base;
 }
 
+/** True when URL points at S3 (or similar) and must be fetched via /api/media/stream. */
+export function isCrossOriginStoredMediaUrl(url) {
+  if (!url || typeof url !== "string") return false;
+  const u = url.trim();
+  if (!u.startsWith("http://") && !u.startsWith("https://")) return false;
+  if (u.includes(".amazonaws.com/")) return true;
+  const backend = normalizeBackendOrigin(resolveBackendUrl());
+  if (backend && u.startsWith(backend)) return false;
+  return false;
+}
+
+/**
+ * URL safe for fetch() / download (same-origin proxy for S3; passthrough for /api/files and blobs).
+ * @param {string} pathOrUrl - message.file_url or absolute URL
+ * @param {{ attachToken?: boolean }} [opts] - append JWT query for video/img (no Authorization header)
+ */
+export function mediaFetchUrl(pathOrUrl, opts = {}) {
+  if (!pathOrUrl) return "";
+  if (pathOrUrl.startsWith("blob:") || pathOrUrl.startsWith("data:")) return pathOrUrl;
+  if (pathOrUrl.startsWith("/api/files/") || pathOrUrl.startsWith("/api/media/")) {
+    return fileUrl(pathOrUrl);
+  }
+  if (isCrossOriginStoredMediaUrl(pathOrUrl)) {
+    const apiBase = getApiBaseUrl();
+    const q = new URLSearchParams({ url: pathOrUrl });
+    if (opts.attachToken) {
+      const token = getStoredAccessToken();
+      if (token) q.set("token", token);
+    }
+    return `${apiBase}/media/stream?${q.toString()}`;
+  }
+  if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) {
+    return pathOrUrl;
+  }
+  return fileUrl(pathOrUrl);
+}
+
 export function fileUrl(path) {
   if (!path) return "";
   if (path.startsWith("blob:") || path.startsWith("data:")) return path;

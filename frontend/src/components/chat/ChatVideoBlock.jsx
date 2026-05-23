@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Download } from "lucide-react";
-import { fileUrl } from "@/lib/api";
+import { fileUrl, mediaFetchUrl } from "@/lib/api";
 import { formatFileSize } from "@/lib/chatMedia";
 import { useChatMediaDownload } from "@/hooks/useChatMediaDownload";
 import MediaDownloadRing from "@/components/chat/MediaDownloadRing";
@@ -46,11 +46,11 @@ export default function ChatVideoBlock({
   }, []);
 
   useEffect(() => {
-    if (!mediaSrc || durationLabel) return;
+    if (!message.file_url || durationLabel) return;
     const v = document.createElement("video");
     v.preload = "metadata";
     v.muted = true;
-    v.src = mediaSrc;
+    v.src = mediaFetchUrl(message.file_url, { attachToken: true });
     v.onloadedmetadata = () => {
       if (Number.isFinite(v.duration) && v.duration > 0) {
         setDurationLabel(formatVideoDuration(v.duration));

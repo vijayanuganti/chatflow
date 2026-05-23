@@ -37,7 +37,7 @@ from fastapi import (
     Query,
     Body,
 )
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, validator
@@ -789,8 +789,7 @@ def _extract_jwt_from_request(request: Request) -> Optional[str]:
     return (cookie_token or "").strip() or None
 
 
-async def get_current_user(request: Request) -> dict:
-    token = _extract_jwt_from_request(request)
+async def _user_from_bearer_token(request: Request, token: Optional[str]) -> dict:
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     payload = decode_token(token)
@@ -800,6 +799,20 @@ async def get_current_user(request: Request) -> dict:
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return clean_user(user)
+
+
+async def get_current_user(request: Request) -> dict:
+    token = _extract_jwt_from_request(request)
+    return await _user_from_bearer_token(request, token)
+
+
+async def get_current_user_media(
+    request: Request,
+    token: Optional[str] = Query(None, description="JWT for media elements that cannot send Authorization"),
+) -> dict:
+    """Like get_current_user; also accepts ?token= for video/img element requests."""
+    auth = _extract_jwt_from_request(request) or (token or "").strip() or None
+    return await _user_from_bearer_token(request, auth)
 
 
 async def require_admin(user: dict = Depends(get_current_user)) -> dict:
@@ -4127,6 +4140,92 @@ async def get_file(file_id: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(str(path))
+
+
+def _normalize_s3_media_key(key_or_url: str) -> str:
+    raw = (key_or_url or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Missing media reference")
+    key = _public_url_to_s3_key(raw) or raw
+    if key.startswith("/"):
+        raise HTTPException(status_code=400, detail="Use /api/files for local uploads")
+    if not key.startswith("uploads/") or ".." in key or "\\" in key:
+        raise HTTPException(status_code=400, detail="Invalid media key")
+    return key
+
+
+async def _assert_user_can_access_s3_key(user_id: str, key: str) -> None:
+    """Ensure the object is referenced in a conversation the user belongs to."""
+    convs = await db.conversations.find({"participants": user_id}, {"_id": 0, "id": 1}).to_list(5000)
+    conv_ids = [c["id"] for c in convs if c.get("id")]
+    if not conv_ids:
+        raise HTTPException(status_code=404, detail="File not found")
+    escaped = re.escape(key)
+    msg = await db.messages.find_one(
+        {
+            "conversation_id": {"$in": conv_ids},
+            "file_url": {"$regex": escaped},
+        },
+        {"_id": 1},
+    )
+    if not msg:
+        raise HTTPException(status_code=404, detail="File not found")
+
+
+def _stream_s3_object_blocking(key: str) -> Tuple[Any, str, Optional[int]]:
+    if not S3_BUCKET:
+        raise HTTPException(status_code=503, detail="Object storage not configured")
+    session = boto3.session.Session(region_name=S3_REGION or None)
+    s3 = session.client("s3")
+    try:
+        obj = s3.get_object(Bucket=S3_BUCKET, Key=key)
+    except ClientError as e:
+        code = (e.response or {}).get("Error", {}).get("Code", "")
+        if code in ("NoSuchKey", "404", "NotFound"):
+            raise HTTPException(status_code=404, detail="File not found") from e
+        logger.warning("S3 get_object failed for %s: %s", key, e)
+        raise HTTPException(status_code=502, detail="Could not load file") from e
+    content_type = obj.get("ContentType") or "application/octet-stream"
+    length = obj.get("ContentLength")
+    return obj["Body"], content_type, length
+
+
+@api_router.get("/media/stream")
+async def stream_media(
+    url: Optional[str] = Query(None),
+    key: Optional[str] = Query(None),
+    user: dict = Depends(get_current_user_media),
+):
+    """
+    Same-origin proxy for S3 chat attachments (avoids browser CORS on fetch).
+    Requires JWT; user must participate in a conversation that references the file.
+    """
+    ref = (url or key or "").strip()
+    if not ref:
+        raise HTTPException(status_code=400, detail="Missing url or key")
+    s3_key = _normalize_s3_media_key(ref)
+    await _assert_user_can_access_s3_key(user["id"], s3_key)
+
+    body, content_type, content_length = await asyncio.to_thread(_stream_s3_object_blocking, s3_key)
+
+    def iter_chunks():
+        try:
+            while True:
+                chunk = body.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            try:
+                body.close()
+            except Exception:
+                pass
+
+    headers: Dict[str, str] = {}
+    if content_length is not None:
+        headers["Content-Length"] = str(content_length)
+
+    return StreamingResponse(iter_chunks(), media_type=content_type, headers=headers)
 
 
 # ---------- WebSocket Manager ----------
