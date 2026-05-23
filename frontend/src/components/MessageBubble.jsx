@@ -1,6 +1,6 @@
 import React, { useRef, memo, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, CheckCheck, Circle, Clock, AlertCircle, Star } from "lucide-react";
+import { Check, CheckCheck, Clock, AlertCircle, Star } from "lucide-react";
 import { fileUrl } from "@/lib/api";
 import { NO_SELECT_STYLE } from "@/lib/noSelectStyles";
 import VoiceNotePlayer, { parseVoiceNoteDurationLabel } from "@/components/VoiceNotePlayer";
@@ -85,7 +85,6 @@ function MessageBubble({
   selectionMode = false,
   dimmed = false,
   onRetry,
-  onReplyQuoteClick,
   bubbleRef,
   viewerUserId,
 }) {
@@ -201,14 +200,6 @@ function MessageBubble({
               aria-hidden
             />
           )}
-          {selectionMode && !selected && !actionSelected && (
-            <div
-              className="absolute -left-1 -top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full border-2 border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-900"
-              aria-hidden
-            >
-              <Circle className="h-3 w-3 text-transparent" strokeWidth={2} />
-            </div>
-          )}
           {selected && !actionSelected && (
             <>
               <div
@@ -242,39 +233,28 @@ function MessageBubble({
 
           {(message.is_forwarded || message.reply_to_id || message.reply_to_snippet) && (
             <div className={`${isMediaBubble ? "px-3 pt-2" : ""}`}>
-              {message.is_forwarded && (
-                <p
-                  className="text-[9px] italic text-gray-500 dark:text-gray-400 mb-0.5"
-                  data-testid={`message-forwarded-${message.id}`}
-                >
+              {message.is_forwarded &&
+                message.original_sender_id &&
+                viewerUserId &&
+                String(message.original_sender_id) !== String(viewerUserId) && (
+                <p className="text-[10px] italic text-gray-500 dark:text-gray-400 mb-0.5" data-testid={`message-forwarded-${message.id}`}>
                   {t("message.forwarded")}
                 </p>
               )}
               {(message.reply_to_id || message.reply_to_snippet) && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (message.reply_to_id) onReplyQuoteClick?.(message.reply_to_id);
-                  }}
-                  className={`mb-1.5 w-full rounded-lg border-l-2 px-2 py-1.5 text-left text-xs touch-manipulation ${
+                <div
+                  className={`mb-1.5 rounded-lg border-l-[3px] px-2 py-1.5 text-xs ${
                     mine
-                      ? "border-emerald-300/90 bg-black/15 text-emerald-50/95"
-                      : "border-emerald-600 bg-gray-100/95 dark:bg-gray-800/90 text-gray-600 dark:text-gray-300"
+                      ? "border-emerald-300/90 bg-emerald-950/20 text-emerald-50/90"
+                      : "border-sky-500/80 bg-gray-100/90 dark:bg-gray-800/80 text-gray-600 dark:text-gray-300"
                   }`}
                   data-testid={`message-reply-quote-${message.id}`}
                 >
                   {message.reply_to_sender ? (
-                    <p
-                      className={`text-[11px] font-bold truncate ${
-                        mine ? "text-emerald-200" : "text-emerald-800 dark:text-emerald-400"
-                      }`}
-                    >
-                      {message.reply_to_sender}
-                    </p>
+                    <p className="font-semibold truncate opacity-90">{message.reply_to_sender}</p>
                   ) : null}
-                  <p className="text-[10px] truncate opacity-90 mt-0.5">{message.reply_to_snippet || ""}</p>
-                </button>
+                  <p className="line-clamp-2 opacity-85">{message.reply_to_snippet || ""}</p>
+                </div>
               )}
             </div>
           )}
@@ -446,7 +426,6 @@ function messageBubblePropsEqual(prev, next) {
   if (prev.starred !== next.starred) return false;
   if (prev.dimmed !== next.dimmed) return false;
   if (prev.selectionMode !== next.selectionMode) return false;
-  if (prev.onReplyQuoteClick !== next.onReplyQuoteClick) return false;
   if (prev.searchQuery !== next.searchQuery) return false;
   if (prev.totalRecipients !== next.totalRecipients) return false;
   if (prev.showReceipts !== next.showReceipts) return false;

@@ -1,6 +1,6 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { Reply, X } from "lucide-react";
+import { X } from "lucide-react";
 
 export default function ReplyPreviewBar({ replyingTo, onCancel }) {
   const { t } = useTranslation();
@@ -13,14 +13,11 @@ export default function ReplyPreviewBar({ replyingTo, onCancel }) {
       className="mx-2 sm:mx-3 mb-1 flex items-stretch gap-2 rounded-lg bg-white dark:bg-gray-900 border border-gray-200/90 dark:border-gray-700 shadow-sm overflow-hidden"
       data-testid="reply-preview-bar"
     >
-      <div className="flex shrink-0 items-center pl-2 text-emerald-700 dark:text-emerald-400" aria-hidden>
-        <Reply className="h-4 w-4" strokeWidth={2} />
-      </div>
-      <div className={`flex-1 min-w-0 border-l-[3px] ${borderColor} px-3 py-2`}>
-        <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-400 truncate">
+      <div className={`flex-1 min-w-0 border-l-4 ${borderColor} px-3 py-2`}>
+        <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-400 truncate">
           {replyingTo.sender_name || "You"}
         </p>
-        <p className="text-[10px] text-gray-500 dark:text-gray-400 truncate mt-0.5">
+        <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2 mt-0.5">
           {replyingTo.snippet || ""}
         </p>
       </div>

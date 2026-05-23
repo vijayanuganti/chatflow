@@ -56,7 +56,6 @@ import { setActiveChatState, clearActiveChatState } from "@/lib/activeChatState"
 import { fcmGroupKeyForSender } from "@/lib/notificationDisplay";
 import { ChatFlowNative } from "@/lib/nativeAuthSync";
 import { messageCanEdit } from "@/lib/messageCanEdit";
-import usePanelMobileBack from "@/hooks/usePanelMobileBack";
 
 export default function ChatWindow({
   conversation,
@@ -87,10 +86,6 @@ export default function ChatWindow({
   const { user } = useAuth();
   const { setActiveConversationId, setChatComposerActive } = useChat();
   const navigate = useNavigate();
-  const isClientUser = (user?.role || "").toLowerCase() === "client";
-  /** Admin + employee: multi-select and forward. Client portal never forwards. */
-  const canForwardSelect = !readOnly && !isClientUser;
-  const canSwipeReply = !readOnly;
 
   const resolvedBackTo =
     chatBackTo ??
@@ -286,7 +281,6 @@ export default function ChatWindow({
     setThreadSearchOpen(false);
     setThreadSearchQuery("");
     setSelectedMessages([]);
-    setReplyingTo(null);
     setActionMessageId(null);
     setMessageMenuOpen(false);
     setEditingMessage(null);
@@ -388,24 +382,25 @@ export default function ChatWindow({
       if (!key || readOnly || !message.id) return;
       void hapticMessageLongPress();
 
-      if (canForwardSelect) {
-        setActionMessageId(null);
+      if (selectedMessages.length > 0) {
+        setSelectedMessages((prev) => (prev.includes(key) ? prev : [...prev, key]));
+        return;
+      }
+
+      if (actionMessageId && actionMessageId !== key) {
         setMessageMenuOpen(false);
+        setActionMessageId(null);
         setSelectedMessages((prev) => {
-          if (prev.length === 0) return [key];
-          return prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key];
+          const next = new Set([...prev, actionMessageId, key]);
+          return [...next];
         });
         return;
       }
 
-      // Client portal: long-press opens ⋮ menu (star / edit) — no forward selection.
-      if (actionMessageId && actionMessageId !== key) {
-        setMessageMenuOpen(false);
-      }
       setActionMessageId(key);
       setMessageMenuOpen(false);
     },
-    [messageKey, readOnly, canForwardSelect, actionMessageId],
+    [messageKey, readOnly, selectedMessages.length, actionMessageId],
   );
 
   const openMessageActionMenu = useCallback((anchorEl) => {
@@ -500,25 +495,6 @@ export default function ChatWindow({
   const startReplyRef = useRef(startReply);
   startReplyRef.current = startReply;
 
-  const handleInChatBack = useCallback(() => {
-    if (isSelectionMode && canForwardSelect) {
-      setSelectedMessages([]);
-      setActionMessageId(null);
-      setMessageMenuOpen(false);
-      return true;
-    }
-    if (actionMessageId || messageMenuOpen) {
-      dismissActionMenu();
-      return true;
-    }
-    return false;
-  }, [isSelectionMode, canForwardSelect, actionMessageId, messageMenuOpen, dismissActionMenu]);
-
-  usePanelMobileBack({
-    enabled: !readOnly,
-    onBack: handleInChatBack,
-  });
-
   const buildSendPayload = useCallback((base) => {
     if (!replyingTo?.id) return base;
     return {
@@ -546,8 +522,15 @@ export default function ChatWindow({
     onSendMessage(body, { tempId: failed.__tempId || failed.id });
   }, [conversation, onSendMessage]);
 
+  const handleReply = useCallback(() => {
+    if (selectedMessages.length !== 1) return;
+    const key = selectedMessages[0];
+    const msg = visibleMessages.find((m) => messageKey(m) === key);
+    if (msg) startReply(msg);
+    setSelectedMessages([]);
+  }, [selectedMessages, visibleMessages, messageKey, startReply]);
+
   const handleForward = useCallback(() => {
-    if (!canForwardSelect) return;
     const keys = new Set(selectedMessages);
     const msgsToForward = visibleMessages.filter((m) => {
       const id = m.id;
@@ -557,7 +540,7 @@ export default function ChatWindow({
     setForwardMessages(msgsToForward);
     setShowForwardModal(true);
     setSelectedMessages([]);
-  }, [canForwardSelect, selectedMessages, visibleMessages]);
+  }, [selectedMessages, visibleMessages]);
 
   const handleSendText = () => {
     const value = text.trim();
@@ -863,21 +846,17 @@ export default function ChatWindow({
           />
         ) : null}
         <div className="flex items-center gap-2 px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5 md:py-2.5">
-        {isSelectionMode && canForwardSelect ? (
+        {isSelectionMode && !readOnly ? (
           <div className="selection-bar flex w-full items-center gap-2" data-testid="message-selection-bar">
             <Button
               size="icon"
               variant="ghost"
               className="rounded-full shrink-0"
-              onClick={() => {
-                setSelectedMessages([]);
-                setActionMessageId(null);
-                setMessageMenuOpen(false);
-              }}
+              onClick={() => setSelectedMessages([])}
               data-testid="message-selection-clear"
               title={t("common.clear")}
             >
-              <X className="h-5 w-5" />
+              <ArrowLeft className="h-5 w-5" />
             </Button>
             <span className="flex-1 text-sm font-medium tabular-nums dark:text-gray-100" data-testid="message-selection-count">
               {selectedMessages.length === 1
@@ -885,15 +864,25 @@ export default function ChatWindow({
                 : t("common.selected", { count: selectedMessages.length })}
             </span>
             <Button
-              size="sm"
+              size="icon"
               variant="ghost"
-              className="rounded-full text-emerald-800 dark:text-emerald-300 shrink-0 gap-1.5 px-3"
-              onClick={handleForward}
-              disabled={selectedMessages.length < 1}
-              data-testid="message-selection-forward"
+              className="rounded-full text-emerald-700 disabled:opacity-40"
+              onClick={handleReply}
+              disabled={selectedMessages.length !== 1}
+              data-testid="message-selection-reply"
+              title={t("common.reply")}
             >
-              <span className="text-sm font-medium">{t("common.forward")}</span>
-              <Forward className="h-4 w-4" />
+              <Reply className="h-5 w-5" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="rounded-full text-emerald-700"
+              onClick={handleForward}
+              data-testid="message-selection-forward"
+              title={t("common.forward")}
+            >
+              <Forward className="h-5 w-5" />
             </Button>
           </div>
         ) : (
@@ -1060,8 +1049,7 @@ export default function ChatWindow({
         />
         <div
           ref={scrollRef}
-          className="chat-bg h-full space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 sm:px-4 sm:py-5 touch-pan-y"
-          style={{ touchAction: "pan-y", WebkitOverflowScrolling: "touch" }}
+          className="chat-bg h-full space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-4 sm:px-4 sm:py-5"
           data-testid="messages-container"
           onClick={() => {
             if (messageMenuOpen || actionMessageId) dismissActionMenu();
@@ -1094,17 +1082,6 @@ export default function ChatWindow({
           }
           const mKey = messageKey(m);
           const isActionTarget = actionMessageId === mKey;
-          const showActionMenuTrigger =
-            !readOnly
-            && (
-              (isClientUser && isActionTarget)
-              || (
-                canForwardSelect
-                && isSelectionMode
-                && selectedMessages.length === 1
-                && selectedMessages[0] === mKey
-              )
-            );
           const bubble = (
             <div
               className={`relative flex w-full ${mine ? "justify-end" : "justify-start"} items-center gap-1`}
@@ -1122,10 +1099,9 @@ export default function ChatWindow({
                 flashHighlight={flashMessageId && String(m.id) === flashMessageId}
                 starred={m.id ? starredIds.has(String(m.id)) : false}
                 searchQuery={threadSearchQuery}
-                selectionMode={canForwardSelect && isSelectionMode}
+                selectionMode={isSelectionMode}
                 onLongPress={readOnly ? undefined : handleLongPressMessage}
-                onToggleSelect={canForwardSelect ? toggleSelect : undefined}
-                onReplyQuoteClick={scrollToMessage}
+                onToggleSelect={readOnly ? undefined : toggleSelect}
                 dimmed={
                   (isSelectionMode && !selectedMessages.includes(mKey))
                   || (actionMessageId && !isActionTarget)
@@ -1133,13 +1109,12 @@ export default function ChatWindow({
                 onRetry={readOnly ? undefined : handleRetryMessage}
                 viewerUserId={user?.id}
               />
-              {showActionMenuTrigger && (
+              {isActionTarget && !readOnly && (
                 <button
                   type="button"
                   className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full text-gray-600 hover:bg-gray-200/80 dark:text-gray-300 dark:hover:bg-gray-800 touch-manipulation"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setActionMessageId(mKey);
                     openMessageActionMenu(e.currentTarget);
                   }}
                   data-testid="message-action-menu-trigger"
@@ -1153,7 +1128,8 @@ export default function ChatWindow({
           return (
             <SwipeableMessageRow
               key={m.__tempId || m.id}
-              disabled={!canSwipeReply || isSelectionMode || !!actionMessageId}
+              isSent={mine}
+              disabled={readOnly || isSelectionMode || !!actionMessageId}
               selectionModeRef={isSelectionModeActive}
               onSwipeReply={() => startReplyRef.current(m)}
             >
@@ -1216,18 +1192,13 @@ export default function ChatWindow({
         </div>
       )}
 
-      {canForwardSelect && (
-        <ForwardModal
-          open={showForwardModal}
-          onOpenChange={(open) => {
-            setShowForwardModal(open);
-            if (!open) setForwardMessages([]);
-          }}
-          messages={forwardMessages}
-          conversations={conversations}
-          currentConversationId={conversation?.id}
-        />
-      )}
+      <ForwardModal
+        open={showForwardModal}
+        onOpenChange={setShowForwardModal}
+        messages={forwardMessages}
+        conversations={conversations}
+        currentConversationId={conversation?.id}
+      />
 
       <MessageContextMenu
         open={messageMenuOpen && !!actionMessage}
