@@ -12,8 +12,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/context/AuthContext";
@@ -127,7 +125,6 @@ export default function TopBar({
                 <UserPlus /> {t("topbar.referClient")}
               </DropdownMenuItem>
             )}
-            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => { logout(); }} data-testid="topbar-logout-item">
               <LogOut /> {t("common.logout")}
             </DropdownMenuItem>
