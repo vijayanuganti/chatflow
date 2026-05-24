@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { MessageSquare, UtensilsCrossed, Wrench, Folder, MessageCircle } from "lucide-react";
+import { MessageSquare, UtensilsCrossed, Folder, MessageCircle } from "lucide-react";
 import { dietPlanPath, profilePath } from "@/lib/appRoutes";
 import { chatListTarget } from "@/lib/chatMobileNav";
 import { saveChatListScroll } from "@/lib/chatListScroll";
@@ -21,7 +21,6 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
     }
     if (id === "diet") return pathname.startsWith("/chat/diet-plan");
     if (id === "folders") return pathname.startsWith("/chat/folders");
-    if (id === "tools") return pathname === "/chat/tools";
     return false;
   };
 
@@ -58,14 +57,6 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
         testId: "client-nav-folders",
         onClick: () => navigate("/chat/folders", { push: true }),
       },
-      {
-        id: "tools",
-        label: t("nav.tools"),
-        icon: Wrench,
-        active: isActive("tools"),
-        testId: "client-nav-tools",
-        onClick: () => navigate("/chat/tools", { push: true }),
-      },
     ],
     [navigate, unreadTotal, pathname, listScrollRef, t],
   );
@@ -88,14 +79,6 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
         active: isActive("folders"),
         testId: "employee-nav-folders",
         onClick: () => navigate("/chat/folders", { push: true }),
-      },
-      {
-        id: "tools",
-        label: t("nav.tools"),
-        icon: Wrench,
-        active: isActive("tools"),
-        testId: "employee-nav-tools",
-        onClick: () => navigate("/chat/tools", { push: true }),
       },
     ],
     [navigate, unreadTotal, pathname, t],
