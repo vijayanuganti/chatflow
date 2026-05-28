@@ -189,7 +189,7 @@ html.dark .bubble-received {
     overflow-wrap: break-word;
 }
 .message-bubble.text-message-bubble {
-    max-width: 75%;
+    max-width: 100%;
 }
 .message-meta .message-timestamp {
     color: #667781;
