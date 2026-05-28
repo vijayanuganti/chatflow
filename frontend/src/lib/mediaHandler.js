@@ -148,7 +148,7 @@ async function openNativeUri(uri, contentType) {
   await FileOpener.open({
     filePath: uri,
     contentType,
-    openWithDefault: true,
+    openWithDefault: false,
   });
 }
 
@@ -196,6 +196,15 @@ function mapNativeOpenError(err) {
   }
   if (msg.includes("network") || msg.includes("failed to fetch") || msg.includes("download failed")) {
     return "Download failed. Please check your connection.";
+  }
+  if (msg.includes("not authenticated")) {
+    return "Please sign in again and retry.";
+  }
+  if (msg.includes("403") || msg.includes("access denied")) {
+    return "You do not have access to this file.";
+  }
+  if (msg.includes("404") || msg.includes("file not found")) {
+    return "File not found.";
   }
   return "Could not open file. Please try again.";
 }
@@ -250,7 +259,7 @@ export async function openMediaInNativeApp({
   const contentType = guessMimeType(name, mimeType, mediaKind);
 
   if (!Capacitor.isNativePlatform()) {
-    const webCached = await getChatMediaLocalUri(url, fileName);
+    const webCached = await getChatMediaLocalUri(url, name);
     if (webCached) {
       openOnWeb(webCached, name);
       return;
@@ -268,7 +277,7 @@ export async function openMediaInNativeApp({
   };
 
   try {
-    const cachedUri = await getChatMediaLocalUri(url, fileName);
+    const cachedUri = await getChatMediaLocalUri(url, name);
     if (cachedUri) {
       emitProgress({ open: true, fileName: name, percent: 100, phase: "opening" });
       await openNativeUri(cachedUri, contentType);
@@ -290,7 +299,7 @@ export async function openMediaInNativeApp({
 
     const uri = await downloadChatMedia({
       url,
-      fileName,
+      fileName: name,
       signal,
       onProgress: (pct) => {
         emitProgress({
@@ -379,41 +388,32 @@ export async function downloadMediaToDevice({
 }) {
   const name = resolveMediaFileName(fileName, mimeType, mediaKind);
   try {
-    const local = await downloadChatMedia({ url, fileName: name, onProgress });
+    await downloadChatMedia({ url, fileName: name, onProgress });
     if (Capacitor.isNativePlatform()) {
       const { Filesystem, Directory } = await import("@capacitor/filesystem");
       const relativePath = getChatMediaCacheRelativePath(url, name);
-      const { data } = await Filesystem.readFile({
-        path: relativePath,
-        directory: Directory.Cache,
-      });
-      const dest = `Download/ChatFlow/${name}`;
+      const destDir = "ChatFlow";
+      const destPath = `${destDir}/${name}`;
       try {
         await Filesystem.mkdir({
-          path: "Download/ChatFlow",
-          directory: Directory.External,
+          path: destDir,
+          directory: Directory.Documents,
           recursive: true,
         });
       } catch {
-        /* folder may exist */
+        /* may exist */
       }
-      try {
-        await Filesystem.writeFile({
-          path: dest,
-          data,
-          directory: Directory.External,
-        });
-        onSuccess?.("Saved to Downloads");
-      } catch {
-        await Filesystem.writeFile({
-          path: name,
-          data,
-          directory: Directory.Documents,
-        });
-        onSuccess?.("Saved to app documents");
-      }
+      await Filesystem.copy({
+        from: relativePath,
+        to: destPath,
+        directory: Directory.Cache,
+        toDirectory: Directory.Documents,
+      });
+      onSuccess?.("Saved to Documents/ChatFlow");
       return;
     }
+    const local = await getChatMediaLocalUri(url, name);
+    if (!local) throw new Error("Download failed");
     triggerBrowserFileDownload(local, name);
     onSuccess?.("Download started");
   } catch (err) {

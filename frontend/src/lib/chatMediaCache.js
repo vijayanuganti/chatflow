@@ -148,14 +148,31 @@ export async function downloadChatMedia({ url, fileName, onProgress, signal }) {
 
   const promise = (async () => {
     try {
-      const blob = await fetchBlobWithProgress(resolved, {
+      if (Capacitor.isNativePlatform()) {
+        const { Filesystem, Directory } = await import("@capacitor/filesystem");
+        const fetchUrl = mediaFetchUrl(url);
+        const headers = getMediaAuthHeaders();
+        if (!headers.Authorization) {
+          throw new Error("Not authenticated");
+        }
+        await Filesystem.downloadFile({
+          url: fetchUrl,
+          path: key,
+          directory: Directory.Cache,
+          headers,
+          recursive: true,
+          progress: Boolean(onProgress),
+        });
+        onProgress?.(100);
+        const uri = await readNativeCachedUri(key);
+        if (!uri) throw new Error("Download failed");
+        return uri;
+      }
+
+      const blob = await fetchBlobWithProgress(url, {
         signal: combinedSignal,
         onProgress,
       });
-      if (Capacitor.isNativePlatform()) {
-        const uri = await writeBlobToNativeCache(key, blob);
-        return uri;
-      }
       const objectUrl = URL.createObjectURL(blob);
       const prev = webBlobCache.get(key);
       if (prev && prev.startsWith("blob:")) {

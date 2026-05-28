@@ -239,6 +239,34 @@ def folder_view_only(folder: dict, user: dict) -> bool:
     return False
 
 
+async def assert_user_can_access_folder_media_key(db, user_id: str, s3_key: str) -> None:
+    """Allow /api/media/stream for S3 objects stored under uploads/folders/ when user can view the folder."""
+    import re
+
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="File not found")
+    escaped = re.escape(s3_key)
+    item = await db.folder_items.find_one(
+        {
+            "$or": [
+                {"url_or_path": s3_key},
+                {"url_or_path": {"$regex": escaped}},
+                {"thumbnail_path": s3_key},
+                {"thumbnail_path": {"$regex": escaped}},
+            ]
+        },
+        {"_id": 0, "folder_id": 1},
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="File not found")
+    folder = await db.folders.find_one({"id": item.get("folder_id")}, {"_id": 0})
+    if not folder:
+        raise HTTPException(status_code=404, detail="File not found")
+    if not await user_can_access_folder(db, folder, user):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
 def _access_summary(rules: List[dict], users_by_id: Dict[str, dict], *, employee_folder: bool = False) -> str:
     parts = []
     specific = 0

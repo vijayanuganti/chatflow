@@ -4208,7 +4208,13 @@ def _normalize_s3_media_key(key_or_url: str) -> str:
 
 
 async def _assert_user_can_access_s3_key(user_id: str, key: str) -> None:
-    """Ensure the object is referenced in a conversation the user belongs to."""
+    """Chat attachments in messages, or folder library files the user may view."""
+    if key.startswith("uploads/folders/"):
+        from folders_api import assert_user_can_access_folder_media_key
+
+        await assert_user_can_access_folder_media_key(db, user_id, key)
+        return
+
     convs = await db.conversations.find({"participants": user_id}, {"_id": 0, "id": 1}).to_list(5000)
     conv_ids = [c["id"] for c in convs if c.get("id")]
     if not conv_ids:
