@@ -44,6 +44,27 @@ function highlightText(text, query) {
   );
 }
 
+function MessageMeta({ time, mine, showReceipts, message, tickStatus }) {
+  return (
+    <span className="message-meta inline-flex items-center gap-0.5 shrink-0 select-none leading-none">
+      <span className="message-timestamp">{time}</span>
+      <ReceiptTicks mine={mine} showReceipts={showReceipts} message={message} tickStatus={tickStatus} />
+    </span>
+  );
+}
+
+/** WhatsApp-style: short text shares a line with meta; long text reserves bottom-right space. */
+function TextWithInlineMeta({ children, meta, className = "" }) {
+  return (
+    <div className={`relative min-w-[52px] max-w-full ${className}`}>
+      <div className="message-text whitespace-pre-wrap break-words text-[15px] leading-[1.35] text-gray-900 dark:text-gray-100 pr-[4.75rem] pb-0.5">
+        {children}
+      </div>
+      <div className="absolute bottom-[2px] right-0 flex items-end pointer-events-none">{meta}</div>
+    </div>
+  );
+}
+
 function ReceiptTicks({ mine, showReceipts, message, tickStatus }) {
   const { t } = useTranslation();
   if (!mine || !showReceipts) return null;
@@ -139,11 +160,14 @@ function MessageBubble({
 
   const clearPress = () => clearTimeout(longPressRef.current);
 
-  const timestampRow = (
-    <div className="message-timestamp-row">
-      <span className="message-timestamp shrink-0">{time}</span>
-      <ReceiptTicks mine={mine} showReceipts={showReceipts} message={message} tickStatus={tickStatus} />
-    </div>
+  const messageMeta = (
+    <MessageMeta
+      time={time}
+      mine={mine}
+      showReceipts={showReceipts}
+      message={message}
+      tickStatus={tickStatus}
+    />
   );
 
   const overlayTimestamp = (
@@ -157,7 +181,14 @@ function MessageBubble({
     </div>
   );
 
-  const bubblePaddingClass = isMediaBubble ? "media-bubble p-0" : "";
+  const isTextOnlyBubble = !isMediaBubble && !isAudio && Boolean(message.content);
+  const bubblePaddingClass = isMediaBubble
+    ? "media-bubble p-0"
+    : isAudio
+      ? "audio-bubble px-3 pt-2 pb-2"
+      : isTextOnlyBubble
+        ? "text-message-bubble"
+        : "pt-[6px] pb-[8px] pl-[9px] pr-3";
 
   return (
     <>
@@ -228,7 +259,7 @@ function MessageBubble({
           )}
 
           {(message.is_forwarded || message.reply_to_id || message.reply_to_snippet) && (
-            <div className={`${isMediaBubble ? "px-3 pt-2" : ""}`}>
+            <div className={`${isMediaBubble ? "px-3 pt-2" : "px-[9px] pt-1.5"}`}>
               {message.is_forwarded &&
                 message.original_sender_id &&
                 viewerUserId &&
@@ -281,12 +312,13 @@ function MessageBubble({
           )}
 
           {isAudio && (
-            <div className="px-3 py-2" data-testid={`audio-player-${message.id}`}>
+            <div className="relative min-w-[160px] pb-4" data-testid={`audio-player-${message.id}`}>
               <VoiceNotePlayer
                 src={mediaSrc}
                 durationLabel={parseVoiceNoteDurationLabel(message.content)}
                 mine={mine}
               />
+              <div className="absolute bottom-0 right-0 pointer-events-none">{messageMeta}</div>
               <UploadProgressRing progress={uploadPct} visible={uploading} />
             </div>
           )}
@@ -298,7 +330,7 @@ function MessageBubble({
                 fileName={message.file_name}
                 fileSize={message.file_size}
                 mimeType={message.__mimeType}
-                timestampRow={timestampRow}
+                timestampRow={<div className="message-timestamp-row">{messageMeta}</div>}
                 onError={mediaOnError}
               />
               <UploadProgressRing progress={uploadPct} visible={uploading} />
@@ -306,62 +338,45 @@ function MessageBubble({
           )}
 
           {message.content && !isAudio ? (
-            <>
-              <p
-                className={`message-text whitespace-pre-wrap break-words text-sm text-gray-900 dark:text-gray-100 leading-relaxed ${
-                  isImage || isVideo ? "px-3 py-1.5" : ""
-                }`}
-              >
+            <div
+              className={
+                isImage || isVideo
+                  ? "px-[9px] pt-1 pb-2 pr-3"
+                  : isTextOnlyBubble
+                    ? ""
+                    : "px-[9px] pt-1 pb-2 pr-3"
+              }
+            >
+              <TextWithInlineMeta meta={messageMeta}>
                 {highlightText(message.content, searchQuery)}
-              </p>
+              </TextWithInlineMeta>
               {(message.is_edited || message.edited_at) && (
                 <p
-                  className={`text-[9px] italic text-gray-400 dark:text-gray-500 ${
-                    isImage || isVideo ? "px-3 pb-0.5" : "px-3 -mt-0.5 pb-0.5"
-                  }`}
+                  className="mt-0.5 text-[9px] italic text-gray-400/90 dark:text-gray-500/90 pr-[4.75rem]"
                   data-testid={`message-edited-${message.id}`}
                 >
                   {t("message.edited")}
                 </p>
               )}
-            </>
+            </div>
           ) : null}
 
-          {!isMediaBubble && !isAudio ? (
-            <div>
-              {mine && message.__error && onRetry ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRetry(message);
-                  }}
-                  className="mb-1 text-[10px] font-medium text-rose-600 dark:text-rose-400 touch-manipulation"
-                  data-testid={`message-retry-${message.id}`}
-                >
-                  {t("message.retry")}
-                </button>
-              ) : null}
-              {timestampRow}
-            </div>
-          ) : isAudio ? (
-            <div className="px-3 pb-2">
-              {mine && message.__error && onRetry ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRetry(message);
-                  }}
-                  className="mb-1 text-[10px] font-medium text-rose-600 dark:text-rose-400 touch-manipulation"
-                  data-testid={`message-retry-${message.id}`}
-                >
-                  {t("message.retry")}
-                </button>
-              ) : null}
-              {timestampRow}
+          {mine && message.__error && onRetry && !isDocument ? (
+            <div className={isMediaBubble || isAudio ? "px-3 pb-1" : "pb-1"}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRetry(message);
+                }}
+                className="text-[10px] font-medium text-rose-600 dark:text-rose-400 touch-manipulation"
+                data-testid={`message-retry-${message.id}`}
+              >
+                {t("message.retry")}
+              </button>
             </div>
           ) : null}
+
         </div>
       </div>
 

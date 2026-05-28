@@ -182,17 +182,23 @@ html.dark .bubble-received {
 
 .message-bubble {
     width: fit-content;
-    min-width: 72px;
+    min-width: 52px;
     max-width: 100%;
     padding: 8px 12px;
     word-break: break-word;
     overflow-wrap: break-word;
+}
+.message-bubble.text-message-bubble {
+    padding: 6px 12px 8px 9px;
 }
 .message-bubble.media-bubble,
 .message-bubble.image-bubble,
 .message-bubble.video-bubble,
 .message-bubble.document-bubble {
     padding: 0;
+}
+.message-bubble.audio-bubble {
+    padding: 8px 10px 8px 9px;
 }
 .message-timestamp-row {
     display: flex;
@@ -201,9 +207,21 @@ html.dark .bubble-received {
     gap: 4px;
     margin-top: 2px;
 }
-.message-timestamp-row .message-timestamp {
-    font-size: 10px;
-    color: #9ca3af;
+.message-timestamp-row .message-timestamp,
+.message-meta .message-timestamp {
+    font-size: 11px;
+    line-height: 1;
+    color: rgba(17, 27, 33, 0.45);
+}
+html.dark .message-timestamp-row .message-timestamp,
+html.dark .message-meta .message-timestamp {
+    color: rgba(233, 237, 239, 0.5);
+}
+html.dark .bubble-sent .message-meta .message-timestamp {
+    color: rgba(233, 255, 235, 0.55);
+}
+.bubble-sent .message-meta .message-timestamp {
+    color: rgba(17, 27, 33, 0.45);
 }
 .message-bubble .message-text {
     white-space: pre-wrap;
