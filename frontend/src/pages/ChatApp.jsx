@@ -203,14 +203,15 @@ export default function ChatApp() {
 
   const closeChat = useCallback(() => {
     if (isClient) return;
-    clearActiveConversation();
-    if (chatConvIdFromUrl) {
-      navigate(-1);
-      return;
-    }
+    restoreNavRef.current = true;
     setSelected(null);
+    clearActiveConversation();
+    void clearActiveChatState();
     navigate(chatListTarget(), { replace: true });
-  }, [isClient, chatConvIdFromUrl, navigate, clearActiveConversation]);
+    queueMicrotask(() => {
+      restoreNavRef.current = false;
+    });
+  }, [isClient, clearActiveConversation, navigate]);
 
   // Return from full-screen new-conversation page with a started thread.
   useEffect(() => {
@@ -799,12 +800,12 @@ export default function ChatApp() {
       setListSelection(null);
       return true;
     }
-    if (chatConvIdFromUrl) {
-      navigate(-1);
+    if (chatConvIdFromUrl || selected) {
+      closeChat();
       return true;
     }
     return false;
-  }, [isClient, listSelection, chatConvIdFromUrl, navigate]);
+  }, [isClient, listSelection, chatConvIdFromUrl, selected, closeChat]);
 
   usePanelMobileBack({
     enabled: user?.role === "client" || user?.role === "employee",
@@ -833,7 +834,8 @@ export default function ChatApp() {
     setQuickView({ conv, user: profileUser });
   }, []);
 
-  const inChatThread = !isClient && (Boolean(selected) || Boolean(chatConvIdFromUrl));
+  const inChatThread =
+    !isClient && Boolean(chatConvIdFromUrl) && Boolean(selected);
   const showMobileFooter =
     inPanelLayout && !chatComposerActive && (isClient || !inChatThread);
   const clientThreadReadOnly = isClient && selected && selected.client_can_write === false;

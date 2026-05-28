@@ -40,8 +40,8 @@ export default function ChatPanelLayout() {
 
   const role = (user?.role || "").toLowerCase();
   const isClient = role === "client";
+  /** Footer hidden only while URL has an open thread (?c=). Matches closeChat replace to /chat. */
   const inChatThread = Boolean(chatConvIdFromUrl);
-  /** Hide bottom nav only inside an open chat thread (not on list / folders / etc.). */
   const showMobileFooter = !chatComposerActive && (isClient || !inChatThread);
 
   return (
