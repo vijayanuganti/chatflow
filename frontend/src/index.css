@@ -189,8 +189,7 @@ html.dark .bubble-received {
     overflow-wrap: break-word;
 }
 .message-bubble.text-message-bubble {
-    padding: 6px 12px 4px 9px;
-    max-width: 75vw;
+    max-width: 75%;
 }
 .message-meta .message-timestamp {
     color: #667781;
@@ -204,8 +203,14 @@ html.dark .bubble-sent .message-meta .message-timestamp {
 .bubble-sent .message-meta .message-timestamp {
     color: #667781;
 }
-.message-meta-anchor {
+.message-meta-tail {
     line-height: 1;
+}
+html.dark .message-meta-tail {
+    color: rgba(233, 237, 239, 0.55);
+}
+html.dark .bubble-sent .message-meta-tail {
+    color: rgba(233, 255, 235, 0.6);
 }
 .message-bubble.media-bubble,
 .message-bubble.image-bubble,
@@ -232,8 +237,6 @@ html.dark .bubble-sent .message-meta .message-timestamp {
     white-space: pre-wrap;
     word-break: break-word;
     overflow-wrap: break-word;
-    margin: 0;
-    padding: 0;
 }
 
 /* Typing dots */

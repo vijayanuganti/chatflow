@@ -46,26 +46,30 @@ function highlightText(text, query) {
 
 function MessageMeta({ time, mine, showReceipts, message, tickStatus }) {
   return (
-    <span className="message-meta inline-flex items-center gap-0.5 shrink-0 select-none leading-none">
+    <>
       <span className="message-timestamp">{time}</span>
-      <ReceiptTicks mine={mine} showReceipts={showReceipts} message={message} tickStatus={tickStatus} />
-    </span>
+      {mine && showReceipts ? (
+        <span className="ml-[2px] inline-flex items-center [&_svg]:h-4 [&_svg]:w-4">
+          <ReceiptTicks mine={mine} showReceipts={showReceipts} message={message} tickStatus={tickStatus} />
+        </span>
+      ) : null}
+    </>
   );
 }
 
 /**
- * WhatsApp-style text + meta: padding-right reserves space; meta is pinned bottom-right.
- * Short lines keep time beside the text; long text wraps above the meta corner.
+ * WhatsApp inline layout: text is `inline`, timestamp tail is `inline-flex` + `float-right`
+ * so short lines sit beside the time and long text wraps with meta at bottom-right.
  */
 function TextWithInlineMeta({ children, meta, className = "" }) {
   return (
-    <div className={`relative min-w-[48px] max-w-full clear-both ${className}`}>
-      <span className="message-text inline-block w-full whitespace-pre-wrap break-words text-[14.2px] leading-[19px] text-[#111b21] dark:text-gray-100 pr-[65px] pb-[2px]">
-        {children}
-      </span>
-      <div className="message-meta-anchor absolute bottom-[2px] right-[7px] flex items-center gap-[2px] select-none pointer-events-none">
+    <div
+      className={`block min-w-[48px] text-[14.2px] leading-[19px] whitespace-pre-wrap text-left break-words clear-both ${className}`}
+    >
+      <span className="message-text inline mr-2 text-[#111b21] dark:text-gray-100">{children}</span>
+      <span className="message-meta message-meta-tail inline-flex items-center align-baseline float-right select-none text-[11px] text-[#667781] gap-[2px] ml-2 relative top-[3px] shrink-0">
         {meta}
-      </div>
+      </span>
     </div>
   );
 }
@@ -80,7 +84,7 @@ function ReceiptTicks({ mine, showReceipts, message, tickStatus }) {
     return <AlertCircle className="h-3 w-3 text-rose-500 shrink-0" strokeWidth={2} aria-label={t("message.failed")} />;
   }
   if (tickStatus === "seen") {
-    return <CheckCheck className="h-3 w-3 text-sky-500 shrink-0" strokeWidth={2} aria-label={t("message.read")} />;
+    return <CheckCheck className="h-4 w-4 text-[#53bdeb] shrink-0" strokeWidth={2} aria-label={t("message.read")} />;
   }
   if (tickStatus === "delivered") {
     return <CheckCheck className="h-3 w-3 text-gray-400 shrink-0" strokeWidth={2} aria-label={t("message.delivered")} />;
@@ -192,7 +196,7 @@ function MessageBubble({
     : isAudio
       ? "audio-bubble px-3 pt-2 pb-2"
       : isTextOnlyBubble
-        ? "text-message-bubble"
+        ? "text-message-bubble pt-[6px] pb-[4px] pl-[9px] pr-[7px] max-w-[75%] break-words"
         : "pt-[6px] pb-[8px] pl-[9px] pr-3";
 
   return (
@@ -357,7 +361,7 @@ function MessageBubble({
               </TextWithInlineMeta>
               {(message.is_edited || message.edited_at) && (
                 <p
-                  className="mt-0.5 text-[9px] italic text-gray-400/90 dark:text-gray-500/90 pr-[65px]"
+                  className="mt-0.5 text-[9px] italic text-gray-400/90 dark:text-gray-500/90 clear-both"
                   data-testid={`message-edited-${message.id}`}
                 >
                   {t("message.edited")}
