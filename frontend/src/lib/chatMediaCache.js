@@ -14,7 +14,45 @@ function cacheKey(url, fileName) {
   for (let i = 0; i < s.length; i += 1) {
     h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
   }
-  return `${CACHE_DIR}/${Math.abs(h).toString(36)}_${name}`;
+  // Flat name (no slashes): Android downloadFile does not create parent folders.
+  return `${CACHE_DIR}_${Math.abs(h).toString(36)}_${name}`;
+}
+
+function nativeDownloadHeaders() {
+  const headers = getMediaAuthHeaders();
+  return Object.fromEntries(
+    Object.entries(headers).map(([k, v]) => [k, String(v)]),
+  );
+}
+
+async function nativeDownloadToCache(url, key, { onProgress, signal }) {
+  const { Filesystem, Directory } = await import("@capacitor/filesystem");
+  const fetchUrl = mediaFetchUrl(url, { attachToken: true });
+  if (!fetchUrl) throw new Error("Missing media URL");
+
+  const headers = nativeDownloadHeaders();
+  if (!headers.Authorization && !fetchUrl.includes("token=")) {
+    throw new Error("Not authenticated");
+  }
+
+  try {
+    await Filesystem.downloadFile({
+      url: fetchUrl,
+      path: key,
+      directory: Directory.Cache,
+      headers,
+      connectTimeout: 60000,
+      readTimeout: 120000,
+    });
+    onProgress?.(100);
+    const uri = await readNativeCachedUri(key);
+    if (uri) return uri;
+  } catch {
+    /* fall through to CapacitorHttp fetch */
+  }
+
+  const blob = await fetchBlobWithProgress(url, { onProgress, signal });
+  return writeBlobToNativeCache(key, blob);
 }
 
 /** Relative path under Directory.Cache for a cached media file. */
@@ -39,7 +77,9 @@ function blobToBase64(blob) {
 }
 
 async function fetchBlobWithProgress(url, { onProgress, signal }) {
-  const fetchUrl = mediaFetchUrl(url);
+  const fetchUrl = mediaFetchUrl(url, {
+    attachToken: Capacitor.isNativePlatform(),
+  });
   const headers = getMediaAuthHeaders();
   if (!headers.Authorization) {
     throw new Error("Not authenticated");
@@ -149,24 +189,10 @@ export async function downloadChatMedia({ url, fileName, onProgress, signal }) {
   const promise = (async () => {
     try {
       if (Capacitor.isNativePlatform()) {
-        const { Filesystem, Directory } = await import("@capacitor/filesystem");
-        const fetchUrl = mediaFetchUrl(url);
-        const headers = getMediaAuthHeaders();
-        if (!headers.Authorization) {
-          throw new Error("Not authenticated");
-        }
-        await Filesystem.downloadFile({
-          url: fetchUrl,
-          path: key,
-          directory: Directory.Cache,
-          headers,
-          recursive: true,
-          progress: Boolean(onProgress),
+        return nativeDownloadToCache(url, key, {
+          onProgress,
+          signal: combinedSignal,
         });
-        onProgress?.(100);
-        const uri = await readNativeCachedUri(key);
-        if (!uri) throw new Error("Download failed");
-        return uri;
       }
 
       const blob = await fetchBlobWithProgress(url, {
