@@ -2,6 +2,7 @@ import { Capacitor } from "@capacitor/core";
 import { fileUrl } from "@/lib/api";
 import {
   downloadChatMedia,
+  getChatMediaCacheRelativePath,
   getChatMediaLocalUri,
   isChatMediaCached,
 } from "@/lib/chatMediaCache";
@@ -147,8 +148,44 @@ async function openNativeUri(uri, contentType) {
   await FileOpener.open({
     filePath: uri,
     contentType,
-    openWithDefault: false,
+    openWithDefault: true,
   });
+}
+
+function triggerBrowserFileDownload(href, fileName) {
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = fileName;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/**
+ * Ensure file name has a sensible extension (folder items may omit it in title).
+ */
+export function resolveMediaFileName(fileName, mimeType, mediaKind = "document") {
+  const fallback =
+    mediaKind === "video" ? "video.mp4" : mediaKind === "photo" ? "photo.jpg" : "file";
+  const base = safeMediaFileName(fileName, fallback);
+  if (/\.[a-z0-9]{2,8}$/i.test(base)) return base;
+  const mime = (mimeType || "").toLowerCase();
+  const extByMime = {
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+    "video/x-matroska": ".mkv",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "application/pdf": ".pdf",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+  };
+  const ext = extByMime[mime];
+  return ext ? `${base}${ext}` : base;
 }
 
 function mapNativeOpenError(err) {
@@ -205,7 +242,11 @@ export async function openMediaInNativeApp({
     return;
   }
 
-  const name = safeMediaFileName(fileName, mediaKind === "video" ? "video.mp4" : "document");
+  const name = resolveMediaFileName(
+    fileName,
+    mimeType,
+    mediaKind === "video" ? "video" : "document",
+  );
   const contentType = guessMimeType(name, mimeType, mediaKind);
 
   if (!Capacitor.isNativePlatform()) {
@@ -321,4 +362,62 @@ export async function openDocumentInNativeApp(url, fileName, mimeType, onError) 
     mediaKind: "document",
     onError,
   });
+}
+
+/**
+ * Save media to device storage (Downloads/Documents on native, file save on web).
+ * Does not open a viewer — use open*InNativeApp for that.
+ */
+export async function downloadMediaToDevice({
+  url,
+  fileName,
+  mimeType,
+  mediaKind = "document",
+  onProgress,
+  onError,
+  onSuccess,
+}) {
+  const name = resolveMediaFileName(fileName, mimeType, mediaKind);
+  try {
+    const local = await downloadChatMedia({ url, fileName: name, onProgress });
+    if (Capacitor.isNativePlatform()) {
+      const { Filesystem, Directory } = await import("@capacitor/filesystem");
+      const relativePath = getChatMediaCacheRelativePath(url, name);
+      const { data } = await Filesystem.readFile({
+        path: relativePath,
+        directory: Directory.Cache,
+      });
+      const dest = `Download/ChatFlow/${name}`;
+      try {
+        await Filesystem.mkdir({
+          path: "Download/ChatFlow",
+          directory: Directory.External,
+          recursive: true,
+        });
+      } catch {
+        /* folder may exist */
+      }
+      try {
+        await Filesystem.writeFile({
+          path: dest,
+          data,
+          directory: Directory.External,
+        });
+        onSuccess?.("Saved to Downloads");
+      } catch {
+        await Filesystem.writeFile({
+          path: name,
+          data,
+          directory: Directory.Documents,
+        });
+        onSuccess?.("Saved to app documents");
+      }
+      return;
+    }
+    triggerBrowserFileDownload(local, name);
+    onSuccess?.("Download started");
+  } catch (err) {
+    const msg = mapNativeOpenError(err) || "Could not download file. Please try again.";
+    onError?.(msg);
+  }
 }

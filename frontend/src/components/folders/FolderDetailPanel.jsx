@@ -8,7 +8,12 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ImageLightbox from "@/components/ImageLightbox";
 import { fileUrl, formatApiError } from "@/lib/api";
-import { openDocumentInNativeApp, openVideoInNativeApp } from "@/lib/mediaHandler";
+import {
+  downloadMediaToDevice,
+  openDocumentInNativeApp,
+  openVideoInNativeApp,
+  resolveMediaFileName,
+} from "@/lib/mediaHandler";
 import { FOLDER_CATEGORIES } from "@/lib/folderAccess";
 import {
   addFolderLink,
@@ -57,11 +62,20 @@ export default function FolderDetailPanel({
   const [busy, setBusy] = useState(false);
   const [photoView, setPhotoView] = useState(null);
 
+  const mediaKindForCategory = (category) => {
+    if (category === "videos") return "video";
+    if (category === "photos") return "photo";
+    return "document";
+  };
+
+  const itemFileName = (item, category) =>
+    resolveMediaFileName(item.title, item.mime_type, mediaKindForCategory(category));
+
   const openNativeVideo = (item) => {
     void openVideoInNativeApp(
       item.url_or_path,
-      item.title || "video.mp4",
-      null,
+      itemFileName(item, "videos"),
+      item.mime_type,
       (msg) => toast.error(msg),
     );
   };
@@ -69,10 +83,28 @@ export default function FolderDetailPanel({
   const openNativeDocument = (item) => {
     void openDocumentInNativeApp(
       item.url_or_path,
-      item.title || "document",
-      null,
+      itemFileName(item, "documents"),
+      item.mime_type,
       (msg) => toast.error(msg),
     );
+  };
+
+  const handleDownload = (item, category) => {
+    const toastId = toast.loading("Downloading…");
+    void downloadMediaToDevice({
+      url: item.url_or_path,
+      fileName: itemFileName(item, category),
+      mimeType: item.mime_type,
+      mediaKind: mediaKindForCategory(category),
+      onSuccess: (msg) => {
+        toast.dismiss(toastId);
+        toast.success(msg || "Downloaded");
+      },
+      onError: (msg) => {
+        toast.dismiss(toastId);
+        toast.error(msg);
+      },
+    });
   };
 
   const itemsByCategory = folder?.items_by_category || {};
@@ -129,17 +161,6 @@ export default function FolderDetailPanel({
     } finally {
       setBusy(false);
     }
-  };
-
-  const openDownload = (item) => {
-    const url = fileUrl(item.url_or_path);
-    if (!url) return;
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = item.title || "download";
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.click();
   };
 
   const renderEmpty = (label) => (
@@ -289,7 +310,14 @@ export default function FolderDetailPanel({
                         Open
                       </Button>
                     )}
-                    <Button size="sm" variant="outline" className="rounded-full" onClick={() => openDownload(item)} title="Download">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-full"
+                      onClick={() => handleDownload(item, category)}
+                      title="Download"
+                      data-testid={`folder-download-${item.id}`}
+                    >
                       <Download className="h-3.5 w-3.5" />
                     </Button>
                     {canEdit && (

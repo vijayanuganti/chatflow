@@ -17,6 +17,11 @@ function cacheKey(url, fileName) {
   return `${CACHE_DIR}/${Math.abs(h).toString(36)}_${name}`;
 }
 
+/** Relative path under Directory.Cache for a cached media file. */
+export function getChatMediaCacheRelativePath(url, fileName) {
+  return cacheKey(url, fileName);
+}
+
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
