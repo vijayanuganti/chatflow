@@ -205,6 +205,14 @@ html.dark .bubble-sent .message-meta .message-timestamp {
 }
 .message-meta-tail {
     line-height: 1;
+    white-space: nowrap;
+    word-break: keep-all;
+    overflow-wrap: normal;
+}
+.message-meta-tail .message-timestamp {
+    white-space: nowrap;
+    word-break: keep-all;
+    overflow-wrap: normal;
 }
 html.dark .message-meta-tail {
     color: rgba(233, 237, 239, 0.55);

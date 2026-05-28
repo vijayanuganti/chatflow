@@ -47,9 +47,13 @@ function highlightText(text, query) {
 function MessageMeta({ time, mine, showReceipts, message, tickStatus }) {
   return (
     <>
-      <span className="message-timestamp">{time}</span>
+      <span className="message-timestamp inline-block whitespace-nowrap">{time}</span>
       {mine && showReceipts ? (
-        <span className="ml-[2px] inline-flex items-center [&_svg]:h-4 [&_svg]:w-4">
+        <span
+          className={`inline-flex items-center ml-[3px] shrink-0 whitespace-nowrap [&_svg]:h-4 [&_svg]:w-4 ${
+            tickStatus === "seen" ? "text-[#53bdeb]" : ""
+          }`}
+        >
           <ReceiptTicks mine={mine} showReceipts={showReceipts} message={message} tickStatus={tickStatus} />
         </span>
       ) : null}
@@ -59,7 +63,7 @@ function MessageMeta({ time, mine, showReceipts, message, tickStatus }) {
 
 /**
  * WhatsApp inline layout: text is `inline`, timestamp tail is `inline-flex` + `float-right`
- * so short lines sit beside the time and long text wraps with meta at bottom-right.
+ * with `whitespace-nowrap` so "10:41 PM" and ticks never break across lines.
  */
 function TextWithInlineMeta({ children, meta, className = "" }) {
   return (
@@ -67,7 +71,7 @@ function TextWithInlineMeta({ children, meta, className = "" }) {
       className={`block min-w-[48px] text-[14.2px] leading-[19px] whitespace-pre-wrap text-left break-words clear-both ${className}`}
     >
       <span className="message-text inline mr-2 text-[#111b21] dark:text-gray-100">{children}</span>
-      <span className="message-meta message-meta-tail inline-flex items-center align-baseline float-right select-none text-[11px] text-[#667781] gap-[2px] ml-2 relative top-[3px] shrink-0">
+      <span className="message-meta message-meta-tail inline-flex items-center float-right select-none text-[11px] text-[#667781] ml-2 mt-[4px] whitespace-nowrap h-[15px] relative top-[2px] shrink-0">
         {meta}
       </span>
     </div>
@@ -196,7 +200,7 @@ function MessageBubble({
     : isAudio
       ? "audio-bubble px-3 pt-2 pb-2"
       : isTextOnlyBubble
-        ? "text-message-bubble pt-[6px] pb-[4px] pl-[9px] pr-[7px] max-w-[75%] break-words"
+        ? "text-message-bubble min-w-[80px] pt-[6px] pb-[4px] pl-[9px] pr-[7px] max-w-[75%] break-words"
         : "pt-[6px] pb-[8px] pl-[9px] pr-3";
 
   return (
