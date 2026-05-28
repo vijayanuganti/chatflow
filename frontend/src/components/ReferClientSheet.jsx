@@ -57,6 +57,7 @@ export default function ReferClientSheet({ open, onOpenChange }) {
   };
 
   const submit = async () => {
+    if (submitting) return;
     const name = form.referred_name.trim();
     const digits = (form.phone_local || "").replace(/[^\d]/g, "");
     if (!name) {

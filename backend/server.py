@@ -1231,6 +1231,26 @@ async def _notify_all_admins(title: str, body: str, data: Optional[Dict[str, str
         _schedule_user_notification(a["id"], title, body, data)
 
 
+def _dedupe_referral_rows(rows: List[dict]) -> List[dict]:
+    """Drop duplicate pending referrals (same referrer + phone); keep newest first."""
+    seen_ids: set = set()
+    seen_pending_keys: set = set()
+    out: List[dict] = []
+    for row in rows:
+        rid = row.get("id")
+        if not rid or rid in seen_ids:
+            continue
+        seen_ids.add(rid)
+        if row.get("status") == "pending":
+            phone = normalize_phone(row.get("referred_phone") or "")
+            key = (row.get("referred_by_id"), phone)
+            if key in seen_pending_keys:
+                continue
+            seen_pending_keys.add(key)
+        out.append(row)
+    return out
+
+
 async def _hydrate_referral(referral: dict) -> dict:
     referrer = await db.users.find_one(
         {"id": referral.get("referred_by_id")},
@@ -3163,11 +3183,23 @@ async def create_referral(body: CreateReferralBody, user: dict = Depends(get_cur
     if body.health_goal == "other" and not (body.health_goal_other or "").strip():
         raise HTTPException(status_code=400, detail="Please describe the health goal")
 
+    phone = normalize_phone(body.referred_phone.strip())
+    existing = await db.referrals.find_one(
+        {
+            "referred_by_id": user["id"],
+            "referred_phone": phone,
+            "status": "pending",
+        },
+        {"_id": 0},
+    )
+    if existing:
+        return await _hydrate_referral(existing)
+
     created_at = now_iso()
     doc = {
         "id": str(uuid.uuid4()),
         "referred_name": body.referred_name.strip(),
-        "referred_phone": body.referred_phone.strip(),
+        "referred_phone": phone,
         "referred_email": (body.referred_email or "").strip() or None,
         "referred_age": body.referred_age,
         "health_goal": body.health_goal,
@@ -3209,6 +3241,7 @@ async def admin_list_referrals(
             raise HTTPException(status_code=400, detail=f"status must be one of {REFERRAL_STATUSES}")
         query["status"] = status
     rows = await db.referrals.find(query, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    rows = _dedupe_referral_rows(rows)
     items = [await _hydrate_referral(r) for r in rows]
     return {"stats": await _referral_stats(), "items": items}
 

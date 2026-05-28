@@ -20,6 +20,43 @@ export function healthGoalLabel(id, otherText) {
   return HEALTH_GOALS.find((g) => g.id === id)?.label || id || "—";
 }
 
+export function referredByRoleLabel(type) {
+  if (type === "employee") return "Employee";
+  if (type === "client") return "Client";
+  const raw = (type || "").trim();
+  if (!raw) return "";
+  return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+}
+
+/** Name + optional role badge; hides badge when it would repeat the name (e.g. "Client" + client). */
+export function referredByDisplay(row) {
+  const name = (row?.referred_by_name || row?.referrer?.full_name || "").trim();
+  const role = referredByRoleLabel(row?.referred_by_type);
+  if (!name) {
+    return { text: role || "—", showBadge: false, badge: role };
+  }
+  if (!role || name.toLowerCase() === role.toLowerCase()) {
+    return { text: name, showBadge: false, badge: role };
+  }
+  return { text: name, showBadge: true, badge: role };
+}
+
+export function referredByDetailLine(row) {
+  const { text, showBadge, badge } = referredByDisplay(row);
+  if (!showBadge || !badge) return text;
+  return `${text} (${badge})`;
+}
+
+export function dedupeReferralsById(items) {
+  const seen = new Set();
+  return (items || []).filter((row) => {
+    const id = row?.id;
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 export function referralStatusBadgeClass(status) {
   if (status === "converted") {
     return "bg-emerald-50 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300";

@@ -18,6 +18,7 @@ import { COMPANY_PRIMARY } from "@/lib/appInfo";
 import {
   healthGoalLabel,
   referralStatusBadgeClass,
+  referredByDetailLine,
   REFERRAL_STATUSES,
 } from "@/lib/referrals";
 import { toast } from "sonner";
@@ -182,7 +183,7 @@ export default function ReferralDetailPage() {
         rows={[
           {
             label: "Referred by",
-            value: `${detail.referred_by_name || detail.referrer?.full_name || "—"} (${detail.referred_by_type || "—"})`,
+            value: referredByDetailLine(detail),
           },
           { label: "Referrer ID", value: detail.referred_by_id },
           { label: "Submitted", value: formatReferredDate(detail.created_at) },

@@ -12,7 +12,9 @@ import AdminSearchBar from "@/components/admin/AdminSearchBar";
 import { api, formatApiError } from "@/lib/api";
 import { COMPANY_PRIMARY } from "@/lib/appInfo";
 import {
+  dedupeReferralsById,
   matchesReferralSearch,
+  referredByDisplay,
   referralStatusBadgeClass,
   REFERRAL_STATUSES,
 } from "@/lib/referrals";
@@ -54,7 +56,7 @@ export default function AdminReferralsPane() {
       const params = {};
       if (filter !== "all") params.status = filter;
       const res = await api.get("/admin/referrals", { params });
-      setItems(res.data?.items || []);
+      setItems(dedupeReferralsById(res.data?.items || []));
       setStats(res.data?.stats || { total: 0, pending: 0, converted: 0, rejected: 0 });
     } catch (err) {
       toast.error(formatApiError(err));
@@ -170,7 +172,9 @@ export default function AdminReferralsPane() {
                 </td>
               </tr>
             )}
-            {filtered.map((r) => (
+            {filtered.map((r) => {
+              const referredBy = referredByDisplay(r);
+              return (
               <tr
                 key={r.id}
                 className="border-b border-gray-100 dark:border-gray-800 last:border-0 hover:bg-gray-50/80 dark:hover:bg-gray-800/40"
@@ -181,17 +185,19 @@ export default function AdminReferralsPane() {
                 </td>
                 <td className="px-3 py-2.5">
                   <span className="text-xs font-medium text-gray-800 dark:text-gray-200">
-                    {r.referred_by_name}
+                    {referredBy.text}
                   </span>
-                  <span
-                    className={`ml-1.5 inline-block rounded-full px-1.5 py-0.5 text-[9px] uppercase ${
-                      r.referred_by_type === "employee"
-                        ? "bg-emerald-50 text-emerald-800"
-                        : "bg-sky-50 text-sky-800"
-                    }`}
-                  >
-                    {r.referred_by_type}
-                  </span>
+                  {referredBy.showBadge ? (
+                    <span
+                      className={`ml-1.5 inline-block rounded-full px-1.5 py-0.5 text-[9px] uppercase ${
+                        r.referred_by_type === "employee"
+                          ? "bg-emerald-50 text-emerald-800"
+                          : "bg-sky-50 text-sky-800"
+                      }`}
+                    >
+                      {referredBy.badge}
+                    </span>
+                  ) : null}
                 </td>
                 <td className="px-3 py-2.5">
                   <span
@@ -241,7 +247,8 @@ export default function AdminReferralsPane() {
                   </Button>
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       </div>
