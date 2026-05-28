@@ -11,6 +11,7 @@ export default function ChatInlineImage({
   fileUrl: path,
   alt,
   onImageClick,
+  message,
   uploading = false,
   uploadPct = 100,
   mine = false,
@@ -70,7 +71,7 @@ export default function ChatInlineImage({
         onClick={(e) => {
           if (selectionMode) return;
           e.stopPropagation();
-          if (!uploading && src) onImageClick?.(src, alt);
+          if (!uploading && src) onImageClick?.(message, src, alt);
         }}
         disabled={uploading}
       >

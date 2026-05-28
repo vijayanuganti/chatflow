@@ -33,6 +33,7 @@ import { hapticMessageLongPress } from "@/lib/messageActionHaptics";
 import MessageContextMenu from "@/components/chat/MessageContextMenu";
 import StarredMessagesPanel from "@/components/chat/StarredMessagesPanel";
 import { formatApiError } from "@/lib/api";
+import { downloadChatMedia } from "@/lib/chatMediaCache";
 import { inferMessageTypeFromFile, createVideoPosterFromFile } from "@/lib/chatMedia";
 import { uploadChatFile } from "@/lib/chatUpload";
 import ChatComposer from "./chat/ChatComposer";
@@ -142,9 +143,43 @@ export default function ChatWindow({
   const typingTimeoutRef = useRef(null);
   const lastTypingPingRef = useRef(0);
   const [lightbox, setLightbox] = useState(null);
-  const handleImageClick = useCallback((src, alt) => {
-    setLightbox({ src, alt });
+  const handleImageClick = useCallback((message, src, alt) => {
+    setLightbox({ src, alt, message: message || null });
   }, []);
+
+  const handleLightboxDownload = useCallback(async () => {
+    if (!lightbox?.src) return;
+    const msg = lightbox.message;
+    const fileName = msg?.file_name || lightbox.alt || "image.jpg";
+    try {
+      let href = lightbox.src;
+      if (msg?.file_url) {
+        href = await downloadChatMedia({ url: msg.file_url, fileName });
+      } else if (!href.startsWith("blob:")) {
+        const res = await fetch(href);
+        if (!res.ok) throw new Error("Download failed");
+        href = URL.createObjectURL(await res.blob());
+      }
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = fileName;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast.success("Image saved");
+    } catch (err) {
+      toast.error(formatApiError(err) || "Could not download image");
+    }
+  }, [lightbox]);
+
+  const handleLightboxForward = useCallback(() => {
+    const msg = lightbox?.message;
+    if (!msg?.id) return;
+    setForwardMessages([msg]);
+    setShowForwardModal(true);
+    setLightbox(null);
+  }, [lightbox]);
   const blobUrlsRef = useRef(new Set());
 
   const trayGroupKey = useMemo(() => {
@@ -1176,6 +1211,9 @@ export default function ChatWindow({
         src={lightbox?.src}
         alt={lightbox?.alt}
         onClose={() => setLightbox(null)}
+        onDownload={handleLightboxDownload}
+        onForward={readOnly ? undefined : handleLightboxForward}
+        showForward={!readOnly}
       />
 
       {/* Input - WhatsApp-style: emoji | text | attach (+) | camera | send/mic */}

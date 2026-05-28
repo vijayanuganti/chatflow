@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Capacitor } from "@capacitor/core";
+import { consumeOverlayBack } from "@/lib/overlayBackHandler";
 
 async function exitNativeApp() {
   if (!Capacitor.isNativePlatform()) return;
@@ -40,6 +41,7 @@ export default function usePanelMobileBack({
     let remove;
     const ready = import("@capacitor/app").then(({ App }) =>
       App.addListener("backButton", async () => {
+        if (consumeOverlayBack()) return;
         const handler = handlerRef.current;
         if (typeof handler === "function") {
           const handled = handler();

@@ -1,20 +1,51 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { X, Download, Forward } from "lucide-react";
+import { registerOverlayBack } from "@/lib/overlayBackHandler";
 
 const DISMISS_DRAG_PX = 72;
 const DISMISS_VELOCITY = 0.45;
+const HISTORY_FLAG = "__chatflowImageLightbox";
 
 /**
  * Fullscreen in-app image viewer: pinch-to-zoom, pan when zoomed, swipe down to dismiss.
+ * Optional download/forward actions; system back closes the viewer first.
  */
-export default function ImageLightbox({ open, src, alt = "Image", onClose }) {
+export default function ImageLightbox({
+  open,
+  src,
+  alt = "Image",
+  onClose,
+  onDownload,
+  onForward,
+  showForward = true,
+}) {
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [dragY, setDragY] = useState(0);
   const [dragOpacity, setDragOpacity] = useState(1);
   const pinchRef = useRef(null);
+  const historyPushedRef = useRef(false);
+  const closingRef = useRef(false);
+
+  const requestClose = useCallback(({ skipHistory = false } = {}) => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    onClose?.();
+    if (!skipHistory && historyPushedRef.current) {
+      historyPushedRef.current = false;
+      try {
+        window.history.back();
+      } catch {
+        /* ignore */
+      }
+    } else {
+      historyPushedRef.current = false;
+    }
+    window.setTimeout(() => {
+      closingRef.current = false;
+    }, 0);
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -22,6 +53,7 @@ export default function ImageLightbox({ open, src, alt = "Image", onClose }) {
     setOffset({ x: 0, y: 0 });
     setDragY(0);
     setDragOpacity(1);
+    closingRef.current = false;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
@@ -31,12 +63,31 @@ export default function ImageLightbox({ open, src, alt = "Image", onClose }) {
 
   useEffect(() => {
     if (!open) return undefined;
-    const onKey = (e) => {
-      if (e.key === "Escape") onClose?.();
+    const unregisterOverlay = registerOverlayBack(() => requestClose({ skipHistory: true }));
+
+    try {
+      window.history.pushState({ [HISTORY_FLAG]: true }, "");
+      historyPushedRef.current = true;
+    } catch {
+      historyPushedRef.current = false;
+    }
+
+    const onPopState = () => {
+      requestClose({ skipHistory: true });
     };
+
+    const onKey = (e) => {
+      if (e.key === "Escape") requestClose();
+    };
+
+    window.addEventListener("popstate", onPopState);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    return () => {
+      unregisterOverlay();
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, requestClose]);
 
   const clampScale = (s) => Math.min(4, Math.max(1, s));
 
@@ -100,7 +151,7 @@ export default function ImageLightbox({ open, src, alt = "Image", onClose }) {
       const dt = Math.max(1, Date.now() - (p.lastT ?? Date.now()));
       const velocity = dy / dt;
       if (dy >= DISMISS_DRAG_PX || velocity > DISMISS_VELOCITY) {
-        onClose?.();
+        requestClose();
         return;
       }
       setDragY(0);
@@ -113,7 +164,7 @@ export default function ImageLightbox({ open, src, alt = "Image", onClose }) {
       }
       return s;
     });
-  }, [onClose]);
+  }, [requestClose]);
 
   if (!open || !src || typeof document === "undefined") return null;
 
@@ -122,34 +173,69 @@ export default function ImageLightbox({ open, src, alt = "Image", onClose }) {
       ? `translate(${offset.x}px, ${offset.y}px) scale(${scale})`
       : `translateY(${dragY}px) scale(${scale})`;
 
+  const hasActions = Boolean(onDownload) || (showForward && onForward);
+
   return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Image preview"
-      className="fixed inset-0 z-[9999] flex flex-col"
+      className="fixed inset-0 z-[9999] flex flex-col justify-between bg-black"
       style={{ backgroundColor: `rgba(0,0,0,${0.95 * dragOpacity})` }}
-      onClick={scale <= 1 && dragY < 8 ? onClose : undefined}
+      onClick={scale <= 1 && dragY < 8 ? requestClose : undefined}
       data-testid="image-lightbox"
     >
-      <div className="flex shrink-0 items-center justify-end p-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <Button
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-50 flex items-center justify-between bg-gradient-to-b from-black/60 to-transparent p-4 pt-[max(1rem,env(safe-area-inset-top))]">
+        <button
           type="button"
-          size="icon"
-          variant="ghost"
-          className="rounded-full text-white hover:bg-white/20"
+          className="pointer-events-auto rounded-full p-2 text-white transition hover:bg-white/10"
           onClick={(e) => {
             e.stopPropagation();
-            onClose?.();
+            requestClose();
           }}
           data-testid="image-lightbox-close"
           aria-label="Close"
         >
-          <X className="h-6 w-6" />
-        </Button>
+          <X className="h-6 w-6" strokeWidth={2} />
+        </button>
+        {hasActions ? (
+          <div className="pointer-events-auto flex items-center gap-2">
+            {onDownload ? (
+              <button
+                type="button"
+                className="rounded-full p-2 text-white transition hover:bg-white/10"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDownload();
+                }}
+                data-testid="image-lightbox-download"
+                aria-label="Download image"
+                title="Download image"
+              >
+                <Download className="h-6 w-6" strokeWidth={2} />
+              </button>
+            ) : null}
+            {showForward && onForward ? (
+              <button
+                type="button"
+                className="rounded-full p-2 text-white transition hover:bg-white/10"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onForward();
+                }}
+                data-testid="image-lightbox-forward"
+                aria-label="Forward image"
+                title="Forward image"
+              >
+                <Forward className="h-6 w-6" strokeWidth={2} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
+
       <div
-        className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden touch-none"
+        className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden touch-none p-2"
         style={{ touchAction: "manipulation" }}
         onClick={(e) => e.stopPropagation()}
         onWheel={onWheel}

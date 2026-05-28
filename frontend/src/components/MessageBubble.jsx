@@ -302,6 +302,7 @@ function MessageBubble({
           {isImage && (
             <div className="relative">
               <ChatInlineImage
+                message={message}
                 fileUrl={message.file_url}
                 fileName={message.file_name}
                 alt={message.file_name || "image"}
