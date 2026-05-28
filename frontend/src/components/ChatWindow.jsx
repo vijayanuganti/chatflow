@@ -860,7 +860,10 @@ export default function ChatWindow({
               size="icon"
               variant="ghost"
               className="rounded-full shrink-0"
-              onClick={() => setSelectedMessages([])}
+              onClick={() => {
+                setSelectedMessages([]);
+                setActionMessageId(null);
+              }}
               data-testid="message-selection-clear"
               title={t("common.clear")}
             >
@@ -1131,16 +1134,16 @@ export default function ChatWindow({
                   onToggleSelect={readOnly ? undefined : toggleSelect}
                   dimmed={
                     (isSelectionMode && !selectedMessages.includes(mKey))
-                    || (actionMessageId && !isActionTarget)
+                    || (!isSelectionMode && actionMessageId && !isActionTarget)
                   }
                   onRetry={readOnly ? undefined : handleRetryMessage}
                   viewerUserId={user?.id}
                 />
               </SwipeableMessageRow>
-              {isActionTarget && !readOnly && (
+              {isActionTarget && !readOnly && !isSelectionMode && (
                 <button
                   type="button"
-                  className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full text-gray-600 hover:bg-gray-200/80 dark:text-gray-300 dark:hover:bg-gray-800 touch-manipulation"
+                  className="message-actions-menu-btn shrink-0 flex h-8 w-8 items-center justify-center rounded-full text-gray-600 hover:bg-gray-200/80 dark:text-gray-300 dark:hover:bg-gray-800 touch-manipulation"
                   onClick={(e) => {
                     e.stopPropagation();
                     openMessageActionMenu(e.currentTarget);

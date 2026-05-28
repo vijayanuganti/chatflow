@@ -19,6 +19,7 @@ export default function ChatVideoBlock({
   uploadPct,
   overlayTimestamp,
   onError,
+  selectionMode = false,
 }) {
   const mediaSrc = fileUrl(message.file_url);
   const poster = message.__videoPoster || undefined;
@@ -68,6 +69,7 @@ export default function ChatVideoBlock({
     <div
       className="relative cursor-pointer touch-manipulation"
       onClick={(e) => {
+        if (selectionMode) return;
         e.stopPropagation();
         if (showUpload) return;
         void onBubbleTap(onError);

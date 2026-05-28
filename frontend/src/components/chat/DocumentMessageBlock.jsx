@@ -32,6 +32,7 @@ export default function DocumentMessageBlock({
   mimeType,
   timestampRow,
   onError,
+  selectionMode = false,
 }) {
   const color = fileIconColor(mimeType, fileName);
   const {
@@ -51,6 +52,7 @@ export default function DocumentMessageBlock({
       <button
         type="button"
         onClick={(e) => {
+          if (selectionMode) return;
           e.stopPropagation();
           void onBubbleTap(onError);
         }}

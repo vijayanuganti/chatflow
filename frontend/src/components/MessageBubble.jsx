@@ -309,6 +309,7 @@ function MessageBubble({
                 uploading={uploading || (message.__pending && uploadPct < 100)}
                 uploadPct={uploadPct}
                 mine={mine}
+                selectionMode={selectionMode}
               />
               {!uploading && overlayTimestamp}
             </div>
@@ -321,6 +322,7 @@ function MessageBubble({
               uploadPct={uploadPct}
               overlayTimestamp={!uploading ? overlayTimestamp : null}
               onError={mediaOnError}
+              selectionMode={selectionMode}
             />
           )}
 
@@ -330,6 +332,7 @@ function MessageBubble({
                 src={mediaSrc}
                 durationLabel={parseVoiceNoteDurationLabel(message.content)}
                 mine={mine}
+                selectionMode={selectionMode}
               />
               <div className="absolute bottom-0 right-0 pointer-events-none">{messageMeta}</div>
               <UploadProgressRing progress={uploadPct} visible={uploading} />
@@ -345,6 +348,7 @@ function MessageBubble({
                 mimeType={message.__mimeType}
                 timestampRow={<div className="message-timestamp-row">{messageMeta}</div>}
                 onError={mediaOnError}
+                selectionMode={selectionMode}
               />
               <UploadProgressRing progress={uploadPct} visible={uploading} />
             </div>

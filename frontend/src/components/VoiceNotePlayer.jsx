@@ -32,7 +32,7 @@ function formatDuration(seconds) {
 /**
  * WhatsApp-style voice row: [play] [waveform bars] [duration]
  */
-export default function VoiceNotePlayer({ src, durationLabel, mine }) {
+export default function VoiceNotePlayer({ src, durationLabel, mine, selectionMode = false }) {
   const audioRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -73,6 +73,7 @@ export default function VoiceNotePlayer({ src, durationLabel, mine }) {
   }, [src, onEnded, onTimeUpdate, onLoadedMetadata]);
 
   const toggle = (e) => {
+    if (selectionMode) return;
     e?.stopPropagation?.();
     const el = audioRef.current;
     if (!el) return;

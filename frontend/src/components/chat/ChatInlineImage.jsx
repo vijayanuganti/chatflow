@@ -15,6 +15,7 @@ export default function ChatInlineImage({
   uploadPct = 100,
   mine = false,
   fileName,
+  selectionMode = false,
 }) {
   const src = fileUrl(path);
   const [loaded, setLoaded] = useState(false);
@@ -67,6 +68,7 @@ export default function ChatInlineImage({
           loaded ? "opacity-100" : "opacity-0 absolute inset-0"
         }`}
         onClick={(e) => {
+          if (selectionMode) return;
           e.stopPropagation();
           if (!uploading && src) onImageClick?.(src, alt);
         }}
