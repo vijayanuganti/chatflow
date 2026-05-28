@@ -25,6 +25,8 @@ export default function TopBar({
   onCreateAccount,
   onRaiseComplaint,
   onRefresh,
+  hideThemeToggle = false,
+  hideMenu = false,
 }) {
   const { user, logout } = useAuth();
   const { toggleTheme, isDark } = useTheme();
@@ -80,21 +82,24 @@ export default function TopBar({
             {t("topbar.createAccount")}
           </Button>
         )}
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-10 w-10 touch-manipulation rounded-full"
-          onClick={toggleTheme}
-          data-testid="topbar-theme-toggle"
-          title={isDark ? t("topbar.themeLight") : t("topbar.themeDark")}
-        >
-          {isDark
-            ? <Sun className="h-5 w-5" strokeWidth={1.5} />
-            : <Moon className="h-5 w-5" strokeWidth={1.5} />}
-        </Button>
+        {!hideThemeToggle ? (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-10 w-10 touch-manipulation rounded-full"
+            onClick={toggleTheme}
+            data-testid="topbar-theme-toggle"
+            title={isDark ? t("topbar.themeLight") : t("topbar.themeDark")}
+          >
+            {isDark
+              ? <Sun className="h-5 w-5" strokeWidth={1.5} />
+              : <Moon className="h-5 w-5" strokeWidth={1.5} />}
+          </Button>
+        ) : null}
         <div className="hidden sm:block">
           <Avatar name={user?.full_name} avatarUrl={user?.avatar_url} status={user?.status || "available"} size={34} />
         </div>
+        {!hideMenu ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="icon" variant="ghost" className="h-10 w-10 touch-manipulation rounded-full" data-testid="topbar-menu-btn" title={t("topbar.menu")}>
@@ -138,6 +143,7 @@ export default function TopBar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        ) : null}
         <LanguageSheet open={languageOpen} onOpenChange={setLanguageOpen} />
         <AboutSheet open={aboutOpen} onOpenChange={setAboutOpen} />
         {canReferClient && (

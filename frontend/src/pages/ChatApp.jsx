@@ -83,7 +83,7 @@ export default function ChatApp() {
   useMobileChatViewport();
   const { t } = useTranslation();
   const { user } = useAuth();
-  const { setActiveConversationId, clearActiveConversation } = useChat();
+  const { setActiveConversationId, clearActiveConversation, chatComposerActive } = useChat();
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -833,7 +833,9 @@ export default function ChatApp() {
     setQuickView({ conv, user: profileUser });
   }, []);
 
-  const showMobileFooter = inPanelLayout && !isClient && !selected && !chatConvIdFromUrl;
+  const isEmployee = user?.role === "employee";
+  const inChatThread = !isClient && (Boolean(selected) || Boolean(chatConvIdFromUrl));
+  const showMobileFooter = inPanelLayout && isClient && !chatComposerActive;
   const clientThreadReadOnly = isClient && selected && selected.client_can_write === false;
 
   return (
@@ -856,6 +858,8 @@ export default function ChatApp() {
               ? () => navigate(raiseComplaintPath(), { push: true })
               : undefined
           }
+          hideThemeToggle={inChatThread}
+          hideMenu={inChatThread}
         />
       </div>
 
@@ -907,7 +911,7 @@ export default function ChatApp() {
         </main>
       </div>
 
-      {!isClient && !selected && (
+      {!isClient && !isEmployee && !selected && (
         <button
           type="button"
           onClick={openNewConversation}
