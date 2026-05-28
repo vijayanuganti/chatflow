@@ -1,26 +1,15 @@
 import React, { useRef, cloneElement, isValidElement } from "react";
 import { Reply } from "lucide-react";
-import { Capacitor } from "@capacitor/core";
 import { NO_SELECT_STYLE } from "@/lib/noSelectStyles";
+import { hapticSwipeReplyThreshold } from "@/lib/messageActionHaptics";
 
-const SWIPE_THRESHOLD = 60;
-const MAX_DRAG = 72;
+const SWIPE_THRESHOLD = 50;
+const MAX_DRAG = 80;
 const LOCK_PX = 10;
-
-async function triggerHaptic() {
-  if (!Capacitor.isNativePlatform()) return;
-  try {
-    const { Haptics, ImpactStyle } = await import("@capacitor/haptics");
-    await Haptics.impact({ style: ImpactStyle.Light });
-  } catch {
-    /* unavailable on web */
-  }
-}
 
 /**
  * WhatsApp-style swipe-right on the bubble to reply.
  * Pointer events (touch + mouse) with vertical-scroll pass-through.
- * `isSent` keeps the row aligned right for outgoing messages.
  */
 export default function SwipeableMessageRow({
   children,
@@ -35,9 +24,9 @@ export default function SwipeableMessageRow({
   const lockedHorizontalRef = useRef(false);
   const dragXRef = useRef(0);
   const activePointerIdRef = useRef(null);
+  const thresholdHapticFiredRef = useRef(false);
 
   const justify = isSent ? "justify-end" : "justify-start";
-  const iconSide = isSent ? "left" : "right";
 
   const applyTransform = (x) => {
     const bubble = bubbleRef.current;
@@ -49,7 +38,15 @@ export default function SwipeableMessageRow({
     if (icon) {
       const progress = Math.min(clamped / SWIPE_THRESHOLD, 1);
       icon.style.opacity = String(progress);
-      icon.style.transform = `scale(${0.6 + 0.4 * progress})`;
+      icon.style.transform = `scale(${0.55 + 0.45 * progress})`;
+    }
+    if (
+      clamped >= SWIPE_THRESHOLD &&
+      !thresholdHapticFiredRef.current &&
+      lockedHorizontalRef.current
+    ) {
+      thresholdHapticFiredRef.current = true;
+      void hapticSwipeReplyThreshold();
     }
   };
 
@@ -65,18 +62,18 @@ export default function SwipeableMessageRow({
     if (icon) {
       icon.style.transition = animate ? "opacity 0.2s ease, transform 0.2s ease" : "none";
       icon.style.opacity = "0";
-      icon.style.transform = "scale(0.6)";
+      icon.style.transform = "scale(0.55)";
     }
     lockedHorizontalRef.current = false;
     dragXRef.current = 0;
     activePointerIdRef.current = null;
+    thresholdHapticFiredRef.current = false;
   };
 
   const finishDrag = () => {
     const triggered = dragXRef.current >= SWIPE_THRESHOLD;
     resetDrag(true);
     if (triggered) {
-      void triggerHaptic();
       onSwipeReply?.();
     }
   };
@@ -90,6 +87,7 @@ export default function SwipeableMessageRow({
     startRef.current = { x: e.clientX, y: e.clientY };
     lockedHorizontalRef.current = false;
     dragXRef.current = 0;
+    thresholdHapticFiredRef.current = false;
 
     const bubble = bubbleRef.current;
     if (bubble) bubble.style.transition = "none";
@@ -143,9 +141,12 @@ export default function SwipeableMessageRow({
     resetDrag(true);
   };
 
+  const child =
+    isValidElement(children) ? cloneElement(children, { bubbleRef }) : children;
+
   return (
     <div
-      className={`chat-message relative flex w-full overflow-visible touch-pan-y ${justify}`}
+      className={`chat-message relative flex w-full min-w-0 overflow-visible touch-pan-y ${justify}`}
       style={{ ...NO_SELECT_STYLE, touchAction: "pan-y" }}
       data-testid="swipeable-message-row"
       onPointerDown={onPointerDown}
@@ -158,20 +159,20 @@ export default function SwipeableMessageRow({
           ref={replyIconRef}
           style={{
             opacity: 0,
-            transform: "scale(0.6)",
+            transform: "scale(0.55)",
             transition: "none",
             position: "absolute",
-            [iconSide]: -36,
+            left: -40,
             top: "50%",
-            marginTop: -12,
+            marginTop: -14,
             pointerEvents: "none",
             zIndex: 0,
           }}
           aria-hidden
         >
-          <Reply className="h-6 w-6 text-emerald-600 dark:text-emerald-400" strokeWidth={2} />
+          <Reply className="h-7 w-7 text-emerald-600 dark:text-emerald-400" strokeWidth={2} />
         </div>
-        {isValidElement(children) ? cloneElement(children, { bubbleRef }) : children}
+        {child}
       </div>
     </div>
   );

@@ -1083,33 +1083,40 @@ export default function ChatWindow({
           }
           const mKey = messageKey(m);
           const isActionTarget = actionMessageId === mKey;
-          const bubble = (
+          return (
             <div
-              className={`relative flex w-full ${mine ? "justify-end" : "justify-start"} items-center gap-1`}
-              onClick={(e) => e.stopPropagation()}
+              key={m.__tempId || m.id}
+              className={`relative flex w-full items-center gap-1 ${mine ? "justify-end" : "justify-start"}`}
             >
-              <MessageBubble
-                message={m}
-                mine={mine}
-                showSenderName={showSenderNames}
-                totalRecipients={totalRecipients}
-                showReceipts={!readOnly}
-                onImageClick={handleImageClick}
-                selected={selectedMessages.includes(mKey)}
-                actionSelected={isActionTarget}
-                flashHighlight={flashMessageId && String(m.id) === flashMessageId}
-                starred={m.id ? starredIds.has(String(m.id)) : false}
-                searchQuery={threadSearchQuery}
-                selectionMode={isSelectionMode}
-                onLongPress={readOnly ? undefined : handleLongPressMessage}
-                onToggleSelect={readOnly ? undefined : toggleSelect}
-                dimmed={
-                  (isSelectionMode && !selectedMessages.includes(mKey))
-                  || (actionMessageId && !isActionTarget)
-                }
-                onRetry={readOnly ? undefined : handleRetryMessage}
-                viewerUserId={user?.id}
-              />
+              <SwipeableMessageRow
+                isSent={mine}
+                disabled={readOnly || isSelectionMode || !!actionMessageId}
+                selectionModeRef={isSelectionModeActive}
+                onSwipeReply={() => startReplyRef.current(m)}
+              >
+                <MessageBubble
+                  message={m}
+                  mine={mine}
+                  showSenderName={showSenderNames}
+                  totalRecipients={totalRecipients}
+                  showReceipts={!readOnly}
+                  onImageClick={handleImageClick}
+                  selected={selectedMessages.includes(mKey)}
+                  actionSelected={isActionTarget}
+                  flashHighlight={flashMessageId && String(m.id) === flashMessageId}
+                  starred={m.id ? starredIds.has(String(m.id)) : false}
+                  searchQuery={threadSearchQuery}
+                  selectionMode={isSelectionMode}
+                  onLongPress={readOnly ? undefined : handleLongPressMessage}
+                  onToggleSelect={readOnly ? undefined : toggleSelect}
+                  dimmed={
+                    (isSelectionMode && !selectedMessages.includes(mKey))
+                    || (actionMessageId && !isActionTarget)
+                  }
+                  onRetry={readOnly ? undefined : handleRetryMessage}
+                  viewerUserId={user?.id}
+                />
+              </SwipeableMessageRow>
               {isActionTarget && !readOnly && (
                 <button
                   type="button"
@@ -1125,17 +1132,6 @@ export default function ChatWindow({
                 </button>
               )}
             </div>
-          );
-          return (
-            <SwipeableMessageRow
-              key={m.__tempId || m.id}
-              isSent={mine}
-              disabled={readOnly || isSelectionMode || !!actionMessageId}
-              selectionModeRef={isSelectionModeActive}
-              onSwipeReply={() => startReplyRef.current(m)}
-            >
-              {bubble}
-            </SwipeableMessageRow>
           );
         })}
         </div>

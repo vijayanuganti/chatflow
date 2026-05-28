@@ -10,3 +10,14 @@ export async function hapticMessageLongPress() {
     /* unavailable on web */
   }
 }
+
+/** Light tap when swipe-to-reply crosses the activation threshold. */
+export async function hapticSwipeReplyThreshold() {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    const { Haptics, ImpactStyle } = await import("@capacitor/haptics");
+    await Haptics.impact({ style: ImpactStyle.Light });
+  } catch {
+    /* unavailable on web */
+  }
+}

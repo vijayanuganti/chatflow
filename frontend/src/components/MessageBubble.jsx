@@ -84,6 +84,7 @@ function MessageBubble({
 }) {
   const { t } = useTranslation();
   const longPressRef = useRef(null);
+  const pressStartRef = useRef({ x: 0, y: 0 });
   const didLongPressRef = useRef(false);
   const time = formatTime(message.created_at);
   const mediaOnError = (msg) => toast.error(msg || "Could not open file");
@@ -107,15 +108,23 @@ function MessageBubble({
   const isAudio = message.message_type === "audio" && message.file_url;
   const isMediaBubble = isImage || isVideo || isDocument;
 
-  const handlePointerDown = () => {
+  const handlePointerDown = (e) => {
     if (!messageId) return;
     didLongPressRef.current = false;
+    pressStartRef.current = { x: e.clientX, y: e.clientY };
     if (!onLongPress && !onToggleSelect) return;
     clearTimeout(longPressRef.current);
     longPressRef.current = setTimeout(() => {
       didLongPressRef.current = true;
       if (onLongPress) onLongPress(message);
     }, 500);
+  };
+
+  const handlePointerMove = (e) => {
+    if (!longPressRef.current) return;
+    const dx = Math.abs(e.clientX - pressStartRef.current.x);
+    const dy = Math.abs(e.clientY - pressStartRef.current.y);
+    if (dx > 10 || dy > 10) clearPress();
   };
 
   const handleClick = () => {
@@ -158,6 +167,7 @@ function MessageBubble({
         data-testid={`message-${message.id || message.__tempId}`}
         data-status={message.__pending ? "pending" : message.__error ? "error" : tickStatus}
         onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
         onPointerUp={clearPress}
         onPointerLeave={clearPress}
         onPointerCancel={clearPress}

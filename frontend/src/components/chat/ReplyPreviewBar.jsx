@@ -10,7 +10,7 @@ export default function ReplyPreviewBar({ replyingTo, onCancel }) {
 
   return (
     <div
-      className="mx-2 sm:mx-3 mb-1 flex items-stretch gap-2 rounded-lg bg-white dark:bg-gray-900 border border-gray-200/90 dark:border-gray-700 shadow-sm overflow-hidden"
+      className="mx-2 sm:mx-3 mb-1 flex items-stretch gap-2 rounded-lg bg-white dark:bg-gray-900 border border-gray-200/90 dark:border-gray-700 shadow-sm overflow-hidden animate-in slide-in-from-bottom-2 fade-in duration-200"
       data-testid="reply-preview-bar"
     >
       <div className={`flex-1 min-w-0 border-l-4 ${borderColor} px-3 py-2`}>
