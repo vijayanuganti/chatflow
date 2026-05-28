@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Outlet, useOutletContext } from "react-router-dom";
+import { Outlet, useOutletContext, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useChat } from "@/context/ChatContext";
 import { api } from "@/lib/api";
 import PanelBottomNav from "@/components/layout/PanelBottomNav";
 import { ChatPanelSidebar, useChatPanelNav } from "@/hooks/useChatPanelNav";
+import { getChatConversationId } from "@/lib/chatMobileNav";
+
 /**
  * Employee / client shell: desktop sidebar (like admin) + mobile bottom nav.
  */
@@ -12,6 +14,9 @@ export default function ChatPanelLayout() {
   const { user } = useAuth();
   const { chatComposerActive } = useChat();
   const [unreadTotal, setUnreadTotal] = useState(0);
+  const [searchParams] = useSearchParams();
+  const chatConvIdFromUrl = getChatConversationId(searchParams);
+
   const refreshUnread = useCallback(async () => {
     try {
       const res = await api.get("/conversations");
@@ -35,8 +40,9 @@ export default function ChatPanelLayout() {
 
   const role = (user?.role || "").toLowerCase();
   const isClient = role === "client";
-  /** Bottom nav is client-only; employee uses desktop sidebar (no mobile footer). */
-  const showMobileFooter = isClient && !chatComposerActive;
+  const inChatThread = Boolean(chatConvIdFromUrl);
+  /** Hide bottom nav only inside an open chat thread (not on list / folders / etc.). */
+  const showMobileFooter = !chatComposerActive && (isClient || !inChatThread);
 
   return (
     <div

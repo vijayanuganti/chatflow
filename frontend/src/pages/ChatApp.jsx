@@ -833,9 +833,9 @@ export default function ChatApp() {
     setQuickView({ conv, user: profileUser });
   }, []);
 
-  const isEmployee = user?.role === "employee";
   const inChatThread = !isClient && (Boolean(selected) || Boolean(chatConvIdFromUrl));
-  const showMobileFooter = inPanelLayout && isClient && !chatComposerActive;
+  const showMobileFooter =
+    inPanelLayout && !chatComposerActive && (isClient || !inChatThread);
   const clientThreadReadOnly = isClient && selected && selected.client_can_write === false;
 
   return (
@@ -911,7 +911,7 @@ export default function ChatApp() {
         </main>
       </div>
 
-      {!isClient && !isEmployee && !selected && (
+      {!isClient && !selected && (
         <button
           type="button"
           onClick={openNewConversation}

@@ -2361,7 +2361,83 @@ export default function AdminDashboard() {
         }}
       />
 
+      {/* Mobile bottom nav — hidden only while a full-screen chat is open */}
+      <div
+        className={`md:hidden fixed bottom-0 left-0 right-0 z-20 flex items-stretch justify-around border-t border-gray-200 bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_18px_rgba(0,0,0,0.06)] backdrop-blur dark:border-gray-800 dark:bg-gray-950/95 dark:shadow-[0_-4px_18px_rgba(0,0,0,0.5)] ${mobileInChat ? "hidden" : ""}`}
+        data-testid="admin-bottom-nav"
+      >
+        <BottomNavButton
+          icon={LayoutDashboard}
+          label={t("nav.adminHome")}
+          active={tab === "overview"}
+          onClick={() => goToTab("overview", { historyMode: "push" })}
+          testId="admin-nav-mobile-home"
+        />
+        <BottomNavButton
+          icon={MessageSquare}
+          label={t("nav.adminChats")}
+          active={tab === "mychats"}
+          badge={unreadTotal}
+          onClick={() => goToTab("mychats", { mobileChatStep: "list", historyMode: "push" })}
+          testId="admin-nav-mobile-chats"
+        />
+        <BottomNavButton
+          icon={Users}
+          label={t("nav.adminContacts")}
+          active={tab === "users"}
+          onClick={() => goToTab("users", { historyMode: "push" })}
+          testId="admin-nav-mobile-contacts"
+        />
+        <BottomNavButton
+          icon={Settings}
+          label={t("nav.adminSettings")}
+          active={
+            tab === "more" ||
+            ["permissions", "batches", "chats", "folders", "reports", "complaints", "storage", "inactive", "referrals"].includes(tab)
+          }
+          onClick={() => goToTab("more", { historyMode: "push" })}
+          testId="admin-nav-mobile-settings"
+        />
+      </div>
     </div>
+  );
+}
+
+function BottomNavButton({ icon: Icon, label, active, onClick, testId, badge = 0 }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className="flex h-14 min-h-[56px] flex-1 touch-manipulation flex-col items-center justify-center gap-0.5 select-none transition-transform active:scale-[0.97]"
+    >
+      <span
+        className={`relative flex items-center justify-center h-7 w-12 rounded-full transition-colors ${
+          active
+            ? "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-900 dark:text-emerald-300"
+            : "text-gray-500 dark:text-gray-400"
+        }`}
+      >
+        <Icon className="h-[18px] w-[18px]" strokeWidth={active ? 2.2 : 1.7} />
+        {badge > 0 ? (
+          <span
+            className="absolute -top-1 -right-0.5 h-4 min-w-[16px] px-1 rounded-full bg-red-500 text-white text-[9px] font-semibold flex items-center justify-center border-2 border-white dark:border-gray-950"
+            data-testid={`${testId}-badge`}
+          >
+            {badge > 99 ? "99+" : badge}
+          </span>
+        ) : null}
+      </span>
+      <span
+        className={`text-[10.5px] leading-none ${
+          active
+            ? "text-emerald-900 dark:text-emerald-300 font-semibold"
+            : "text-gray-500 dark:text-gray-400 font-medium"
+        }`}
+      >
+        {label}
+      </span>
+    </button>
   );
 }
 
