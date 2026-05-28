@@ -124,6 +124,7 @@ export default function ChatWindow({
   const [starredLoading, setStarredLoading] = useState(false);
   const [flashMessageId, setFlashMessageId] = useState(null);
   const messageMenuAnchorRef = useRef(null);
+  const selectionMoreRef = useRef(null);
   const [text, setText] = useState("");
   const [composerFocused, setComposerFocused] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -372,9 +373,20 @@ export default function ChatWindow({
     if (!key) return;
     setSelectedMessages((prev) => {
       const next = prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key];
+      if (next.length === 0) setActionMessageId(null);
       return next;
     });
   }, []);
+
+  const openSelectionMessageMenu = useCallback(() => {
+    if (selectedMessages.length !== 1) return;
+    const key = selectedMessages[0];
+    const msg = visibleMessages.find((m) => messageKey(m) === key);
+    if (!msg?.id) return;
+    setActionMessageId(key);
+    messageMenuAnchorRef.current = selectionMoreRef.current;
+    setMessageMenuOpen(true);
+  }, [selectedMessages, visibleMessages, messageKey]);
 
   const handleLongPressMessage = useCallback(
     (message) => {
@@ -382,25 +394,21 @@ export default function ChatWindow({
       if (!key || readOnly || !message.id) return;
       void hapticMessageLongPress();
 
-      if (selectedMessages.length > 0) {
-        setSelectedMessages((prev) => (prev.includes(key) ? prev : [...prev, key]));
-        return;
-      }
-
-      if (actionMessageId && actionMessageId !== key) {
-        setMessageMenuOpen(false);
-        setActionMessageId(null);
-        setSelectedMessages((prev) => {
-          const next = new Set([...prev, actionMessageId, key]);
-          return [...next];
-        });
-        return;
-      }
-
-      setActionMessageId(key);
       setMessageMenuOpen(false);
+      setReplyingTo(null);
+      setEditingMessage(null);
+
+      if (isSelectionMode) {
+        setSelectedMessages((prev) =>
+          (prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]),
+        );
+        return;
+      }
+
+      setActionMessageId(null);
+      setSelectedMessages([key]);
     },
-    [messageKey, readOnly, selectedMessages.length, actionMessageId],
+    [messageKey, readOnly, isSelectionMode],
   );
 
   const openMessageActionMenu = useCallback((anchorEl) => {
@@ -883,6 +891,18 @@ export default function ChatWindow({
               title={t("common.forward")}
             >
               <Forward className="h-5 w-5" />
+            </Button>
+            <Button
+              ref={selectionMoreRef}
+              size="icon"
+              variant="ghost"
+              className="rounded-full text-emerald-700 disabled:opacity-40"
+              onClick={openSelectionMessageMenu}
+              disabled={selectedMessages.length !== 1}
+              data-testid="message-selection-more"
+              aria-label="Message actions"
+            >
+              <MoreVertical className="h-5 w-5" />
             </Button>
           </div>
         ) : (

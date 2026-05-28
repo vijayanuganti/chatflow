@@ -20,8 +20,16 @@ export default function MessageContextMenu({
   const [pos, setPos] = useState({ top: 0, left: 0 });
 
   useLayoutEffect(() => {
-    if (!open || !anchorRef?.current) return;
-    const anchor = anchorRef.current.getBoundingClientRect();
+    if (!open) return;
+    const anchorEl = anchorRef?.current;
+    const anchor = anchorEl
+      ? anchorEl.getBoundingClientRect()
+      : {
+          top: window.innerHeight / 2 - 60,
+          bottom: window.innerHeight / 2,
+          left: window.innerWidth / 2 - 80,
+          right: window.innerWidth / 2 + 80,
+        };
     const menu = menuRef.current;
     const menuH = menu?.offsetHeight || 120;
     const menuW = menu?.offsetWidth || 160;

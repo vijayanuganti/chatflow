@@ -189,7 +189,23 @@ html.dark .bubble-received {
     overflow-wrap: break-word;
 }
 .message-bubble.text-message-bubble {
-    padding: 6px 12px 8px 9px;
+    padding: 6px 12px 4px 9px;
+    max-width: 75vw;
+}
+.message-meta .message-timestamp {
+    color: #667781;
+}
+html.dark .message-meta .message-timestamp {
+    color: rgba(233, 237, 239, 0.55);
+}
+html.dark .bubble-sent .message-meta .message-timestamp {
+    color: rgba(233, 255, 235, 0.6);
+}
+.bubble-sent .message-meta .message-timestamp {
+    color: #667781;
+}
+.message-meta-anchor {
+    line-height: 1;
 }
 .message-bubble.media-bubble,
 .message-bubble.image-bubble,
@@ -211,17 +227,6 @@ html.dark .bubble-received {
 .message-meta .message-timestamp {
     font-size: 11px;
     line-height: 1;
-    color: rgba(17, 27, 33, 0.45);
-}
-html.dark .message-timestamp-row .message-timestamp,
-html.dark .message-meta .message-timestamp {
-    color: rgba(233, 237, 239, 0.5);
-}
-html.dark .bubble-sent .message-meta .message-timestamp {
-    color: rgba(233, 255, 235, 0.55);
-}
-.bubble-sent .message-meta .message-timestamp {
-    color: rgba(17, 27, 33, 0.45);
 }
 .message-bubble .message-text {
     white-space: pre-wrap;

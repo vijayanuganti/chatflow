@@ -53,14 +53,19 @@ function MessageMeta({ time, mine, showReceipts, message, tickStatus }) {
   );
 }
 
-/** WhatsApp-style: short text shares a line with meta; long text reserves bottom-right space. */
+/**
+ * WhatsApp-style text + meta: padding-right reserves space; meta is pinned bottom-right.
+ * Short lines keep time beside the text; long text wraps above the meta corner.
+ */
 function TextWithInlineMeta({ children, meta, className = "" }) {
   return (
-    <div className={`relative min-w-[52px] max-w-full ${className}`}>
-      <div className="message-text whitespace-pre-wrap break-words text-[15px] leading-[1.35] text-gray-900 dark:text-gray-100 pr-[4.75rem] pb-0.5">
+    <div className={`relative min-w-[48px] max-w-full clear-both ${className}`}>
+      <span className="message-text inline-block w-full whitespace-pre-wrap break-words text-[14.2px] leading-[19px] text-[#111b21] dark:text-gray-100 pr-[65px] pb-[2px]">
         {children}
+      </span>
+      <div className="message-meta-anchor absolute bottom-[2px] right-[7px] flex items-center gap-[2px] select-none pointer-events-none">
+        {meta}
       </div>
-      <div className="absolute bottom-[2px] right-0 flex items-end pointer-events-none">{meta}</div>
     </div>
   );
 }
@@ -352,7 +357,7 @@ function MessageBubble({
               </TextWithInlineMeta>
               {(message.is_edited || message.edited_at) && (
                 <p
-                  className="mt-0.5 text-[9px] italic text-gray-400/90 dark:text-gray-500/90 pr-[4.75rem]"
+                  className="mt-0.5 text-[9px] italic text-gray-400/90 dark:text-gray-500/90 pr-[65px]"
                   data-testid={`message-edited-${message.id}`}
                 >
                   {t("message.edited")}
