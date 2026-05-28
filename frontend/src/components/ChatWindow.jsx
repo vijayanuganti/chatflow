@@ -42,6 +42,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useChat } from "@/context/ChatContext";
 import Avatar from "./Avatar";
 import MessageBubble from "./MessageBubble";
+import { monitoringBubbleAlignRight } from "@/lib/adminMonitoring";
 import {
   adminChatTabBackTo,
   buildPendingChatState,
@@ -308,6 +309,11 @@ export default function ChatWindow({
     setActionMessageId(null);
   }, []);
 
+  const exitSelectionMode = useCallback(() => {
+    setSelectedMessages([]);
+    setActionMessageId(null);
+  }, []);
+
   /* Keep typing=true refreshed while the composer is focused (mobile WS / idle gaps). */
   useEffect(() => {
     if (readOnly || !conversation?.id || !sendTyping || !text.trim() || !composerFocused) {
@@ -431,6 +437,7 @@ export default function ChatWindow({
     setEditingMessage(actionMessage);
     setText(actionMessage.content || "");
     setReplyingTo(null);
+    exitSelectionMode();
     dismissActionMenu();
     requestAnimationFrame(() => {
       try {
@@ -439,12 +446,13 @@ export default function ChatWindow({
         composerRef.current?.focus();
       }
     });
-  }, [actionMessage, dismissActionMenu]);
+  }, [actionMessage, dismissActionMenu, exitSelectionMode]);
 
   const handleCancelEdit = useCallback(() => {
     setEditingMessage(null);
     setText("");
-  }, []);
+    exitSelectionMode();
+  }, [exitSelectionMode]);
 
   const handleToggleStar = useCallback(async () => {
     const msg = actionMessage;
@@ -566,6 +574,7 @@ export default function ChatWindow({
           });
           setEditingMessage(null);
           setText("");
+          exitSelectionMode();
           flushTypingStop();
         } catch (err) {
           toast.error(formatApiError(err));
@@ -815,7 +824,7 @@ export default function ChatWindow({
 
   // For read-receipts in groups
   const totalRecipients = isGroup ? (conversation.participants?.length || 1) - 1 : 1;
-  const showSenderNames = isGroup || readOnly;
+  const showSenderNames = isGroup;
 
   const openContactProfile = () => {
     if (!conversation || isGroup || !otherUser?.id) return;
@@ -860,10 +869,7 @@ export default function ChatWindow({
               size="icon"
               variant="ghost"
               className="rounded-full shrink-0"
-              onClick={() => {
-                setSelectedMessages([]);
-                setActionMessageId(null);
-              }}
+              onClick={exitSelectionMode}
               data-testid="message-selection-clear"
               title={t("common.clear")}
             >
@@ -1095,15 +1101,9 @@ export default function ChatWindow({
             );
           }
           const m = item.message;
-          let mine;
-          if (readOnly && !isGroup) {
-            const p = conversation.participants || [];
-            mine = m.sender_id === p[p.length - 1];
-          } else if (readOnly && isGroup) {
-            mine = m.sender_id === conversation.created_by;
-          } else {
-            mine = m.sender_id === user?.id;
-          }
+          const mine = readOnly
+            ? monitoringBubbleAlignRight(m, conversation)
+            : m.sender_id === user?.id;
           const mKey = messageKey(m);
           const isActionTarget = actionMessageId === mKey;
           return (
