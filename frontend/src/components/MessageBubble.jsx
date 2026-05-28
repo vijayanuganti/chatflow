@@ -328,14 +328,14 @@ function MessageBubble({
           )}
 
           {isAudio && (
-            <div className="relative min-w-[160px] pb-4" data-testid={`audio-player-${message.id}`}>
+            <div className="relative min-w-[160px]" data-testid={`audio-player-${message.id}`}>
               <VoiceNotePlayer
                 src={mediaSrc}
                 durationLabel={parseVoiceNoteDurationLabel(message.content)}
                 mine={mine}
                 selectionMode={selectionMode}
+                footerRight={messageMeta}
               />
-              <div className="absolute bottom-0 right-0 pointer-events-none">{messageMeta}</div>
               <UploadProgressRing progress={uploadPct} visible={uploading} />
             </div>
           )}

@@ -30,9 +30,15 @@ function formatDuration(seconds) {
 }
 
 /**
- * WhatsApp-style voice row: [play] [waveform bars] [duration]
+ * WhatsApp-style voice row: [play] [waveform]; footer has duration (left) + meta slot (right).
  */
-export default function VoiceNotePlayer({ src, durationLabel, mine, selectionMode = false }) {
+export default function VoiceNotePlayer({
+  src,
+  durationLabel,
+  mine,
+  selectionMode = false,
+  footerRight = null,
+}) {
   const audioRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -96,35 +102,47 @@ export default function VoiceNotePlayer({ src, durationLabel, mine, selectionMod
 
   return (
     <div
-      className="flex items-center gap-2 min-w-[200px] max-w-[min(100%,260px)] py-0.5"
+      className="flex min-w-[200px] max-w-[min(100%,260px)] flex-col"
       data-testid="voice-note-player"
     >
       <audio ref={audioRef} src={src} preload="metadata" playsInline className="hidden" data-voice-note />
-      <button
-        type="button"
-        onClick={toggle}
-        className={`h-8 w-8 shrink-0 flex items-center justify-center touch-manipulation ${iconColor}`}
-        title={playing ? "Pause" : "Play"}
-        data-testid="voice-note-play-btn"
-        aria-label={playing ? "Pause" : "Play"}
-      >
-        {playing ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current pl-0.5" />}
-      </button>
-      <div className="flex flex-1 items-center gap-[2px] h-6 min-w-0" aria-hidden>
-        {bars.map((h, i) => {
-          const filled = (i + 1) / bars.length <= progress;
-          return (
-            <span
-              key={i}
-              className={`w-[2px] rounded-full shrink-0 transition-colors duration-100 ${filled ? filledColor : emptyColor}`}
-              style={{ height: `${Math.max(4, Math.round(h * 22))}px` }}
-            />
-          );
-        })}
+      <div className="flex items-center gap-2 py-0.5">
+        <button
+          type="button"
+          onClick={toggle}
+          className={`h-8 w-8 shrink-0 flex items-center justify-center touch-manipulation ${iconColor}`}
+          title={playing ? "Pause" : "Play"}
+          data-testid="voice-note-play-btn"
+          aria-label={playing ? "Pause" : "Play"}
+        >
+          {playing ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current pl-0.5" />}
+        </button>
+        <div className="flex h-6 min-w-0 flex-1 items-center gap-[2px]" aria-hidden>
+          {bars.map((h, i) => {
+            const filled = (i + 1) / bars.length <= progress;
+            return (
+              <span
+                key={i}
+                className={`w-[2px] shrink-0 rounded-full transition-colors duration-100 ${filled ? filledColor : emptyColor}`}
+                style={{ height: `${Math.max(4, Math.round(h * 22))}px` }}
+              />
+            );
+          })}
+        </div>
       </div>
-      <span className={`text-[11px] font-medium tabular-nums shrink-0 ${mine ? "text-[#667781]" : "text-[#667781]"}`}>
-        {displayTime}
-      </span>
+      <div
+        className="message-audio-footer mt-1 flex w-full min-h-[15px] items-center justify-between gap-2"
+        data-testid="voice-note-footer"
+      >
+        <span className="message-audio-duration message-timestamp tabular-nums whitespace-nowrap">
+          {displayTime}
+        </span>
+        {footerRight ? (
+          <span className="message-meta message-meta-tail inline-flex shrink-0 items-center gap-[2px] whitespace-nowrap text-[11px] text-[#667781]">
+            {footerRight}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }
