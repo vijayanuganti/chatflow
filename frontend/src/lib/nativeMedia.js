@@ -1,12 +1,10 @@
+import { Capacitor } from "@capacitor/core";
+
 /**
- * True when running inside the Capacitor native WebView (iOS / Android).
+ * True when running inside the Capacitor native app (iOS / Android).
  */
 export function isCapacitorNativeApp() {
-  if (typeof window === "undefined") return false;
-  if (window.androidBridge) return true;
-  const wk = window.webkit?.messageHandlers;
-  if (wk?.bridge) return true;
-  return false;
+  return Capacitor.isNativePlatform();
 }
 
 async function photoToFile(photo, opts = {}) {

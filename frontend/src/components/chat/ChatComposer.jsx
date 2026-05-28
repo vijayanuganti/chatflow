@@ -55,8 +55,6 @@ export default function ChatComposer({
   const videoInputRef = useRef(null);
   const docInputRef = useRef(null);
   const audioInputRef = useRef(null);
-  const cameraInputRef = useRef(null);
-
   const hasText = text.trim().length > 0;
 
   const setEmoji = useCallback((open) => {
@@ -91,6 +89,22 @@ export default function ChatComposer({
     if (e.target) e.target.value = "";
   };
 
+  const openWebCameraCapture = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.setAttribute("capture", "environment");
+    input.className = "hidden";
+    input.style.display = "none";
+    input.onchange = (e) => {
+      const file = e.target?.files?.[0];
+      if (file) onSendFile?.(file);
+      input.remove();
+    };
+    document.body.appendChild(input);
+    input.click();
+  }, [onSendFile]);
+
   const handleCamera = useCallback(async () => {
     if (disabled) return;
     if (isCapacitorNativeApp()) {
@@ -105,8 +119,8 @@ export default function ChatComposer({
       }
       return;
     }
-    cameraInputRef.current?.click();
-  }, [disabled, onSendFile]);
+    openWebCameraCapture();
+  }, [disabled, onSendFile, openWebCameraCapture, t]);
 
   const insertEmoji = useCallback((emoji) => {
     const el = composerRef?.current;
@@ -144,16 +158,6 @@ export default function ChatComposer({
         accept="application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.csv,.rtf"
         onChange={handleFileInput}
       />
-      <input
-        ref={cameraInputRef}
-        type="file"
-        className="hidden"
-        accept="image/*,video/*"
-        capture="environment"
-        onChange={handleFileInput}
-        data-testid="chat-camera-input"
-      />
-
       <div className="flex items-end gap-2 px-2 sm:px-3 pb-2">
         {!voiceRecording && (
         <div className="flex flex-1 min-w-0 items-end gap-0 rounded-[26px] border border-gray-200/90 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900 px-1 py-1">
