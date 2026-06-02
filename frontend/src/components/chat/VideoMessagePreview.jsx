@@ -33,7 +33,9 @@ export default function VideoMessagePreview({
         poster={poster || undefined}
         playsInline
         className="rounded-xl max-h-80 w-full bg-black object-cover"
-        controls={playing}
+        controls={false}
+        controlsList="nodownload nofullscreen noplaybackrate noremoteplayback"
+        disablePictureInPicture
         onEnded={() => setPlaying(false)}
         onPause={() => setPlaying(false)}
         data-testid="message-video"

@@ -46,7 +46,10 @@ export function useVideoPoster(fileUrl, initialPoster = "") {
           const res = await fetch(thumbUrl, { headers: getMediaAuthHeaders() });
           if (res.ok) {
             const blob = await res.blob();
-            if (blob.size > 0) {
+            const isImage =
+              blob.type.startsWith("image/") ||
+              (!blob.type && blob.size > 0);
+            if (blob.size > 0 && isImage) {
               const objectUrl = URL.createObjectURL(blob);
               blobPosterCache.set(thumbUrl, objectUrl);
               apply(objectUrl);

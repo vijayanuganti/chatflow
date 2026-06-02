@@ -1,4 +1,5 @@
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import PrivacyPolicyScreen from "@/components/PrivacyPolicyScreen";
 import { MessageCircle, ChevronRight } from "lucide-react";
 import {
   Sheet,
@@ -14,7 +15,6 @@ import {
   DEVELOPER_ROLE,
   DEVELOPER_INITIALS,
   SUPPORT_EMAIL,
-  PRIVACY_POLICY_URL,
   COMPANY_PRIMARY,
   COMPANY_PRIMARY_LIGHT,
 } from "@/lib/appInfo";
@@ -87,8 +87,13 @@ const SWIPE_CLOSE_PX = 72;
 export default function AboutSheet({ open, onOpenChange }) {
   const scrollRef = useRef(null);
   const touchStartY = useRef(null);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
 
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
+
+  useEffect(() => {
+    if (!open) setPrivacyOpen(false);
+  }, [open]);
 
   const onDragTouchStart = (e) => {
     touchStartY.current = e.touches[0]?.clientY ?? null;
@@ -115,18 +120,6 @@ export default function AboutSheet({ open, onOpenChange }) {
     const el = scrollRef.current;
     if (!el || el.scrollTop > 4) return;
     touchStartY.current = e.touches[0]?.clientY ?? null;
-  };
-
-  const openPrivacy = () => {
-    if (PRIVACY_POLICY_URL) {
-      window.open(PRIVACY_POLICY_URL, "_blank", "noopener,noreferrer");
-      return;
-    }
-    window.open(
-      "https://www.chatflow.app/privacy",
-      "_blank",
-      "noopener,noreferrer",
-    );
   };
 
   const openSupport = () => {
@@ -237,7 +230,7 @@ export default function AboutSheet({ open, onOpenChange }) {
             <LinkRow
               emoji="📄"
               label="Privacy Policy"
-              onClick={openPrivacy}
+              onClick={() => setPrivacyOpen(true)}
               testId="about-privacy"
             />
             <Divider />
@@ -286,6 +279,9 @@ export default function AboutSheet({ open, onOpenChange }) {
           </div>
         </div>
       </SheetContent>
+      {privacyOpen ? (
+        <PrivacyPolicyScreen onBack={() => setPrivacyOpen(false)} />
+      ) : null}
     </Sheet>
   );
 }

@@ -186,7 +186,11 @@ export default function ChatVideoViewer({
               src={src}
               playsInline
               preload="auto"
-              className="max-h-full max-w-full object-contain"
+              controls={false}
+              controlsList="nodownload nofullscreen noplaybackrate noremoteplayback"
+              disablePictureInPicture
+              disableRemotePlayback
+              className="max-h-full max-w-full object-contain chat-video-viewer-media"
               style={{
                 opacity: showCover ? 0 : 1,
                 transition: "opacity 280ms ease",

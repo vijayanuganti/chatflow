@@ -226,6 +226,34 @@ html.dark .bubble-sent .message-meta-tail {
 .message-bubble.document-bubble {
     padding: 0;
 }
+
+/* Inline / fullscreen chat video: hide native OS play & control chrome (custom overlay only). */
+.chat-inline-video-block video,
+.video-bubble video,
+.chat-video-viewer-media {
+    appearance: none;
+    -webkit-appearance: none;
+}
+.chat-inline-video-block video::-webkit-media-controls,
+.chat-inline-video-block video::-webkit-media-controls-enclosure,
+.chat-inline-video-block video::-webkit-media-controls-panel,
+.chat-inline-video-block video::-webkit-media-controls-start-playback-button,
+.chat-inline-video-block video::-webkit-media-controls-overlay-play-button,
+.video-bubble video::-webkit-media-controls,
+.video-bubble video::-webkit-media-controls-enclosure,
+.video-bubble video::-webkit-media-controls-panel,
+.video-bubble video::-webkit-media-controls-start-playback-button,
+.video-bubble video::-webkit-media-controls-overlay-play-button,
+.chat-video-viewer-media::-webkit-media-controls,
+.chat-video-viewer-media::-webkit-media-controls-enclosure,
+.chat-video-viewer-media::-webkit-media-controls-panel,
+.chat-video-viewer-media::-webkit-media-controls-start-playback-button,
+.chat-video-viewer-media::-webkit-media-controls-overlay-play-button {
+    display: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    -webkit-appearance: none !important;
+}
 .message-bubble.audio-bubble {
     padding: 8px 10px 8px 9px;
 }
