@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getMediaAuthHeaders, mediaFetchUrl } from "@/lib/api";
+import { coerceMediaRef, getMediaAuthHeaders, mediaFetchUrl } from "@/lib/api";
 import { createVideoPosterFromUrl } from "@/lib/chatMedia";
 import { getVideoThumbnailUrl } from "@/lib/videoThumbnailUrl";
 
@@ -15,13 +15,14 @@ export function useVideoPoster(fileUrl, initialPoster = "") {
   const genRef = useRef(0);
 
   useEffect(() => {
-    const local = (initialPoster || "").trim();
+    const local = coerceMediaRef(initialPoster);
+    const mediaUrl = coerceMediaRef(fileUrl);
     if (local.startsWith("data:") || local.startsWith("blob:")) {
       setPosterSrc(local);
       return undefined;
     }
 
-    if (!fileUrl || fileUrl.startsWith("blob:") || fileUrl.startsWith("data:")) {
+    if (!mediaUrl || mediaUrl.startsWith("blob:") || mediaUrl.startsWith("data:")) {
       setPosterSrc(local || "");
       return undefined;
     }
@@ -57,7 +58,7 @@ export function useVideoPoster(fileUrl, initialPoster = "") {
         }
       }
 
-      const dataUrl = await createVideoPosterFromUrl(fileUrl);
+      const dataUrl = await createVideoPosterFromUrl(mediaUrl);
       if (!cancelled && gen === genRef.current) {
         apply(dataUrl || local || "");
       }

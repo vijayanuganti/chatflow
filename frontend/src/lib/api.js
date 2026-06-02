@@ -404,10 +404,29 @@ export function getWsUrl(explicitToken) {
   return base;
 }
 
+/**
+ * Normalize message.file_url / path props to a string (guards against non-string API values).
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function coerceMediaRef(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "object") {
+    const o = /** @type {Record<string, unknown>} */ (value);
+    if (typeof o.url === "string") return o.url.trim();
+    if (typeof o.href === "string") return o.href.trim();
+    if (typeof o.file_url === "string") return o.file_url.trim();
+    if (typeof o.path === "string") return o.path.trim();
+  }
+  return "";
+}
+
 /** True when URL points at S3 (or similar) and must be fetched via /api/media/stream. */
 export function isCrossOriginStoredMediaUrl(url) {
-  if (!url || typeof url !== "string") return false;
-  const u = url.trim();
+  const u = coerceMediaRef(url);
+  if (!u) return false;
   if (!u.startsWith("http://") && !u.startsWith("https://")) return false;
   if (u.includes(".amazonaws.com/")) return true;
   const backend = normalizeBackendOrigin(resolveBackendUrl());
@@ -421,13 +440,14 @@ export function isCrossOriginStoredMediaUrl(url) {
  * @param {{ attachToken?: boolean }} [opts] - append JWT query for video/img (no Authorization header)
  */
 export function mediaFetchUrl(pathOrUrl, opts = {}) {
-  if (!pathOrUrl) return "";
-  if (pathOrUrl.startsWith("blob:") || pathOrUrl.startsWith("data:")) return pathOrUrl;
-  if (pathOrUrl.startsWith("/api/files/") || pathOrUrl.startsWith("/api/media/")) {
-    let href = fileUrl(pathOrUrl);
+  const ref = coerceMediaRef(pathOrUrl);
+  if (!ref) return "";
+  if (ref.startsWith("blob:") || ref.startsWith("data:")) return ref;
+  if (ref.startsWith("/api/files/") || ref.startsWith("/api/media/")) {
+    let href = fileUrl(ref);
     if (
       opts.attachToken &&
-      (pathOrUrl.startsWith("/api/media/thumbnail") || pathOrUrl.includes("/api/media/thumbnail"))
+      (ref.startsWith("/api/media/thumbnail") || ref.includes("/api/media/thumbnail"))
     ) {
       const q = new URLSearchParams();
       const token = getStoredAccessToken();
@@ -439,9 +459,9 @@ export function mediaFetchUrl(pathOrUrl, opts = {}) {
     }
     return href;
   }
-  if (isCrossOriginStoredMediaUrl(pathOrUrl)) {
+  if (isCrossOriginStoredMediaUrl(ref)) {
     const apiBase = getApiBaseUrl();
-    const q = new URLSearchParams({ url: pathOrUrl });
+    const q = new URLSearchParams({ url: ref });
     if (opts.attachToken) {
       const token = getStoredAccessToken();
       if (token) q.set("token", token);
@@ -450,10 +470,10 @@ export function mediaFetchUrl(pathOrUrl, opts = {}) {
     }
     return `${apiBase}/media/stream?${q.toString()}`;
   }
-  if (pathOrUrl.startsWith("http://") || pathOrUrl.startsWith("https://")) {
-    return pathOrUrl;
+  if (ref.startsWith("http://") || ref.startsWith("https://")) {
+    return ref;
   }
-  return fileUrl(pathOrUrl);
+  return fileUrl(ref);
 }
 
 /** Headers required for /api/media/stream (JWT + browser binding, same as axios). */
@@ -467,9 +487,11 @@ export function getMediaAuthHeaders() {
 }
 
 export function fileUrl(path) {
-  if (!path) return "";
-  if (path.startsWith("blob:") || path.startsWith("data:")) return path;
-  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  const ref = coerceMediaRef(path);
+  if (!ref) return "";
+  if (ref.startsWith("blob:") || ref.startsWith("data:")) return ref;
+  if (ref.startsWith("http://") || ref.startsWith("https://")) return ref;
   const backend = resolveBackendUrl();
-  return backend ? `${backend}${path}` : path;
+  const normalized = ref.startsWith("/") ? ref : `/${ref}`;
+  return backend ? `${backend}${normalized}` : normalized;
 }

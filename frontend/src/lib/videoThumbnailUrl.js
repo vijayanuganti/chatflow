@@ -1,5 +1,5 @@
 import { Capacitor } from "@capacitor/core";
-import { fileUrl, getOrCreateBrowserId, getStoredAccessToken } from "@/lib/api";
+import { coerceMediaRef, fileUrl, getOrCreateBrowserId, getStoredAccessToken } from "@/lib/api";
 import { sanitizeProductionMediaUrl } from "@/lib/mediaPlaybackUrl";
 
 /**
@@ -8,8 +8,8 @@ import { sanitizeProductionMediaUrl } from "@/lib/mediaPlaybackUrl";
  * @returns {string|null}
  */
 export function extractMediaFileId(fileUrl) {
-  if (!fileUrl || typeof fileUrl !== "string") return null;
-  const u = fileUrl.trim();
+  const u = coerceMediaRef(fileUrl);
+  if (!u) return null;
   if (u.startsWith("blob:") || u.startsWith("data:")) return null;
 
   const filesMatch = u.match(/\/api\/files\/([^?#]+)/i);
@@ -60,7 +60,9 @@ export function getVideoThumbnailUrl(pathOrUrl, opts = {}) {
  */
 export function resolveVideoPosterUrl(message) {
   if (!message) return "";
-  if (message.__videoPoster) return message.__videoPoster;
-  if (message.file_url) return getVideoThumbnailUrl(message.file_url, { attachToken: true });
+  const local = coerceMediaRef(message.__videoPoster);
+  if (local) return local;
+  const fileRef = coerceMediaRef(message.file_url);
+  if (fileRef) return getVideoThumbnailUrl(fileRef, { attachToken: true });
   return "";
 }

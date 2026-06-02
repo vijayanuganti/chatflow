@@ -4,6 +4,7 @@ import {
   downloadChatMedia,
   isChatMediaCached,
 } from "@/lib/chatMediaCache";
+import { coerceMediaRef } from "@/lib/api";
 import { openDocumentInNativeApp } from "@/lib/mediaHandler";
 import { getVideoThumbnailUrl } from "@/lib/videoThumbnailUrl";
 
@@ -20,6 +21,7 @@ export function useChatMediaDownload({
   posterUrl,
   onOpenInApp,
 }) {
+  const mediaUrl = coerceMediaRef(url);
   const [state, setState] = useState("idle");
   const [progress, setProgress] = useState(0);
   const mountedRef = useRef(true);
@@ -32,12 +34,12 @@ export function useChatMediaDownload({
   }, []);
 
   useEffect(() => {
-    if (!url) {
+    if (!mediaUrl) {
       setState("idle");
       return undefined;
     }
     let cancelled = false;
-    isChatMediaCached(url, fileName).then((cached) => {
+    isChatMediaCached(mediaUrl, fileName).then((cached) => {
       if (!cancelled && mountedRef.current) {
         setState(cached ? "downloaded" : "idle");
         if (cached) setProgress(100);
@@ -46,15 +48,15 @@ export function useChatMediaDownload({
     return () => {
       cancelled = true;
     };
-  }, [url, fileName]);
+  }, [mediaUrl, fileName]);
 
   const startDownload = useCallback(async () => {
-    if (!url || state === "downloading") return;
+    if (!mediaUrl || state === "downloading") return;
     setState("downloading");
     setProgress(0);
     try {
       await downloadChatMedia({
-        url,
+        url: mediaUrl,
         fileName,
         onProgress: (pct) => {
           if (mountedRef.current) setProgress(pct);
@@ -78,25 +80,25 @@ export function useChatMediaDownload({
       }
       throw err;
     }
-  }, [url, fileName, state]);
+  }, [mediaUrl, fileName, state]);
 
   const cancelDownload = useCallback(() => {
-    cancelChatMediaDownload(url, fileName);
+    cancelChatMediaDownload(mediaUrl, fileName);
     setState("idle");
     setProgress(0);
-  }, [url, fileName]);
+  }, [mediaUrl, fileName]);
 
   const openInApp = useCallback(() => {
-    if (!url || !onOpenInApp || mediaKind !== "video") return false;
+    if (!mediaUrl || !onOpenInApp || mediaKind !== "video") return false;
     onOpenInApp({
       kind: "video",
-      url,
+      url: mediaUrl,
       fileName,
       mimeType,
-      posterUrl: posterUrl || getVideoThumbnailUrl(url, { attachToken: true }) || undefined,
+      posterUrl: posterUrl || getVideoThumbnailUrl(mediaUrl, { attachToken: true }) || undefined,
     });
     return true;
-  }, [url, fileName, mimeType, mediaKind, posterUrl, onOpenInApp]);
+  }, [mediaUrl, fileName, mimeType, mediaKind, posterUrl, onOpenInApp]);
 
   const onBubbleTap = useCallback(
     async (onError) => {
@@ -108,7 +110,7 @@ export function useChatMediaDownload({
       if (mediaKind === "document") {
         try {
           await openDocumentInNativeApp({
-            url,
+            url: mediaUrl,
             fileName,
             mimeType,
             onError: (msg) => onError?.(msg),
@@ -137,7 +139,7 @@ export function useChatMediaDownload({
         onError?.(err?.message || "Download failed. Please check your connection.");
       }
     },
-    [state, cancelDownload, openInApp, startDownload, mediaKind, url, fileName, mimeType],
+    [state, cancelDownload, openInApp, startDownload, mediaKind, mediaUrl, fileName, mimeType],
   );
 
   return {

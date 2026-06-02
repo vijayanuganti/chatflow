@@ -1,5 +1,5 @@
 import { Capacitor } from "@capacitor/core";
-import { fileUrl, mediaFetchUrl } from "@/lib/api";
+import { coerceMediaRef, fileUrl, mediaFetchUrl } from "@/lib/api";
 
 const OCI_HOST_SUFFIX = "sslip.io";
 
@@ -31,9 +31,10 @@ export function sanitizeProductionMediaUrl(url) {
  * Authenticated URL for in-app video/PDF/image streaming (Capacitor + web).
  */
 export function getMediaPlaybackUrl(pathOrUrl, opts = {}) {
-  if (!pathOrUrl) return "";
+  const ref = coerceMediaRef(pathOrUrl);
+  if (!ref) return "";
   const attachToken = opts.attachToken ?? Capacitor.isNativePlatform();
-  const resolved = mediaFetchUrl(pathOrUrl, { attachToken });
+  const resolved = mediaFetchUrl(ref, { attachToken });
   return sanitizeProductionMediaUrl(fileUrl(resolved) || resolved);
 }
 

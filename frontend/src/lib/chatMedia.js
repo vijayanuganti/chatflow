@@ -1,4 +1,4 @@
-import { getMediaAuthHeaders, mediaFetchUrl } from "@/lib/api";
+import { coerceMediaRef, getMediaAuthHeaders, mediaFetchUrl } from "@/lib/api";
 
 /** Infer API message_type from a File. */
 export function inferMessageTypeFromFile(file) {
@@ -83,11 +83,12 @@ function captureFrameFromVideoElement(video, revokeUrl) {
 
 /** Generate a poster frame data URL from a remote video URL (authenticated stream). */
 export async function createVideoPosterFromUrl(fileUrl) {
-  if (!fileUrl || fileUrl.startsWith("blob:") || fileUrl.startsWith("data:")) {
+  const ref = coerceMediaRef(fileUrl);
+  if (!ref || ref.startsWith("blob:") || ref.startsWith("data:")) {
     return null;
   }
   try {
-    const fetchUrl = mediaFetchUrl(fileUrl, { attachToken: true });
+    const fetchUrl = mediaFetchUrl(ref, { attachToken: true });
     const res = await fetch(fetchUrl, { headers: getMediaAuthHeaders() });
     if (!res.ok) return null;
     const blob = await res.blob();

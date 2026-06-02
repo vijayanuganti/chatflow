@@ -1,5 +1,5 @@
 import { Capacitor } from "@capacitor/core";
-import { fileUrl } from "@/lib/api";
+import { coerceMediaRef, fileUrl } from "@/lib/api";
 import {
   downloadChatMedia,
   getChatMediaCacheRelativePath,
@@ -256,7 +256,8 @@ export async function openMediaInNativeApp({
   onError,
   showChooser = false,
 }) {
-  const resolvedUrl = fileUrl(url) || url;
+  const mediaUrl = coerceMediaRef(url);
+  const resolvedUrl = fileUrl(mediaUrl) || mediaUrl;
   if (!resolvedUrl) {
     onError?.("Could not open file. Please try again.");
     return;
@@ -270,7 +271,7 @@ export async function openMediaInNativeApp({
   const contentType = guessMimeType(name, mimeType, mediaKind);
 
   if (!Capacitor.isNativePlatform()) {
-    const webCached = await getChatMediaLocalUri(url, name);
+    const webCached = await getChatMediaLocalUri(mediaUrl, name);
     if (webCached) {
       openOnWeb(webCached, name);
       return;
@@ -288,7 +289,7 @@ export async function openMediaInNativeApp({
   };
 
   try {
-    const cachedUri = await getChatMediaLocalUri(url, name);
+    const cachedUri = await getChatMediaLocalUri(mediaUrl, name);
     if (cachedUri) {
       emitProgress({ open: true, fileName: name, percent: 100, phase: "opening" });
       await openNativeUri(cachedUri, contentType, { showChooser });
@@ -309,7 +310,7 @@ export async function openMediaInNativeApp({
     showedProgress = true;
 
     const uri = await downloadChatMedia({
-      url,
+      url: mediaUrl,
       fileName: name,
       signal,
       onProgress: (pct) => {
@@ -400,11 +401,16 @@ export async function downloadMediaToDevice({
   onError,
   onSuccess,
 }) {
+  const mediaUrl = coerceMediaRef(url);
+  if (!mediaUrl) {
+    onError?.("Missing file URL.");
+    return;
+  }
   const name = resolveMediaFileName(fileName, mimeType, mediaKind);
   try {
-    await downloadChatMedia({ url, fileName: name, onProgress });
+    await downloadChatMedia({ url: mediaUrl, fileName: name, onProgress });
     if (Capacitor.isNativePlatform()) {
-      const relativePath = getChatMediaCacheRelativePath(url, name);
+      const relativePath = getChatMediaCacheRelativePath(mediaUrl, name);
       const category = classifyMediaForFolder(
         name,
         mimeType,
@@ -414,7 +420,7 @@ export async function downloadMediaToDevice({
       onSuccess?.(`Saved to ${label}`);
       return;
     }
-    const local = await getChatMediaLocalUri(url, name);
+    const local = await getChatMediaLocalUri(mediaUrl, name);
     if (!local) throw new Error("Download failed");
     triggerBrowserFileDownload(local, name);
     onSuccess?.("Download started");
