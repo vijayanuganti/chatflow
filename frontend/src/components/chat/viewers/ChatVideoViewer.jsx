@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader2, Pause, Play } from "lucide-react";
+import { Loader2, Play } from "lucide-react";
 import { useVideoPoster } from "@/hooks/useVideoPoster";
 import { getMediaPlaybackUrl } from "@/lib/mediaPlaybackUrl";
 import { registerOverlayBack } from "@/lib/overlayBackHandler";
@@ -8,7 +8,7 @@ import MediaViewerHeader from "@/components/chat/viewers/MediaViewerHeader";
 import { MV, formatMediaTime } from "@/components/chat/viewers/mediaViewerTheme";
 
 /**
- * Full-screen in-app video with cover poster and custom controls (no native browser chrome).
+ * Full-screen in-app video: auto-play on open, tap center to play/pause, seek bar only at bottom.
  */
 export default function ChatVideoViewer({
   open,
@@ -20,6 +20,7 @@ export default function ChatVideoViewer({
 }) {
   const videoRef = useRef(null);
   const seekRef = useRef(null);
+  const autoPlayStartedRef = useRef(false);
   const [src, setSrc] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -35,9 +36,7 @@ export default function ChatVideoViewer({
 
   const requestClose = useCallback(() => {
     const v = videoRef.current;
-    if (v) {
-      v.pause();
-    }
+    if (v) v.pause();
     onClose?.();
   }, [onClose]);
 
@@ -51,7 +50,7 @@ export default function ChatVideoViewer({
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
-    if (!v) return;
+    if (!v || error) return;
     if (v.paused) {
       void v.play().catch(() => {
         setError("Could not play this video. Check your connection and try again.");
@@ -60,20 +59,17 @@ export default function ChatVideoViewer({
       v.pause();
     }
     bumpControls();
-  }, [bumpControls]);
+  }, [bumpControls, error]);
 
-  const seekToClientX = useCallback(
-    (clientX) => {
-      const bar = seekRef.current;
-      const v = videoRef.current;
-      if (!bar || !v || !Number.isFinite(v.duration)) return;
-      const rect = bar.getBoundingClientRect();
-      const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-      v.currentTime = ratio * v.duration;
-      setCurrentTime(v.currentTime);
-    },
-    [],
-  );
+  const seekToClientX = useCallback((clientX) => {
+    const bar = seekRef.current;
+    const v = videoRef.current;
+    if (!bar || !v || !Number.isFinite(v.duration)) return;
+    const rect = bar.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    v.currentTime = ratio * v.duration;
+    setCurrentTime(v.currentTime);
+  }, []);
 
   useEffect(() => {
     if (!open || !url) {
@@ -84,12 +80,14 @@ export default function ChatVideoViewer({
       setShowCover(true);
       setCurrentTime(0);
       setDuration(0);
+      autoPlayStartedRef.current = false;
       return undefined;
     }
     setLoading(true);
     setError("");
     setPlaying(false);
     setShowCover(true);
+    autoPlayStartedRef.current = false;
     setSrc(getMediaPlaybackUrl(url));
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -105,6 +103,30 @@ export default function ChatVideoViewer({
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     };
   }, [open, url, requestClose]);
+
+  useEffect(() => {
+    if (!open || !src || error) return undefined;
+    const v = videoRef.current;
+    if (!v) return undefined;
+
+    const startPlayback = () => {
+      if (autoPlayStartedRef.current) return;
+      autoPlayStartedRef.current = true;
+      setShowCover(false);
+      void v.play().catch(() => {
+        autoPlayStartedRef.current = false;
+        setError("Could not play this video. Check your connection and try again.");
+      });
+    };
+
+    if (v.readyState >= 2) {
+      startPlayback();
+    } else {
+      v.addEventListener("canplay", startPlayback, { once: true });
+      return () => v.removeEventListener("canplay", startPlayback);
+    }
+    return undefined;
+  }, [open, src, error]);
 
   useEffect(() => {
     if (!playing) setControlsVisible(true);
@@ -133,27 +155,38 @@ export default function ChatVideoViewer({
       />
 
       <div
-        className="relative flex min-h-0 flex-1 flex-col items-center justify-center"
-        onClick={bumpControls}
+        className="relative flex min-h-0 flex-1 items-center justify-center"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) bumpControls();
+        }}
       >
         {loading && !error ? (
-          <Loader2
-            className="absolute z-10 h-10 w-10 animate-spin text-white/70"
-            aria-hidden
-          />
+          <Loader2 className="absolute z-10 h-10 w-10 animate-spin text-white/70" aria-hidden />
         ) : null}
 
         {error ? (
           <p className="px-6 text-center text-sm text-red-300">{error}</p>
         ) : (
-          <>
+          <div
+            className="relative flex h-full w-full max-h-full max-w-full items-center justify-center"
+            onClick={togglePlay}
+            role="button"
+            tabIndex={0}
+            aria-label={playing ? "Pause video" : "Play video"}
+            onKeyDown={(e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                togglePlay();
+              }
+            }}
+          >
             <video
               ref={videoRef}
               key={src}
               src={src}
               playsInline
               preload="auto"
-              className="max-h-full max-w-full w-full object-contain"
+              className="max-h-full max-w-full object-contain"
               style={{
                 opacity: showCover ? 0 : 1,
                 transition: "opacity 280ms ease",
@@ -181,6 +214,7 @@ export default function ChatVideoViewer({
                 setPlaying(false);
                 setShowCover(true);
                 setControlsVisible(true);
+                autoPlayStartedRef.current = false;
               }}
               onError={() => {
                 setLoading(false);
@@ -192,65 +226,51 @@ export default function ChatVideoViewer({
               <img
                 src={coverSrc}
                 alt=""
-                className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+                className="pointer-events-none absolute inset-0 m-auto max-h-full max-w-full object-contain"
                 style={{ transition: "opacity 280ms ease" }}
                 draggable={false}
               />
             ) : null}
 
-            {!playing && !error ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  togglePlay();
-                }}
-                className="absolute z-20 flex h-[72px] w-[72px] items-center justify-center rounded-full bg-black/45 backdrop-blur-sm touch-manipulation"
-                aria-label="Play video"
-                data-testid="chat-video-viewer-play"
+            {!playing && !loading && !error ? (
+              <div
+                className="pointer-events-none absolute inset-0 flex items-center justify-center"
+                aria-hidden
               >
-                <Play className="ml-1 h-9 w-9 text-white" fill="white" strokeWidth={0} />
-              </button>
+                <div className="flex h-[72px] w-[72px] items-center justify-center rounded-full border-[2.5px] border-white/75 bg-black/35 backdrop-blur-sm">
+                  <Play className="ml-1 h-9 w-9 text-white" fill="white" strokeWidth={0} />
+                </div>
+              </div>
             ) : null}
-          </>
+
+          </div>
         )}
 
         {!error && src ? (
           <div
-            className="absolute inset-x-0 bottom-0 z-30 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-16 transition-opacity duration-200"
+            className="absolute inset-x-0 bottom-0 z-30 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-12 transition-opacity duration-200"
             style={{
               opacity: showChrome ? 1 : 0,
               pointerEvents: showChrome ? "auto" : "none",
               background:
-                "linear-gradient(0deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.45) 55%, transparent 100%)",
+                "linear-gradient(0deg, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.4) 60%, transparent 100%)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-3 flex items-center gap-3">
-              <button
-                type="button"
-                onClick={togglePlay}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white touch-manipulation"
-                aria-label={playing ? "Pause" : "Play"}
-              >
-                {playing ? (
-                  <Pause className="h-6 w-6" fill="white" strokeWidth={0} />
-                ) : (
-                  <Play className="h-6 w-6 ml-0.5" fill="white" strokeWidth={0} />
-                )}
-              </button>
-              <span className="w-10 shrink-0 text-[11px] tabular-nums text-white/85">
+            <div className="flex items-center gap-2">
+              <span className="w-11 shrink-0 text-center text-[11px] tabular-nums text-white/90">
                 {formatMediaTime(currentTime)}
               </span>
               <div
                 ref={seekRef}
-                className="relative h-6 flex-1 touch-none"
+                className="relative h-8 flex-1 touch-none"
                 role="slider"
                 aria-valuemin={0}
                 aria-valuemax={duration || 0}
                 aria-valuenow={currentTime}
                 aria-label="Seek"
                 onPointerDown={(e) => {
+                  e.stopPropagation();
                   e.currentTarget.setPointerCapture(e.pointerId);
                   setSeeking(true);
                   seekToClientX(e.clientX);
@@ -274,17 +294,14 @@ export default function ChatVideoViewer({
                 />
                 <div
                   className="absolute left-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full"
-                  style={{
-                    width: `${progress}%`,
-                    backgroundColor: MV.accent,
-                  }}
+                  style={{ width: `${progress}%`, backgroundColor: MV.accent }}
                 />
                 <div
                   className="absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-white shadow-md"
                   style={{ left: `calc(${progress}% - 7px)` }}
                 />
               </div>
-              <span className="w-10 shrink-0 text-right text-[11px] tabular-nums text-white/55">
+              <span className="w-11 shrink-0 text-center text-[11px] tabular-nums text-white/55">
                 {formatMediaTime(duration)}
               </span>
             </div>

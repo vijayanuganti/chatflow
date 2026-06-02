@@ -1,19 +1,12 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { Download } from "lucide-react";
-import { fileUrl, mediaFetchUrl } from "@/lib/api";
+import React from "react";
+import { Download, Play } from "lucide-react";
 import { formatFileSize } from "@/lib/chatMedia";
 import { useVideoPoster } from "@/hooks/useVideoPoster";
 import { useChatMediaDownload } from "@/hooks/useChatMediaDownload";
-import MediaDownloadRing from "@/components/chat/MediaDownloadRing";
-import UploadProgressRing from "@/components/chat/UploadProgressRing";
 
-function formatVideoDuration(seconds) {
-  const s = Math.max(0, Math.floor(Number(seconds) || 0));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}:${String(r).padStart(2, "0")}`;
-}
-
+/**
+ * WhatsApp-style inline video bubble: thumbnail, single center play, timestamp bottom-right, thin bottom progress.
+ */
 export default function ChatVideoBlock({
   message,
   uploading,
@@ -23,15 +16,15 @@ export default function ChatVideoBlock({
   onOpenInApp,
   selectionMode = false,
 }) {
-  const mediaSrc = fileUrl(message.file_url);
   const posterSrc = useVideoPoster(message.file_url, message.__videoPoster);
   const fileSize = message.file_size;
 
   const {
-    progress,
+    progress: downloadProgress,
     isDownloaded,
     isDownloading,
     onBubbleTap,
+    openInApp,
   } = useChatMediaDownload({
     url: message.file_url,
     fileName: message.file_name,
@@ -41,117 +34,109 @@ export default function ChatVideoBlock({
     onOpenInApp,
   });
 
-  const [durationLabel, setDurationLabel] = useState("");
-
-  const onVideoMetadata = useCallback((e) => {
-    const d = e.currentTarget.duration;
-    if (Number.isFinite(d) && d > 0) {
-      setDurationLabel(formatVideoDuration(d));
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!message.file_url || durationLabel) return;
-    const v = document.createElement("video");
-    v.preload = "metadata";
-    v.muted = true;
-    v.src = mediaFetchUrl(message.file_url, { attachToken: true });
-    v.onloadedmetadata = () => {
-      if (Number.isFinite(v.duration) && v.duration > 0) {
-        setDurationLabel(formatVideoDuration(v.duration));
-      }
-      v.removeAttribute("src");
-      v.load();
-    };
-  }, [message.file_url, durationLabel]);
-
   const showUpload = uploading;
   const inAppPlayback = Boolean(onOpenInApp);
-  const showDownloadUi = !showUpload && !isDownloaded && !inAppPlayback;
-  const showPlay = !showUpload && (inAppPlayback || isDownloaded);
-  const showVideoSrc = isDownloaded || showUpload;
+  const showDownloadUi = !showUpload && !inAppPlayback && !isDownloaded;
+  const showCenterPlay = !showUpload && !showDownloadUi && (inAppPlayback || isDownloaded);
+  const bottomProgress = showUpload
+    ? uploadPct ?? 0
+    : isDownloading
+      ? downloadProgress
+      : null;
+
+  const handleActivate = (e) => {
+    if (selectionMode) return;
+    e.stopPropagation();
+    if (showUpload) return;
+    if (inAppPlayback) {
+      openInApp();
+      return;
+    }
+    void onBubbleTap(onError);
+  };
 
   return (
     <div
-      className="relative cursor-pointer touch-manipulation overflow-hidden"
-      style={{ minHeight: 140, maxHeight: 300, borderRadius: 12 }}
-      onClick={(e) => {
-        if (selectionMode) return;
-        e.stopPropagation();
-        if (showUpload) return;
-        void onBubbleTap(onError);
-      }}
+      className="relative w-full cursor-pointer touch-manipulation overflow-hidden bg-[#1e1e1e]"
+      style={{ minHeight: 160, maxHeight: 300, borderRadius: 12 }}
+      onClick={handleActivate}
+      role="button"
+      tabIndex={0}
+      aria-label="Play video"
       data-testid={`message-video-${message.id}`}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleActivate(e);
+        }
+      }}
     >
-      {posterSrc && !showVideoSrc ? (
+      {posterSrc ? (
         <img
           src={posterSrc}
           alt=""
-          className="absolute inset-0 h-full w-full object-cover bg-gray-800"
+          className="block h-full min-h-[160px] w-full object-cover"
+          style={{ maxHeight: 300 }}
           draggable={false}
-        />
-      ) : null}
-
-      {mediaSrc || posterSrc || showVideoSrc ? (
-        <video
-          src={showVideoSrc ? mediaSrc : undefined}
-          poster={posterSrc || undefined}
-          className="block w-full bg-gray-800"
-          style={{
-            maxHeight: 300,
-            minHeight: 140,
-            borderRadius: 12,
-            objectFit: "cover",
-            opacity: posterSrc && !showVideoSrc ? 0 : 1,
-          }}
-          preload="metadata"
-          muted
-          playsInline
-          onLoadedMetadata={onVideoMetadata}
         />
       ) : (
         <div
-          className="flex w-full items-center justify-center bg-gray-800"
-          style={{ height: 180, borderRadius: 12 }}
-        >
-          <span className="text-xs text-gray-400">Video</span>
-        </div>
+          className="flex w-full items-center justify-center bg-[#2a2a2a]"
+          style={{ minHeight: 160, maxHeight: 300 }}
+          aria-hidden
+        />
       )}
 
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/55 via-black/20 to-transparent"
+        aria-hidden
+      />
+
       {showDownloadUi && !isDownloading ? (
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center rounded-[12px] bg-black/35">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black/55">
-            <Download className="h-6 w-6 text-white" strokeWidth={2} />
+        <div className="absolute inset-0 z-[2] flex flex-col items-center justify-center bg-black/40">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white/50 bg-black/40">
+            <Download className="h-5 w-5 text-white" strokeWidth={2} />
           </div>
           {fileSize ? (
-            <span className="mt-2 text-[11px] font-medium text-white">{formatFileSize(fileSize)}</span>
+            <span className="mt-2 text-[11px] font-medium text-white/90">
+              {formatFileSize(fileSize)}
+            </span>
           ) : null}
         </div>
       ) : null}
 
-      {showPlay ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[12px] bg-black/20">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-black/60">
-            <svg viewBox="0 0 24 24" fill="white" className="ml-1 h-7 w-7" aria-hidden>
-              <path d="M8 5v14l11-7z" />
-            </svg>
+      {showCenterPlay ? (
+        <div className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center">
+          <div
+            className="flex h-[52px] w-[52px] items-center justify-center rounded-full border-[2.5px] border-white/80 bg-black/30 shadow-lg backdrop-blur-[1px]"
+            aria-hidden
+          >
+            <Play className="ml-0.5 h-6 w-6 text-white" fill="white" strokeWidth={0} />
           </div>
         </div>
       ) : null}
 
-      {durationLabel && !showUpload ? (
-        <div className="pointer-events-none absolute bottom-2 right-2 rounded bg-black/50 px-1.5 py-0.5 text-[10px] text-white">
-          {durationLabel}
+      {overlayTimestamp ? (
+        <div className="pointer-events-none z-[4] [&_.message-timestamp-row]:hidden">
+          {overlayTimestamp}
         </div>
       ) : null}
 
-      {!showUpload && overlayTimestamp}
-      <MediaDownloadRing
-        visible={isDownloading}
-        progress={progress}
-        onCancel={() => void onBubbleTap(onError)}
-      />
-      <UploadProgressRing progress={uploadPct} visible={showUpload} />
+      {bottomProgress != null ? (
+        <div
+          className="absolute bottom-0 left-0 right-0 z-[5] h-[3px] bg-white/25"
+          role="progressbar"
+          aria-valuenow={bottomProgress}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <div
+            className="h-full bg-white transition-[width] duration-150 ease-out"
+            style={{ width: `${Math.min(100, Math.max(0, bottomProgress))}%` }}
+          />
+        </div>
+      ) : null}
+
     </div>
   );
 }
