@@ -14,6 +14,7 @@ import {
   resolveMediaFileName,
 } from "@/lib/mediaHandler";
 import { isPdfAttachment } from "@/lib/mediaPlaybackUrl";
+import { getVideoThumbnailUrl } from "@/lib/videoThumbnailUrl";
 import { FOLDER_CATEGORIES } from "@/lib/folderAccess";
 import {
   addFolderLink,
@@ -79,6 +80,8 @@ export default function FolderDetailPanel({
       fileName: itemFileName(item, category),
       mimeType: item.mime_type,
       mediaKind: mediaKindForCategory(category),
+      messageType:
+        category === "photos" ? "image" : category === "videos" ? "video" : undefined,
       onSuccess: (msg) => {
         toast.dismiss(toastId);
         toast.success(msg || "Downloaded");
@@ -98,7 +101,10 @@ export default function FolderDetailPanel({
         fileName: itemFileName(item, "videos"),
         mimeType: item.mime_type,
         title: item.title,
-        posterUrl: item.thumbnail_path || undefined,
+        posterUrl:
+          (item.thumbnail_path ? fileUrl(item.thumbnail_path) : null) ||
+          getVideoThumbnailUrl(item.url_or_path, { attachToken: true }) ||
+          undefined,
       });
       return;
     }

@@ -33,6 +33,7 @@ import { initNativeAuthSync } from "@/lib/nativeAuthSync";
 import { initAppForegroundSync } from "@/lib/activeChatState";
 import { initSafeAreaInsets } from "@/lib/safeAreaInsets";
 import { syncConversationSoundsFromNative } from "@/lib/conversationSounds";
+import { ensureChatFlowFoldersExist } from "@/utils/fileSystem";
 import ForceLogoutBridge from "@/components/ForceLogoutBridge";
 import NotificationLaunchGuard from "@/components/NotificationLaunchGuard";
 import ShareIntentProvider from "@/components/share/ShareIntentProvider";
@@ -90,6 +91,7 @@ function NativeAuthBootstrap() {
     initAppForegroundSync();
     const clearSafeAreaInsets = initSafeAreaInsets();
     void syncConversationSoundsFromNative();
+    void ensureChatFlowFoldersExist();
     return clearSafeAreaInsets;
   }, []);
   return null;

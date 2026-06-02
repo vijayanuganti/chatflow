@@ -6,6 +6,10 @@ import {
   getChatMediaLocalUri,
   isChatMediaCached,
 } from "@/lib/chatMediaCache";
+import {
+  classifyMediaForFolder,
+  saveFromCacheToChatFlowFolder,
+} from "@/utils/fileSystem";
 
 const CACHE_DIR = "chatflow-media";
 
@@ -382,6 +386,7 @@ export async function downloadMediaToDevice({
   fileName,
   mimeType,
   mediaKind = "document",
+  messageType,
   onProgress,
   onError,
   onSuccess,
@@ -390,26 +395,14 @@ export async function downloadMediaToDevice({
   try {
     await downloadChatMedia({ url, fileName: name, onProgress });
     if (Capacitor.isNativePlatform()) {
-      const { Filesystem, Directory } = await import("@capacitor/filesystem");
       const relativePath = getChatMediaCacheRelativePath(url, name);
-      const destDir = "ChatFlow";
-      const destPath = `${destDir}/${name}`;
-      try {
-        await Filesystem.mkdir({
-          path: destDir,
-          directory: Directory.Documents,
-          recursive: true,
-        });
-      } catch {
-        /* may exist */
-      }
-      await Filesystem.copy({
-        from: relativePath,
-        to: destPath,
-        directory: Directory.Cache,
-        toDirectory: Directory.Documents,
-      });
-      onSuccess?.("Saved to Documents/ChatFlow");
+      const category = classifyMediaForFolder(
+        name,
+        mimeType,
+        messageType || (mediaKind === "video" ? "video" : mediaKind === "photo" ? "image" : ""),
+      );
+      const { label } = await saveFromCacheToChatFlowFolder(relativePath, name, category);
+      onSuccess?.(`Saved to ${label}`);
       return;
     }
     const local = await getChatMediaLocalUri(url, name);

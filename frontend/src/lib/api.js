@@ -424,7 +424,20 @@ export function mediaFetchUrl(pathOrUrl, opts = {}) {
   if (!pathOrUrl) return "";
   if (pathOrUrl.startsWith("blob:") || pathOrUrl.startsWith("data:")) return pathOrUrl;
   if (pathOrUrl.startsWith("/api/files/") || pathOrUrl.startsWith("/api/media/")) {
-    return fileUrl(pathOrUrl);
+    let href = fileUrl(pathOrUrl);
+    if (
+      opts.attachToken &&
+      (pathOrUrl.startsWith("/api/media/thumbnail") || pathOrUrl.includes("/api/media/thumbnail"))
+    ) {
+      const q = new URLSearchParams();
+      const token = getStoredAccessToken();
+      if (token) q.set("token", token);
+      const bid = getOrCreateBrowserId();
+      if (bid) q.set("bid", bid);
+      const qs = q.toString();
+      if (qs) href = `${href}${href.includes("?") ? "&" : "?"}${qs}`;
+    }
+    return href;
   }
   if (isCrossOriginStoredMediaUrl(pathOrUrl)) {
     const apiBase = getApiBaseUrl();

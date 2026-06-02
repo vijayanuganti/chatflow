@@ -4180,6 +4180,9 @@ async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_cur
     else:
         ftype = "file"
 
+    if ftype == "video":
+        asyncio.create_task(_ensure_video_thumb_task(file_id))
+
     return {
         "file_url": file_url,
         "file_name": file.filename,
@@ -4285,6 +4288,47 @@ async def stream_media(
         headers["Content-Length"] = str(content_length)
 
     return StreamingResponse(iter_chunks(), media_type=content_type, headers=headers)
+
+
+def _upload_thumb_to_s3(fileobj, key: str, mime: str) -> None:
+    _upload_to_s3(fileobj, key, mime)
+
+
+async def _ensure_video_thumb_task(file_id: str) -> None:
+    from media_thumbnails import ensure_video_thumbnail
+
+    try:
+        await ensure_video_thumbnail(
+            file_id=file_id,
+            upload_dir=UPLOAD_DIR,
+            s3_bucket=S3_BUCKET,
+            stream_s3_object=_stream_s3_object_blocking,
+            upload_to_s3=_upload_thumb_to_s3,
+        )
+    except Exception as e:
+        logger.warning("Background thumbnail generation failed for %s: %s", file_id, e)
+
+
+@api_router.get("/media/thumbnail/{file_id:path}")
+async def get_media_thumbnail(
+    file_id: str,
+    user: dict = Depends(get_current_user_media),
+):
+    """JPEG poster for a video attachment the user can access."""
+    from media_thumbnails import ensure_video_thumbnail, serve_thumbnail
+
+    async def _assert(key: str) -> None:
+        await _assert_user_can_access_s3_key(user["id"], key)
+
+    return await serve_thumbnail(
+        file_id,
+        upload_dir=UPLOAD_DIR,
+        s3_bucket=S3_BUCKET,
+        assert_access=_assert,
+        stream_s3_object=_stream_s3_object_blocking,
+        upload_to_s3=_upload_thumb_to_s3,
+        ensure_thumb=ensure_video_thumbnail,
+    )
 
 
 # ---------- WebSocket Manager ----------

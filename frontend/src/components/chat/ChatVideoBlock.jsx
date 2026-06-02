@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { fileUrl, mediaFetchUrl } from "@/lib/api";
 import { formatFileSize } from "@/lib/chatMedia";
+import { resolveVideoPosterUrl } from "@/lib/videoThumbnailUrl";
 import { useChatMediaDownload } from "@/hooks/useChatMediaDownload";
 import MediaDownloadRing from "@/components/chat/MediaDownloadRing";
 import UploadProgressRing from "@/components/chat/UploadProgressRing";
@@ -23,7 +24,7 @@ export default function ChatVideoBlock({
   selectionMode = false,
 }) {
   const mediaSrc = fileUrl(message.file_url);
-  const poster = message.__videoPoster || undefined;
+  const poster = resolveVideoPosterUrl(message) || undefined;
   const fileSize = message.file_size;
 
   const {

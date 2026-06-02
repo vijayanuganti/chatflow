@@ -5,6 +5,7 @@ import {
   isChatMediaCached,
 } from "@/lib/chatMediaCache";
 import { isPdfAttachment } from "@/lib/mediaPlaybackUrl";
+import { getVideoThumbnailUrl } from "@/lib/videoThumbnailUrl";
 
 /**
  * WhatsApp-style download state for chat video/document bubbles.
@@ -93,7 +94,7 @@ export function useChatMediaDownload({
         url,
         fileName,
         mimeType,
-        posterUrl,
+        posterUrl: posterUrl || getVideoThumbnailUrl(url, { attachToken: true }) || undefined,
       });
       return true;
     }

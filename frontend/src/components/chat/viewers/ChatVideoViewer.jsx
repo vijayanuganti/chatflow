@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, Pause, Play } from "lucide-react";
 import { getMediaPlaybackUrl } from "@/lib/mediaPlaybackUrl";
+import { getVideoThumbnailUrl } from "@/lib/videoThumbnailUrl";
 import { registerOverlayBack } from "@/lib/overlayBackHandler";
 import MediaViewerHeader from "@/components/chat/viewers/MediaViewerHeader";
 import { MV, formatMediaTime } from "@/components/chat/viewers/mediaViewerTheme";
@@ -31,10 +32,14 @@ export default function ChatVideoViewer({
   const hideTimerRef = useRef(null);
 
   const coverSrc = (() => {
-    if (!posterUrl) return "";
-    const p = String(posterUrl);
-    if (p.startsWith("data:") || p.startsWith("blob:")) return p;
-    return getMediaPlaybackUrl(posterUrl);
+    if (posterUrl) {
+      const p = String(posterUrl);
+      if (p.startsWith("data:") || p.startsWith("blob:")) return p;
+      if (p.includes("/api/media/thumbnail") || p.startsWith("http")) return p;
+      return getMediaPlaybackUrl(posterUrl);
+    }
+    if (url) return getVideoThumbnailUrl(url, { attachToken: true });
+    return "";
   })();
 
   const requestClose = useCallback(() => {
@@ -196,7 +201,7 @@ export default function ChatVideoViewer({
               <img
                 src={coverSrc}
                 alt=""
-                className="pointer-events-none absolute inset-0 m-auto max-h-full max-w-full object-contain"
+                className="pointer-events-none absolute inset-0 h-full w-full object-cover"
                 style={{ transition: "opacity 280ms ease" }}
                 draggable={false}
               />

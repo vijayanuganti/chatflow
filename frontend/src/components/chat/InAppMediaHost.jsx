@@ -4,6 +4,7 @@ import ChatImageViewer from "@/components/chat/viewers/ChatImageViewer";
 import ChatPdfViewer from "@/components/chat/viewers/ChatPdfViewer";
 import { fileUrl } from "@/lib/api";
 import { getMediaPlaybackUrl, isPdfAttachment } from "@/lib/mediaPlaybackUrl";
+import { resolveVideoPosterUrl } from "@/lib/videoThumbnailUrl";
 
 /**
  * Renders the active in-app media modal (image / video / PDF).
@@ -40,7 +41,10 @@ export default function InAppMediaHost({
 
   if (kind === "video") {
     const posterUrl =
-      viewer.posterUrl || message?.__videoPoster || viewer.poster || undefined;
+      viewer.posterUrl ||
+      resolveVideoPosterUrl(message) ||
+      (url ? resolveVideoPosterUrl({ file_url: url }) : "") ||
+      undefined;
     return (
       <ChatVideoViewer
         open
