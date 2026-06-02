@@ -37,8 +37,8 @@ export function extractMediaFileId(fileUrl) {
  * @param {{ attachToken?: boolean }} [opts]
  * @returns {string} empty when not a server-stored video
  */
-export function getVideoThumbnailUrl(fileUrl, opts = {}) {
-  const fileId = extractMediaFileId(fileUrl);
+export function getVideoThumbnailUrl(pathOrUrl, opts = {}) {
+  const fileId = extractMediaFileId(pathOrUrl);
   if (!fileId) return "";
   const attachToken = opts.attachToken ?? Capacitor.isNativePlatform();
   let path = `/api/media/thumbnail/${encodeURIComponent(fileId)}`;
