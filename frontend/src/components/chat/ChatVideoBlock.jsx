@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { fileUrl, mediaFetchUrl } from "@/lib/api";
 import { formatFileSize } from "@/lib/chatMedia";
-import { resolveVideoPosterUrl } from "@/lib/videoThumbnailUrl";
+import { useVideoPoster } from "@/hooks/useVideoPoster";
 import { useChatMediaDownload } from "@/hooks/useChatMediaDownload";
 import MediaDownloadRing from "@/components/chat/MediaDownloadRing";
 import UploadProgressRing from "@/components/chat/UploadProgressRing";
@@ -24,7 +24,7 @@ export default function ChatVideoBlock({
   selectionMode = false,
 }) {
   const mediaSrc = fileUrl(message.file_url);
-  const poster = resolveVideoPosterUrl(message) || undefined;
+  const posterSrc = useVideoPoster(message.file_url, message.__videoPoster);
   const fileSize = message.file_size;
 
   const {
@@ -37,7 +37,7 @@ export default function ChatVideoBlock({
     fileName: message.file_name,
     mimeType: message.__mimeType,
     mediaKind: "video",
-    posterUrl: poster,
+    posterUrl: posterSrc || undefined,
     onOpenInApp,
   });
 
@@ -63,16 +63,18 @@ export default function ChatVideoBlock({
       v.removeAttribute("src");
       v.load();
     };
-  }, [mediaSrc, durationLabel]);
+  }, [message.file_url, durationLabel]);
 
   const showUpload = uploading;
   const inAppPlayback = Boolean(onOpenInApp);
   const showDownloadUi = !showUpload && !isDownloaded && !inAppPlayback;
   const showPlay = !showUpload && (inAppPlayback || isDownloaded);
+  const showVideoSrc = isDownloaded || showUpload;
 
   return (
     <div
-      className="relative cursor-pointer touch-manipulation"
+      className="relative cursor-pointer touch-manipulation overflow-hidden"
+      style={{ minHeight: 140, maxHeight: 300, borderRadius: 12 }}
       onClick={(e) => {
         if (selectionMode) return;
         e.stopPropagation();
@@ -81,12 +83,27 @@ export default function ChatVideoBlock({
       }}
       data-testid={`message-video-${message.id}`}
     >
-      {mediaSrc || poster ? (
+      {posterSrc && !showVideoSrc ? (
+        <img
+          src={posterSrc}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover bg-gray-800"
+          draggable={false}
+        />
+      ) : null}
+
+      {mediaSrc || posterSrc || showVideoSrc ? (
         <video
-          src={isDownloaded || showUpload ? mediaSrc : undefined}
-          poster={poster}
+          src={showVideoSrc ? mediaSrc : undefined}
+          poster={posterSrc || undefined}
           className="block w-full bg-gray-800"
-          style={{ maxHeight: 300, minHeight: 140, borderRadius: 12, objectFit: "cover" }}
+          style={{
+            maxHeight: 300,
+            minHeight: 140,
+            borderRadius: 12,
+            objectFit: "cover",
+            opacity: posterSrc && !showVideoSrc ? 0 : 1,
+          }}
           preload="metadata"
           muted
           playsInline

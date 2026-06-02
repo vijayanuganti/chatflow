@@ -40,7 +40,7 @@ export function extractMediaFileId(fileUrl) {
 export function getVideoThumbnailUrl(pathOrUrl, opts = {}) {
   const fileId = extractMediaFileId(pathOrUrl);
   if (!fileId) return "";
-  const attachToken = opts.attachToken ?? Capacitor.isNativePlatform();
+  const attachToken = opts.attachToken !== false;
   let path = `/api/media/thumbnail/${encodeURIComponent(fileId)}`;
   if (attachToken) {
     const q = new URLSearchParams();

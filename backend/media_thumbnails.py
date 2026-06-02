@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple
 
 from fastapi import HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+from PIL import Image, ImageDraw
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,26 @@ def is_video_file_id(file_id: str) -> bool:
 
 def _ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
+
+
+def _write_placeholder_thumbnail(dest: Path, width: int = 640, height: int = 360) -> bool:
+    """Fallback JPEG when ffmpeg is unavailable."""
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        img = Image.new("RGB", (width, height), color=(32, 32, 36))
+        draw = ImageDraw.Draw(img)
+        cx, cy = width // 2, height // 2
+        r = min(width, height) // 8
+        draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(80, 80, 88))
+        draw.polygon(
+            [(cx - r // 2, cy - r), (cx - r // 2, cy + r), (cx + r, cy)],
+            fill=(220, 220, 225),
+        )
+        img.save(dest, format="JPEG", quality=82)
+        return dest.is_file()
+    except Exception as e:
+        logger.warning("Placeholder thumbnail failed: %s", e)
+        return False
 
 
 def _extract_frame_ffmpeg(source: Path, dest: Path) -> bool:
@@ -143,7 +164,8 @@ async def ensure_video_thumbnail(
             return None
 
         if not _extract_frame_ffmpeg(tmp_source, tmp_thumb):
-            return None
+            if not _write_placeholder_thumbnail(tmp_thumb):
+                return None
 
         if s3_bucket:
             try:
@@ -193,6 +215,9 @@ async def serve_thumbnail(
         thumb_key = thumb_key_for_file_id(file_id)
         try:
             body, content_type, _ = stream_s3_object(thumb_key)
+            data = body.read()
+            body.close()
+            return Response(content=data, media_type=content_type or "image/jpeg")
         except HTTPException:
             await ensure_thumb(
                 file_id=file_id,
@@ -201,12 +226,15 @@ async def serve_thumbnail(
                 stream_s3_object=stream_s3_object,
                 upload_to_s3=upload_to_s3,
             )
-            body, content_type, _ = stream_s3_object(thumb_key)
-
-        data = body.read()
-        body.close()
-        from fastapi.responses import Response
-
-        return Response(content=data, media_type=content_type or "image/jpeg")
+            try:
+                body, content_type, _ = stream_s3_object(thumb_key)
+                data = body.read()
+                body.close()
+                return Response(content=data, media_type=content_type or "image/jpeg")
+            except HTTPException as err:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Thumbnail not found. Install ffmpeg on the server for video posters.",
+                ) from err
 
     raise HTTPException(status_code=404, detail="Thumbnail not found")
