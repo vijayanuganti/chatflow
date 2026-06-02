@@ -14,6 +14,7 @@ export default function InAppMediaHost({
   onClose,
   onDownload,
   onForward,
+  onSaveAndSend,
   showForward = true,
 }) {
   if (!viewer) return null;
@@ -30,16 +31,21 @@ export default function InAppMediaHost({
         onClose={onClose}
         onDownload={onDownload}
         onForward={onForward}
+        onSaveAndSend={onSaveAndSend || viewer.onSaveAndSend}
         showForward={showForward}
+        editorToolbar={viewer.editorToolbar ?? true}
       />
     );
   }
 
   if (kind === "video") {
+    const posterUrl =
+      viewer.posterUrl || message?.__videoPoster || viewer.poster || undefined;
     return (
       <ChatVideoViewer
         open
         url={url}
+        posterUrl={posterUrl}
         fileName={fileName}
         title={title || message?.file_name}
         onClose={onClose}

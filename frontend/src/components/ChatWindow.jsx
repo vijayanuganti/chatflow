@@ -156,7 +156,13 @@ export default function ChatWindow({
       alt,
       fileName: message?.file_name,
       message: message || null,
+      editorToolbar: true,
     });
+  }, []);
+
+  const handleMediaViewerSaveSend = useCallback(() => {
+    setMediaViewer(null);
+    toast.success("Image ready — send from the composer when you're set.");
   }, []);
 
   const handleMediaViewerDownload = useCallback(async () => {
@@ -1224,6 +1230,9 @@ export default function ChatWindow({
         onClose={() => setMediaViewer(null)}
         onDownload={mediaViewer?.kind === "image" ? handleMediaViewerDownload : undefined}
         onForward={readOnly ? undefined : handleMediaViewerForward}
+        onSaveAndSend={
+          mediaViewer?.kind === "image" && !readOnly ? handleMediaViewerSaveSend : undefined
+        }
         showForward={!readOnly}
       />
 

@@ -36,6 +36,7 @@ export default function ChatVideoBlock({
     fileName: message.file_name,
     mimeType: message.__mimeType,
     mediaKind: "video",
+    posterUrl: poster,
     onOpenInApp,
   });
 

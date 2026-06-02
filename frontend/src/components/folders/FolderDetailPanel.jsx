@@ -98,6 +98,7 @@ export default function FolderDetailPanel({
         fileName: itemFileName(item, "videos"),
         mimeType: item.mime_type,
         title: item.title,
+        posterUrl: item.thumbnail_path || undefined,
       });
       return;
     }

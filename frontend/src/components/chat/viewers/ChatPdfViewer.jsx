@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader2, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { getMediaAuthHeaders } from "@/lib/api";
 import { getMediaPlaybackUrl } from "@/lib/mediaPlaybackUrl";
 import { registerOverlayBack } from "@/lib/overlayBackHandler";
+import MediaViewerHeader from "@/components/chat/viewers/MediaViewerHeader";
+import { usePinchZoomPan } from "@/components/chat/viewers/usePinchZoomPan";
+import { MV } from "@/components/chat/viewers/mediaViewerTheme";
 
 /**
- * In-app PDF viewer — streams via authenticated fetch into an embedded iframe (no external app).
+ * In-app PDF viewer with polished header and pinch-zoom pan on the document surface.
  */
 export default function ChatPdfViewer({ open, url, fileName, title, onClose }) {
   const [blobUrl, setBlobUrl] = useState("");
@@ -18,12 +21,23 @@ export default function ChatPdfViewer({ open, url, fileName, title, onClose }) {
     onClose?.();
   }, [onClose]);
 
+  const {
+    scale,
+    transform,
+    reset,
+    onWheel,
+    onTouchStart,
+    onTouchMove,
+    onTouchEnd,
+  } = usePinchZoomPan({ minScale: 1, maxScale: 3.5 });
+
   useEffect(() => {
     if (!open || !url) return undefined;
 
     let cancelled = false;
     setLoading(true);
     setError("");
+    reset();
 
     const fetchUrl = getMediaPlaybackUrl(url);
     const headers = getMediaAuthHeaders();
@@ -67,7 +81,7 @@ export default function ChatPdfViewer({ open, url, fileName, title, onClose }) {
       unregister();
       window.removeEventListener("keydown", onKey);
     };
-  }, [open, url, requestClose]);
+  }, [open, url, requestClose, reset]);
 
   useEffect(() => {
     if (open) return undefined;
@@ -86,29 +100,45 @@ export default function ChatPdfViewer({ open, url, fileName, title, onClose }) {
   if (!open || !url || typeof document === "undefined") return null;
 
   const label = title || fileName || "PDF";
+  const zoomPct = Math.round(scale * 100);
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[10000] flex flex-col bg-[#1a1a1a]"
+      className="fixed inset-0 z-[10000] flex flex-col"
+      style={{ backgroundColor: MV.bg }}
       role="dialog"
       aria-modal="true"
       aria-label={label}
       data-testid="chat-pdf-viewer"
     >
-      <div className="flex shrink-0 items-center justify-between border-b border-white/10 bg-[#111] px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <p className="truncate text-sm font-medium text-white/90 max-w-[70%]">{label}</p>
-        <button
-          type="button"
-          onClick={requestClose}
-          className="rounded-full p-2 text-white hover:bg-white/10 touch-manipulation"
-          aria-label="Close"
-          data-testid="chat-pdf-viewer-close"
-        >
-          <X className="h-6 w-6" />
-        </button>
+      <div
+        className="shrink-0 border-b border-white/[0.08]"
+        style={{ backgroundColor: MV.headerBg }}
+      >
+        <MediaViewerHeader
+          title={label}
+          onClose={requestClose}
+          backIcon="back"
+          testId="chat-pdf-viewer"
+          rightSlot={
+            blobUrl && !error ? (
+              <span className="rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-medium tabular-nums text-white/70">
+                {zoomPct}%
+              </span>
+            ) : null
+          }
+        />
       </div>
 
-      <div className="relative min-h-0 flex-1">
+      <div
+        className="relative min-h-0 flex-1 overflow-auto overscroll-contain touch-none"
+        style={{ WebkitOverflowScrolling: "touch" }}
+        onWheel={onWheel}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+      >
         {loading ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <Loader2 className="h-10 w-10 animate-spin text-white/70" />
@@ -119,11 +149,21 @@ export default function ChatPdfViewer({ open, url, fileName, title, onClose }) {
             {error}
           </div>
         ) : blobUrl ? (
-          <iframe
-            title={label}
-            src={blobUrl}
-            className="h-full w-full border-0 bg-white"
-          />
+          <div
+            className="flex min-h-full min-w-full items-start justify-center p-2"
+            style={{
+              transform,
+              transformOrigin: "center top",
+              transition: scale === 1 ? "transform 80ms ease-out" : undefined,
+            }}
+          >
+            <iframe
+              title={label}
+              src={blobUrl}
+              className="h-[calc(100dvh-4.5rem)] w-full max-w-3xl border-0 bg-white shadow-2xl"
+              style={{ minHeight: "70dvh" }}
+            />
+          </div>
         ) : null}
       </div>
     </div>,

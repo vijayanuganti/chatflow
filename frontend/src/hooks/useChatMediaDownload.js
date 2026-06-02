@@ -9,9 +9,16 @@ import { isPdfAttachment } from "@/lib/mediaPlaybackUrl";
 /**
  * WhatsApp-style download state for chat video/document bubbles.
  * When `onOpenInApp` is set, tap opens embedded viewers instead of native FileOpener.
- * @param {{ url: string, fileName?: string, mimeType?: string, mediaKind: 'video'|'document', onOpenInApp?: (payload: object) => void }} opts
+ * @param {{ url: string, fileName?: string, mimeType?: string, mediaKind: 'video'|'document', posterUrl?: string, onOpenInApp?: (payload: object) => void }} opts
  */
-export function useChatMediaDownload({ url, fileName, mimeType, mediaKind, onOpenInApp }) {
+export function useChatMediaDownload({
+  url,
+  fileName,
+  mimeType,
+  mediaKind,
+  posterUrl,
+  onOpenInApp,
+}) {
   const [state, setState] = useState("idle");
   const [progress, setProgress] = useState(0);
   const mountedRef = useRef(true);
@@ -86,6 +93,7 @@ export function useChatMediaDownload({ url, fileName, mimeType, mediaKind, onOpe
         url,
         fileName,
         mimeType,
+        posterUrl,
       });
       return true;
     }
@@ -99,7 +107,7 @@ export function useChatMediaDownload({ url, fileName, mimeType, mediaKind, onOpe
       return true;
     }
     return false;
-  }, [url, fileName, mimeType, mediaKind, onOpenInApp]);
+  }, [url, fileName, mimeType, mediaKind, posterUrl, onOpenInApp]);
 
   const onBubbleTap = useCallback(
     async (onError) => {
