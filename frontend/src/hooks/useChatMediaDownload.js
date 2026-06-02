@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Capacitor } from "@capacitor/core";
 import {
   cancelChatMediaDownload,
   downloadChatMedia,
   isChatMediaCached,
 } from "@/lib/chatMediaCache";
-import { openDocumentInNativeApp, openVideoInNativeApp } from "@/lib/mediaHandler";
+import { isPdfAttachment } from "@/lib/mediaPlaybackUrl";
 
 /**
  * WhatsApp-style download state for chat video/document bubbles.
- * @param {{ url: string, fileName?: string, mimeType?: string, mediaKind: 'video'|'document' }} opts
+ * When `onOpenInApp` is set, tap opens embedded viewers instead of native FileOpener.
+ * @param {{ url: string, fileName?: string, mimeType?: string, mediaKind: 'video'|'document', onOpenInApp?: (payload: object) => void }} opts
  */
-export function useChatMediaDownload({ url, fileName, mimeType, mediaKind }) {
+export function useChatMediaDownload({ url, fileName, mimeType, mediaKind, onOpenInApp }) {
   const [state, setState] = useState("idle");
   const [progress, setProgress] = useState(0);
   const mountedRef = useRef(true);
@@ -78,31 +78,28 @@ export function useChatMediaDownload({ url, fileName, mimeType, mediaKind }) {
     setProgress(0);
   }, [url, fileName]);
 
-  const openInNativeApp = useCallback(
-    async (onError) => {
-      if (!url) return;
-      const open = mediaKind === "video" ? openVideoInNativeApp : openDocumentInNativeApp;
-      if (state !== "downloaded" && Capacitor.isNativePlatform()) {
-        try {
-          setState("downloading");
-          await downloadChatMedia({
-            url,
-            fileName,
-            onProgress: (pct) => {
-              if (mountedRef.current) setProgress(pct);
-            },
-          });
-          if (mountedRef.current) setState("downloaded");
-        } catch (err) {
-          if (mountedRef.current) setState("idle");
-          onError?.(err?.message || "Download failed");
-          return;
-        }
-      }
-      await open(url, fileName, mimeType, onError);
-    },
-    [url, fileName, mimeType, mediaKind, state],
-  );
+  const openInApp = useCallback(() => {
+    if (!url || !onOpenInApp) return false;
+    if (mediaKind === "video") {
+      onOpenInApp({
+        kind: "video",
+        url,
+        fileName,
+        mimeType,
+      });
+      return true;
+    }
+    if (mediaKind === "document" && isPdfAttachment(fileName, mimeType)) {
+      onOpenInApp({
+        kind: "pdf",
+        url,
+        fileName,
+        mimeType,
+      });
+      return true;
+    }
+    return false;
+  }, [url, fileName, mimeType, mediaKind, onOpenInApp]);
 
   const onBubbleTap = useCallback(
     async (onError) => {
@@ -110,17 +107,22 @@ export function useChatMediaDownload({ url, fileName, mimeType, mediaKind }) {
         cancelDownload();
         return;
       }
-      if (state === "downloaded") {
-        await openInNativeApp(onError);
+
+      if (openInApp()) {
         return;
       }
+
+      if (state === "downloaded") {
+        return;
+      }
+
       try {
         await startDownload();
       } catch (err) {
         onError?.(err?.message || "Download failed. Please check your connection.");
       }
     },
-    [state, cancelDownload, openInNativeApp, startDownload],
+    [state, cancelDownload, openInApp, startDownload],
   );
 
   return {
@@ -130,7 +132,7 @@ export function useChatMediaDownload({ url, fileName, mimeType, mediaKind }) {
     isDownloading: state === "downloading",
     startDownload,
     cancelDownload,
-    openInNativeApp,
+    openInApp,
     onBubbleTap,
   };
 }

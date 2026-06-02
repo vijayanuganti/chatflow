@@ -37,7 +37,7 @@ import { downloadChatMedia } from "@/lib/chatMediaCache";
 import { inferMessageTypeFromFile, createVideoPosterFromFile } from "@/lib/chatMedia";
 import { uploadChatFile } from "@/lib/chatUpload";
 import ChatComposer from "./chat/ChatComposer";
-import ImageLightbox from "./ImageLightbox";
+import InAppMediaHost from "@/components/chat/InAppMediaHost";
 import { formatWhatsAppLastSeen } from "@/lib/datetime";
 import { useAuth } from "@/context/AuthContext";
 import { useChat } from "@/context/ChatContext";
@@ -142,20 +142,32 @@ export default function ChatWindow({
   const composerRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const lastTypingPingRef = useRef(0);
-  const [lightbox, setLightbox] = useState(null);
-  const handleImageClick = useCallback((message, src, alt) => {
-    setLightbox({ src, alt, message: message || null });
+  const [mediaViewer, setMediaViewer] = useState(null);
+
+  const handleOpenInAppMedia = useCallback((payload) => {
+    setMediaViewer(payload);
   }, []);
 
-  const handleLightboxDownload = useCallback(async () => {
-    if (!lightbox?.src) return;
-    const msg = lightbox.message;
-    const fileName = msg?.file_name || lightbox.alt || "image.jpg";
+  const handleImageClick = useCallback((message, src, alt) => {
+    setMediaViewer({
+      kind: "image",
+      url: message?.file_url,
+      src,
+      alt,
+      fileName: message?.file_name,
+      message: message || null,
+    });
+  }, []);
+
+  const handleMediaViewerDownload = useCallback(async () => {
+    if (mediaViewer?.kind !== "image") return;
+    const msg = mediaViewer.message;
+    const fileName = msg?.file_name || mediaViewer.alt || "image.jpg";
     try {
-      let href = lightbox.src;
+      let href = mediaViewer.src;
       if (msg?.file_url) {
         href = await downloadChatMedia({ url: msg.file_url, fileName });
-      } else if (!href.startsWith("blob:")) {
+      } else if (href && !href.startsWith("blob:")) {
         const res = await fetch(href);
         if (!res.ok) throw new Error("Download failed");
         href = URL.createObjectURL(await res.blob());
@@ -171,15 +183,15 @@ export default function ChatWindow({
     } catch (err) {
       toast.error(formatApiError(err) || "Could not download image");
     }
-  }, [lightbox]);
+  }, [mediaViewer]);
 
-  const handleLightboxForward = useCallback(() => {
-    const msg = lightbox?.message;
+  const handleMediaViewerForward = useCallback(() => {
+    const msg = mediaViewer?.message;
     if (!msg?.id) return;
     setForwardMessages([msg]);
     setShowForwardModal(true);
-    setLightbox(null);
-  }, [lightbox]);
+    setMediaViewer(null);
+  }, [mediaViewer]);
   const blobUrlsRef = useRef(new Set());
 
   const trayGroupKey = useMemo(() => {
@@ -1159,6 +1171,7 @@ export default function ChatWindow({
                   totalRecipients={totalRecipients}
                   showReceipts={!readOnly}
                   onImageClick={handleImageClick}
+                  onOpenInAppMedia={handleOpenInAppMedia}
                   selected={selectedMessages.includes(mKey)}
                   actionSelected={isActionTarget}
                   flashHighlight={flashMessageId && String(m.id) === flashMessageId}
@@ -1206,13 +1219,11 @@ export default function ChatWindow({
         )}
       </div>
 
-      <ImageLightbox
-        open={!!lightbox?.src}
-        src={lightbox?.src}
-        alt={lightbox?.alt}
-        onClose={() => setLightbox(null)}
-        onDownload={handleLightboxDownload}
-        onForward={readOnly ? undefined : handleLightboxForward}
+      <InAppMediaHost
+        viewer={mediaViewer}
+        onClose={() => setMediaViewer(null)}
+        onDownload={mediaViewer?.kind === "image" ? handleMediaViewerDownload : undefined}
+        onForward={readOnly ? undefined : handleMediaViewerForward}
         showForward={!readOnly}
       />
 

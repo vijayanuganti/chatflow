@@ -19,6 +19,7 @@ export default function ChatVideoBlock({
   uploadPct,
   overlayTimestamp,
   onError,
+  onOpenInApp,
   selectionMode = false,
 }) {
   const mediaSrc = fileUrl(message.file_url);
@@ -35,6 +36,7 @@ export default function ChatVideoBlock({
     fileName: message.file_name,
     mimeType: message.__mimeType,
     mediaKind: "video",
+    onOpenInApp,
   });
 
   const [durationLabel, setDurationLabel] = useState("");
@@ -62,8 +64,9 @@ export default function ChatVideoBlock({
   }, [mediaSrc, durationLabel]);
 
   const showUpload = uploading;
-  const showDownloadUi = !showUpload && !isDownloaded;
-  const showPlay = !showUpload && isDownloaded;
+  const inAppPlayback = Boolean(onOpenInApp);
+  const showDownloadUi = !showUpload && !isDownloaded && !inAppPlayback;
+  const showPlay = !showUpload && (inAppPlayback || isDownloaded);
 
   return (
     <div

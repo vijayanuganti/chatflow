@@ -103,6 +103,7 @@ function MessageBubble({
   totalRecipients,
   showReceipts = true,
   onImageClick,
+  onOpenInAppMedia,
   selected = false,
   actionSelected = false,
   flashHighlight = false,
@@ -323,6 +324,7 @@ function MessageBubble({
               uploadPct={uploadPct}
               overlayTimestamp={!uploading ? overlayTimestamp : null}
               onError={mediaOnError}
+              onOpenInApp={onOpenInAppMedia}
               selectionMode={selectionMode}
             />
           )}
@@ -349,6 +351,7 @@ function MessageBubble({
                 mimeType={message.__mimeType}
                 timestampRow={<div className="message-timestamp-row">{messageMeta}</div>}
                 onError={mediaOnError}
+                onOpenInApp={onOpenInAppMedia}
                 selectionMode={selectionMode}
               />
               <UploadProgressRing progress={uploadPct} visible={uploading} />

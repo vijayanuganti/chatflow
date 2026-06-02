@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ExternalLink, FileText, Loader2 } from "lucide-react";
 import { api, fileUrl, formatApiError } from "@/lib/api";
-import { openDocumentInNativeApp, openVideoInNativeApp } from "@/lib/mediaHandler";
+import InAppMediaHost from "@/components/chat/InAppMediaHost";
+import { isPdfAttachment } from "@/lib/mediaPlaybackUrl";
 import { categorizeSharedMessages } from "@/lib/sharedMedia";
 import { toast } from "sonner";
-import ImageLightbox from "./ImageLightbox";
 
 const TABS = [
   { id: "media", label: "Media" },
@@ -21,8 +21,26 @@ export default function SharedMediaSection({
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("media");
   const [categorized, setCategorized] = useState({ media: [], documents: [], links: [] });
-  const [lightbox, setLightbox] = useState(null);
+  const [mediaViewer, setMediaViewer] = useState(null);
   const isProfile = variant === "profile";
+
+  const openSharedItem = (m) => {
+    if (m.message_type === "image") {
+      setMediaViewer({
+        kind: "image",
+        url: m.file_url,
+        src: fileUrl(m.file_url),
+        alt: m.file_name || "image",
+        fileName: m.file_name,
+      });
+    } else if (m.message_type === "video") {
+      setMediaViewer({ kind: "video", url: m.file_url, fileName: m.file_name });
+    } else if (isPdfAttachment(m.file_name, m.__mimeType)) {
+      setMediaViewer({ kind: "pdf", url: m.file_url, fileName: m.file_name });
+    } else {
+      toast.info("Download this file from the chat message to save it.");
+    }
+  };
 
   const load = useCallback(async () => {
     if (!profileUserId && !conversationIdProp) return;
@@ -101,15 +119,7 @@ export default function SharedMediaSection({
               key={m.id}
               type="button"
               className="aspect-square rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
-              onClick={() => {
-                if (m.message_type === "image") {
-                  setLightbox({ src: fileUrl(m.file_url), alt: m.file_name || "image" });
-                } else if (m.message_type === "video") {
-                  void openVideoInNativeApp(m.file_url, m.file_name, null, (msg) => toast.error(msg));
-                } else {
-                  void openDocumentInNativeApp(m.file_url, m.file_name, null, (msg) => toast.error(msg));
-                }
-              }}
+              onClick={() => openSharedItem(m)}
             >
               {m.message_type === "video" ? (
                 <video src={fileUrl(m.file_url)} className="h-full w-full object-cover" muted />
@@ -125,13 +135,7 @@ export default function SharedMediaSection({
             <button
               key={m.id}
               type="button"
-              onClick={() => {
-                if (m.message_type === "image") {
-                  setLightbox({ src: fileUrl(m.file_url), alt: m.file_name || "image" });
-                } else if (m.message_type === "video") {
-                  void openVideoInNativeApp(m.file_url, m.file_name, null, (msg) => toast.error(msg));
-                }
-              }}
+              onClick={() => openSharedItem(m)}
               className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-900/50"
             >
               <span className="text-sm truncate dark:text-gray-200">{m.file_name || m.message_type}</span>
@@ -143,7 +147,7 @@ export default function SharedMediaSection({
               type="button"
               onClick={(e) => {
                 e.preventDefault();
-                void openDocumentInNativeApp(m.file_url, m.file_name, null, (msg) => toast.error(msg));
+                openSharedItem(m);
               }}
               className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-gray-50 dark:hover:bg-gray-900/50"
             >
@@ -170,12 +174,7 @@ export default function SharedMediaSection({
         </div>
       )}
 
-      <ImageLightbox
-        open={!!lightbox?.src}
-        src={lightbox?.src}
-        alt={lightbox?.alt}
-        onClose={() => setLightbox(null)}
-      />
+      <InAppMediaHost viewer={mediaViewer} onClose={() => setMediaViewer(null)} showForward={false} />
     </section>
   );
 }

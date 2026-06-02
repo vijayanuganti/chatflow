@@ -6,14 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import InAppMediaHost from "@/components/chat/InAppMediaHost";
 import ImageLightbox from "@/components/ImageLightbox";
 import { fileUrl, formatApiError } from "@/lib/api";
 import {
   downloadMediaToDevice,
-  openDocumentInNativeApp,
-  openVideoInNativeApp,
   resolveMediaFileName,
 } from "@/lib/mediaHandler";
+import { isPdfAttachment } from "@/lib/mediaPlaybackUrl";
 import { FOLDER_CATEGORIES } from "@/lib/folderAccess";
 import {
   addFolderLink,
@@ -61,6 +61,7 @@ export default function FolderDetailPanel({
   const [uploadPct, setUploadPct] = useState(null);
   const [busy, setBusy] = useState(false);
   const [photoView, setPhotoView] = useState(null);
+  const [mediaViewer, setMediaViewer] = useState(null);
 
   const mediaKindForCategory = (category) => {
     if (category === "videos") return "video";
@@ -70,24 +71,6 @@ export default function FolderDetailPanel({
 
   const itemFileName = (item, category) =>
     resolveMediaFileName(item.title, item.mime_type, mediaKindForCategory(category));
-
-  const openNativeVideo = (item) => {
-    void openVideoInNativeApp(
-      item.url_or_path,
-      itemFileName(item, "videos"),
-      item.mime_type,
-      (msg) => toast.error(msg),
-    );
-  };
-
-  const openNativeDocument = (item) => {
-    void openDocumentInNativeApp(
-      item.url_or_path,
-      itemFileName(item, "documents"),
-      item.mime_type,
-      (msg) => toast.error(msg),
-    );
-  };
 
   const handleDownload = (item, category) => {
     const toastId = toast.loading("Downloading…");
@@ -105,6 +88,32 @@ export default function FolderDetailPanel({
         toast.error(msg);
       },
     });
+  };
+
+  const openFolderMedia = (item, category) => {
+    if (category === "videos") {
+      setMediaViewer({
+        kind: "video",
+        url: item.url_or_path,
+        fileName: itemFileName(item, "videos"),
+        mimeType: item.mime_type,
+        title: item.title,
+      });
+      return;
+    }
+    if (category === "documents" && isPdfAttachment(item.title, item.mime_type)) {
+      setMediaViewer({
+        kind: "pdf",
+        url: item.url_or_path,
+        fileName: itemFileName(item, "documents"),
+        mimeType: item.mime_type,
+        title: item.title,
+      });
+      return;
+    }
+    if (category === "documents") {
+      void handleDownload(item, category);
+    }
   };
 
   const itemsByCategory = folder?.items_by_category || {};
@@ -273,7 +282,7 @@ export default function FolderDetailPanel({
                   <button
                     type="button"
                     className="w-full aspect-video bg-gray-900 flex items-center justify-center text-white"
-                    onClick={() => openNativeVideo(item)}
+                    onClick={() => openFolderMedia(item, "videos")}
                   >
                     <Film className="h-10 w-10 opacity-80" />
                   </button>
@@ -291,7 +300,7 @@ export default function FolderDetailPanel({
                   </div>
                   <div className="flex gap-1 pt-1">
                     {isVideo && (
-                      <Button size="sm" variant="outline" className="rounded-full flex-1 text-xs" onClick={() => openNativeVideo(item)}>
+                      <Button size="sm" variant="outline" className="rounded-full flex-1 text-xs" onClick={() => openFolderMedia(item, "videos")}>
                         Open
                       </Button>
                     )}
@@ -305,7 +314,7 @@ export default function FolderDetailPanel({
                         size="sm"
                         variant="outline"
                         className="rounded-full flex-1 text-xs"
-                        onClick={() => openNativeDocument(item)}
+                        onClick={() => openFolderMedia(item, "documents")}
                       >
                         Open
                       </Button>
@@ -367,6 +376,7 @@ export default function FolderDetailPanel({
         <TabsContent value="documents" className="mt-4">{renderMediaGrid("documents", itemsByCategory.documents || [])}</TabsContent>
       </Tabs>
       <ImageLightbox open={!!photoView} src={photoView} onClose={() => setPhotoView(null)} />
+      <InAppMediaHost viewer={mediaViewer} onClose={() => setMediaViewer(null)} showForward={false} />
     </div>
   );
 }
