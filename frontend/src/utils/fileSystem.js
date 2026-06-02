@@ -10,28 +10,46 @@ export const CHATFLOW_FOLDERS = {
   audio: "ChatFlow Audio",
 };
 
+/** @type {{ directory: string, basePath: string, label: string } | null} */
+let resolvedLayout = null;
+
 /**
- * Base directory + relative path prefix for ChatFlow media on device.
- * Android: public Documents/ChatFlow (visible in file managers for app-created files).
- * iOS: app Documents/ChatFlow.
+ * Preferred public folder layouts (first match wins).
+ * Android: Download/ChatFlow (public Downloads) then Documents/ChatFlow.
+ * iOS: Documents/ChatFlow.
  */
-export function getChatFlowStorageLayout() {
+export function getChatFlowStorageAttempts() {
   const platform = Capacitor.getPlatform();
   if (platform === "android") {
-    return {
-      directory: "DOCUMENTS",
-      basePath: `${CHATFLOW_ROOT}`,
-      label: "Documents/ChatFlow",
-    };
+    return [
+      {
+        directory: "EXTERNAL_STORAGE",
+        basePath: `Download/${CHATFLOW_ROOT}`,
+        label: `Download/${CHATFLOW_ROOT}`,
+      },
+      {
+        directory: "DOCUMENTS",
+        basePath: CHATFLOW_ROOT,
+        label: `Documents/${CHATFLOW_ROOT}`,
+      },
+    ];
   }
   if (platform === "ios") {
-    return {
-      directory: "DOCUMENTS",
-      basePath: CHATFLOW_ROOT,
-      label: "Files/ChatFlow",
-    };
+    return [
+      {
+        directory: "DOCUMENTS",
+        basePath: CHATFLOW_ROOT,
+        label: `Files/${CHATFLOW_ROOT}`,
+      },
+    ];
   }
-  return null;
+  return [];
+}
+
+export function getChatFlowStorageLayout() {
+  if (resolvedLayout) return resolvedLayout;
+  const attempts = getChatFlowStorageAttempts();
+  return attempts[0] || null;
 }
 
 /**
@@ -54,29 +72,36 @@ export async function requestChatFlowStoragePermissions() {
 }
 
 /**
- * Create ChatFlow/ChatFlow Images|Videos|Documents|Audio if missing.
+ * Create ChatFlow + Images / Videos / Documents / Audio subfolders on device.
  */
 export async function ensureChatFlowFoldersExist() {
   if (!Capacitor.isNativePlatform()) return;
 
-  const layout = getChatFlowStorageLayout();
-  if (!layout) return;
+  const attempts = getChatFlowStorageAttempts();
+  if (!attempts.length) return;
 
   await requestChatFlowStoragePermissions();
 
   const { Filesystem, Directory } = await import("@capacitor/filesystem");
-  const directory = Directory[layout.directory] ?? Directory.Documents;
 
-  const paths = [
-    layout.basePath,
-    ...Object.values(CHATFLOW_FOLDERS).map((name) => `${layout.basePath}/${name}`),
-  ];
-
-  for (const path of paths) {
-    try {
-      await Filesystem.mkdir({ path, directory, recursive: true });
-    } catch {
-      /* already exists or mkdir unsupported */
+  for (const layout of attempts) {
+    const directory = Directory[layout.directory] ?? Directory.Documents;
+    const paths = [
+      layout.basePath,
+      ...Object.values(CHATFLOW_FOLDERS).map((name) => `${layout.basePath}/${name}`),
+    ];
+    let ok = true;
+    for (const path of paths) {
+      try {
+        await Filesystem.mkdir({ path, directory, recursive: true });
+      } catch {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) {
+      resolvedLayout = layout;
+      return;
     }
   }
 }
@@ -103,20 +128,15 @@ export function classifyMediaForFolder(fileName, mimeType = "", messageType = ""
 }
 
 /**
- * Relative path under Documents for a saved attachment.
- * @param {string} fileName
- * @param {ChatFlowMediaCategory} category
+ * Relative path under the resolved public directory for a saved attachment.
  */
 export function getChatFlowSaveRelativePath(fileName, category) {
   const layout = getChatFlowStorageLayout();
-  if (!layout) return `ChatFlow/${fileName}`;
+  if (!layout) return `${CHATFLOW_ROOT}/${fileName}`;
   const folder = CHATFLOW_FOLDERS[category] || CHATFLOW_FOLDERS.documents;
   return `${layout.basePath}/${folder}/${fileName}`;
 }
 
-/**
- * Human-readable save location for toasts.
- */
 export function getChatFlowSaveLocationLabel(category) {
   const layout = getChatFlowStorageLayout();
   if (!layout) return "Downloads";
@@ -126,9 +146,6 @@ export function getChatFlowSaveLocationLabel(category) {
 
 /**
  * Copy from cache relative path into the typed ChatFlow subfolder.
- * @param {string} cacheRelativePath
- * @param {string} fileName
- * @param {ChatFlowMediaCategory} category
  */
 export async function saveFromCacheToChatFlowFolder(cacheRelativePath, fileName, category) {
   const layout = getChatFlowStorageLayout();

@@ -351,7 +351,6 @@ function MessageBubble({
                 mimeType={message.__mimeType}
                 timestampRow={<div className="message-timestamp-row">{messageMeta}</div>}
                 onError={mediaOnError}
-                onOpenInApp={onOpenInAppMedia}
                 selectionMode={selectionMode}
               />
               <UploadProgressRing progress={uploadPct} visible={uploading} />

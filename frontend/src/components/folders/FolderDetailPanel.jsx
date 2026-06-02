@@ -13,8 +13,8 @@ import {
   downloadMediaToDevice,
   resolveMediaFileName,
 } from "@/lib/mediaHandler";
-import { isPdfAttachment } from "@/lib/mediaPlaybackUrl";
 import { getVideoThumbnailUrl } from "@/lib/videoThumbnailUrl";
+import { openDocumentInNativeApp } from "@/lib/mediaHandler";
 import { FOLDER_CATEGORIES } from "@/lib/folderAccess";
 import {
   addFolderLink,
@@ -108,18 +108,14 @@ export default function FolderDetailPanel({
       });
       return;
     }
-    if (category === "documents" && isPdfAttachment(item.title, item.mime_type)) {
-      setMediaViewer({
-        kind: "pdf",
+    if (category === "documents") {
+      void openDocumentInNativeApp({
         url: item.url_or_path,
         fileName: itemFileName(item, "documents"),
         mimeType: item.mime_type,
-        title: item.title,
+        onError: (msg) => toast.error(msg || "Could not open file"),
       });
       return;
-    }
-    if (category === "documents") {
-      void handleDownload(item, category);
     }
   };
 

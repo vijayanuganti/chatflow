@@ -147,12 +147,18 @@ async function writeBlobToCache(relativePath, blob) {
   return written.uri;
 }
 
-async function openNativeUri(uri, contentType) {
+/**
+ * @param {string} uri
+ * @param {string} contentType
+ * @param {{ showChooser?: boolean }} [opts] - showChooser=true → Android/iOS "Open with" sheet
+ */
+async function openNativeUri(uri, contentType, opts = {}) {
   const { FileOpener } = await import("@capacitor-community/file-opener");
+  const showChooser = opts.showChooser ?? false;
   await FileOpener.open({
     filePath: uri,
     contentType,
-    openWithDefault: false,
+    openWithDefault: !showChooser,
   });
 }
 
@@ -248,6 +254,7 @@ export async function openMediaInNativeApp({
   mimeType,
   mediaKind = "document",
   onError,
+  showChooser = false,
 }) {
   const resolvedUrl = fileUrl(url) || url;
   if (!resolvedUrl) {
@@ -284,7 +291,7 @@ export async function openMediaInNativeApp({
     const cachedUri = await getChatMediaLocalUri(url, name);
     if (cachedUri) {
       emitProgress({ open: true, fileName: name, percent: 100, phase: "opening" });
-      await openNativeUri(cachedUri, contentType);
+      await openNativeUri(cachedUri, contentType, { showChooser });
       emitProgress({ open: false, phase: "idle" });
       return;
     }
@@ -324,7 +331,7 @@ export async function openMediaInNativeApp({
       onCancel: undefined,
     });
 
-    await openNativeUri(uri, contentType);
+    await openNativeUri(uri, contentType, { showChooser });
   } catch (err) {
     reportError(err);
   } finally {
@@ -348,7 +355,7 @@ export async function openBlobInNativeApp({ blob, fileName, mimeType, onError })
   try {
     emitProgress({ open: true, fileName: name, percent: 100, phase: "opening" });
     const uri = await writeBlobToCache(cacheRelativePath(name), blob);
-    await openNativeUri(uri, contentType);
+    await openNativeUri(uri, contentType, { showChooser: true });
   } catch (err) {
     const message = mapNativeOpenError(err);
     if (message) onError?.(message);
@@ -367,6 +374,7 @@ export async function openVideoInNativeApp(url, fileName, mimeType, onError) {
   });
 }
 
+/** Download to cache, then open with the system "Open with" / viewer chooser. */
 export async function openDocumentInNativeApp(url, fileName, mimeType, onError) {
   return openMediaInNativeApp({
     url,
@@ -374,6 +382,7 @@ export async function openDocumentInNativeApp(url, fileName, mimeType, onError) 
     mimeType,
     mediaKind: "document",
     onError,
+    showChooser: true,
   });
 }
 

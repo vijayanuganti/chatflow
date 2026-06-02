@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ExternalLink, FileText, Loader2 } from "lucide-react";
 import { api, fileUrl, formatApiError } from "@/lib/api";
 import InAppMediaHost from "@/components/chat/InAppMediaHost";
-import { isPdfAttachment } from "@/lib/mediaPlaybackUrl";
+import { openDocumentInNativeApp } from "@/lib/mediaHandler";
 import { categorizeSharedMessages } from "@/lib/sharedMedia";
 import { toast } from "sonner";
 
@@ -35,8 +35,13 @@ export default function SharedMediaSection({
       });
     } else if (m.message_type === "video") {
       setMediaViewer({ kind: "video", url: m.file_url, fileName: m.file_name });
-    } else if (isPdfAttachment(m.file_name, m.__mimeType)) {
-      setMediaViewer({ kind: "pdf", url: m.file_url, fileName: m.file_name });
+    } else if (m.message_type === "file" || m.file_url) {
+      void openDocumentInNativeApp({
+        url: m.file_url,
+        fileName: m.file_name,
+        mimeType: m.__mimeType,
+        onError: (msg) => toast.error(msg || "Could not open file"),
+      });
     } else {
       toast.info("Download this file from the chat message to save it.");
     }

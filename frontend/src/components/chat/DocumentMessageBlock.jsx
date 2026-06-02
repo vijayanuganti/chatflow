@@ -32,7 +32,6 @@ export default function DocumentMessageBlock({
   mimeType,
   timestampRow,
   onError,
-  onOpenInApp,
   selectionMode = false,
 }) {
   const color = fileIconColor(mimeType, fileName);
@@ -46,7 +45,6 @@ export default function DocumentMessageBlock({
     fileName,
     mimeType,
     mediaKind: "document",
-    onOpenInApp,
   });
 
   return (

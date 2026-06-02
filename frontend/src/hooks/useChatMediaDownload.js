@@ -4,12 +4,12 @@ import {
   downloadChatMedia,
   isChatMediaCached,
 } from "@/lib/chatMediaCache";
-import { isPdfAttachment } from "@/lib/mediaPlaybackUrl";
+import { openDocumentInNativeApp } from "@/lib/mediaHandler";
 import { getVideoThumbnailUrl } from "@/lib/videoThumbnailUrl";
 
 /**
  * WhatsApp-style download state for chat video/document bubbles.
- * When `onOpenInApp` is set, tap opens embedded viewers instead of native FileOpener.
+ * Videos with `onOpenInApp` use in-app player; documents always open via native "Open with" sheet.
  * @param {{ url: string, fileName?: string, mimeType?: string, mediaKind: 'video'|'document', posterUrl?: string, onOpenInApp?: (payload: object) => void }} opts
  */
 export function useChatMediaDownload({
@@ -87,33 +87,39 @@ export function useChatMediaDownload({
   }, [url, fileName]);
 
   const openInApp = useCallback(() => {
-    if (!url || !onOpenInApp) return false;
-    if (mediaKind === "video") {
-      onOpenInApp({
-        kind: "video",
-        url,
-        fileName,
-        mimeType,
-        posterUrl: posterUrl || getVideoThumbnailUrl(url, { attachToken: true }) || undefined,
-      });
-      return true;
-    }
-    if (mediaKind === "document" && isPdfAttachment(fileName, mimeType)) {
-      onOpenInApp({
-        kind: "pdf",
-        url,
-        fileName,
-        mimeType,
-      });
-      return true;
-    }
-    return false;
+    if (!url || !onOpenInApp || mediaKind !== "video") return false;
+    onOpenInApp({
+      kind: "video",
+      url,
+      fileName,
+      mimeType,
+      posterUrl: posterUrl || getVideoThumbnailUrl(url, { attachToken: true }) || undefined,
+    });
+    return true;
   }, [url, fileName, mimeType, mediaKind, posterUrl, onOpenInApp]);
 
   const onBubbleTap = useCallback(
     async (onError) => {
       if (state === "downloading") {
         cancelDownload();
+        return;
+      }
+
+      if (mediaKind === "document") {
+        try {
+          await openDocumentInNativeApp({
+            url,
+            fileName,
+            mimeType,
+            onError: (msg) => onError?.(msg),
+          });
+          if (mountedRef.current) {
+            setState("downloaded");
+            setProgress(100);
+          }
+        } catch (err) {
+          onError?.(err?.message || "Could not open document.");
+        }
         return;
       }
 
@@ -131,7 +137,7 @@ export function useChatMediaDownload({
         onError?.(err?.message || "Download failed. Please check your connection.");
       }
     },
-    [state, cancelDownload, openInApp, startDownload],
+    [state, cancelDownload, openInApp, startDownload, mediaKind, url, fileName, mimeType],
   );
 
   return {

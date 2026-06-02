@@ -1,14 +1,13 @@
 import React from "react";
 import ChatVideoViewer from "@/components/chat/viewers/ChatVideoViewer";
 import ChatImageViewer from "@/components/chat/viewers/ChatImageViewer";
-import ChatPdfViewer from "@/components/chat/viewers/ChatPdfViewer";
 import { fileUrl } from "@/lib/api";
-import { getMediaPlaybackUrl, isPdfAttachment } from "@/lib/mediaPlaybackUrl";
+import { getMediaPlaybackUrl } from "@/lib/mediaPlaybackUrl";
 import { resolveVideoPosterUrl } from "@/lib/videoThumbnailUrl";
 
 /**
- * Renders the active in-app media modal (image / video / PDF).
- * @param {{ viewer: object|null, onClose: () => void, onDownload?: () => void, onForward?: () => void, showForward?: boolean }} props
+ * In-app media modals for photos and videos only.
+ * Documents (PDF, Office, etc.) open via the device native viewer — see openDocumentInNativeApp.
  */
 export default function InAppMediaHost({
   viewer,
@@ -52,18 +51,6 @@ export default function InAppMediaHost({
         posterUrl={posterUrl}
         fileName={fileName}
         title={title || message?.file_name}
-        onClose={onClose}
-      />
-    );
-  }
-
-  if (kind === "pdf" || (kind === "document" && isPdfAttachment(fileName, viewer.mimeType))) {
-    return (
-      <ChatPdfViewer
-        open
-        url={url}
-        fileName={fileName}
-        title={title || fileName}
         onClose={onClose}
       />
     );
