@@ -106,8 +106,8 @@ echo '==> Remote: entering ${REMOTE_DIR}'
 cd ${REMOTE_DIR}
 
 echo '==> Remote: git pull'
-git checkout -- frontend/yarn.lock 2>/dev/null || true
-git stash push -m deploy-autostash -- frontend/yarn.lock 2>/dev/null || true
+git checkout -- frontend/yarn.lock backend/ecosystem.config.cjs 2>/dev/null || true
+git stash push -m deploy-autostash -- frontend/yarn.lock backend/ecosystem.config.cjs 2>/dev/null || true
 git pull --ff-only
 
 echo '==> Remote: backend — activate venv and install dependencies'

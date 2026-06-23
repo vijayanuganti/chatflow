@@ -69,8 +69,8 @@ fi
 chmod o+x /home/ubuntu /home/ubuntu/chatflow /home/ubuntu/chatflow/frontend
 cd $RemoteDir
 echo '==> git pull'
-git checkout -- frontend/yarn.lock 2>/dev/null || true
-git stash push -m deploy-autostash -- frontend/yarn.lock 2>/dev/null || true
+git checkout -- frontend/yarn.lock backend/ecosystem.config.cjs 2>/dev/null || true
+git stash push -m deploy-autostash -- frontend/yarn.lock backend/ecosystem.config.cjs 2>/dev/null || true
 git pull --ff-only
 echo '==> backend deps'
 cd backend
