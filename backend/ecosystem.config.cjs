@@ -1,5 +1,5 @@
 /**
- * PM2 process config for ChatFlow FastAPI on OCI.
+ * PM2 process config for ChatFlow FastAPI on AWS EC2.
  * Usage (on server): cd /home/ubuntu/chatflow/backend && pm2 start ecosystem.config.cjs
  */
 module.exports = {
@@ -11,7 +11,7 @@ module.exports = {
       args: "-m uvicorn server:app --host 127.0.0.1 --port 8000",
       env: {
         CORS_ORIGINS:
-          "https://140-245-209-196.sslip.io,http://localhost,capacitor://localhost,ionic://localhost",
+          "https://vijay-chatflow.duckdns.org,http://localhost,capacitor://localhost,ionic://localhost",
       },
     },
   ],

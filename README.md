@@ -23,8 +23,16 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 - **Complaints** — clients raise issues against their employee; admins triage from the panel (open / solved).
 - **Push notifications** — Firebase Cloud Messaging (FCM) on web (service worker) and Android (native tray + actions); muted chats skip FCM.
 - **Foreground message banner** — in-app dropdown when a new message arrives while the app is open (positioned below the status bar on native).
+- **Single-session login** — one active device per account; logging in elsewhere signs out the previous session and clears push tokens.
+- **Shared folders** — admins/employees create folders with media, documents, and links; role-gated view/edit access.
+- **WhatsApp-style chat media** — inline video thumbnails with a single custom play control; full-screen in-app photo/video viewers; documents open via native “Open with” (no in-app PDF viewer).
+- **Video poster API** — server-generated thumbnails at `GET /api/media/thumbnail/{file_id}` with client-side frame capture fallback.
+- **ChatFlow device folders (Android)** — downloaded chat media saved under `Download/ChatFlow/` (`frontend/src/utils/fileSystem.js`).
+- **In-app Privacy Policy** — full-screen scrollable policy from **About** (all portals); no external browser.
+- **i18n** — English, Hindi, and Telugu via `react-i18next` (language picker in the top-bar menu).
+- **Client referrals** — employees and clients can refer new clients from the top-bar menu.
 - **Role-aware mobile shells** — fixed ChatFlow header, panel footers (Chats · Diet · Settings for clients; Chats · Batches · Settings for employees), and native back-button handling.
-- **Production on OCI VPS** — Nginx + PM2 + MongoDB Atlas + S3 (documented below); optional Render/Vercel path also supported.
+- **Production on AWS EC2** — Nginx + PM2 + MongoDB Atlas + S3 + DuckDNS HTTPS (documented below); optional Render/Vercel path also supported.
 
 ---
 
@@ -51,6 +59,25 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 - **In-chat search** — find messages with highlighted matches.
 - **Starred messages** — star/unstar stored in `localStorage` per conversation (`frontend/src/lib/starredMessages.js`).
 - **Header tap** — opens the contact **User profile** page (mute toggle + shared media).
+
+### Chat media (images, video, documents)
+
+| Type | Inline bubble | Tap action |
+| ---- | ------------- | ---------- |
+| **Image** | Thumbnail in bubble | Full-screen `ChatImageViewer` (pinch-zoom, editor sidebar) |
+| **Video** | Poster image + single center play icon; timestamp + ticks bottom-right (`ChatVideoBlock.jsx`) | Full-screen `ChatVideoViewer` (auto-play, tap to pause, bottom seek bar) |
+| **Document** | File name + size row | Native “Open with” via `@capacitor-community/file-opener` (`openDocumentInNativeApp`) |
+| **Audio** | WhatsApp-style voice row (`VoiceNotePlayer`) | In-bubble playback |
+
+- **No duplicate play icons** — inline video bubbles use `<img>` posters only; native `<video>` controls are suppressed (`controls={false}` + WebKit CSS in `index.css`).
+- **Poster pipeline** — local upload preview → API thumbnail → client frame capture (`useVideoPoster.js`, `videoThumbnailUrl.js`).
+- **Downloads** — optional cache + progress ring for large files (`useChatMediaDownload.js`, `chatMediaCache.js`); videos with in-app playback skip download UI when `onOpenInAppMedia` is wired.
+
+### About, legal & support
+
+- **About sheet** — bottom sheet from the top-bar **⋮ → About** (`AboutSheet.jsx`); app version, features, credits from `frontend/src/lib/appInfo.js`.
+- **Privacy Policy** — in-app full-screen page (`PrivacyPolicyScreen.jsx`); content in `privacyPolicyContent.js`; back returns to About.
+- **Contact Support** — `mailto:` link using `SUPPORT_EMAIL` from `appInfo.js` (override with `REACT_APP_SUPPORT_EMAIL`).
 
 ### Profiles & shared media
 
@@ -115,14 +142,18 @@ Native shells live under `frontend/android` and `frontend/ios` (Capacitor 8).
 - **Branded splash:** `SplashScreenBootstrap.jsx` shows ChatFlow icon + wordmark for at least 3s on native while auth loads; Capacitor splash is hidden as soon as React paints.
 - **API URL resolution** (`frontend/src/lib/backendUrl.js`):
   - **Native:** `REACT_APP_BACKEND_URL_MOBILE` or `REACT_APP_BASE_URL` (must be a LAN IP or public HTTPS URL — never `localhost`).
-  - **Browser on OCI (sslip.io):** same origin as the page; REST calls go to `/api` via Nginx (no `:8000` in the URL).
+  - **Browser on AWS (DuckDNS / EC2):** same origin as the page; REST calls go to `/api` via Nginx (no `:8000` in the URL).
   - **Browser dev:** same host as CRA, port `8001`.
 - **Auth on native:** JWT in `Authorization` header + `X-ChatFlow-Browser-Id` (not HttpOnly cookies — avoids WebView CORS issues). `nativeAuthSync.js` mirrors the token into Android shared prefs for FCM handlers.
 - **CORS for the native shell:** include `http://localhost`, `capacitor://localhost`, and `ionic://localhost` in backend `CORS_ORIGINS` for production APKs talking to a public API.
 - **Push:** `@capacitor/push-notifications` registers FCM tokens; custom `ChatFlowNative` plugin tracks active chat and notification sounds on Android (`frontend/android/.../ChatFlowNativePlugin.java`).
 - **Firebase:** place `firebase-adminsdk.json` in `backend/` for local dev, or set `FIREBASE_SERVICE_ACCOUNT_FILE` on the server (see `backend/.env.example`). Add `google-services.json` in the Android app per Firebase console instructions.
 - **Camera and photos:** profile avatar and chat “Photo” attachments use `@capacitor/camera` (`nativeMedia.js`). iOS privacy strings are in `frontend/ios/App/App/Info.plist`.
-- **Files:** `@capacitor-community/file-opener` + `@capacitor/filesystem` for opening documents in chat (`openDocument.js`).
+- **Files:** `@capacitor-community/file-opener` + `@capacitor/filesystem` for opening documents in chat (`mediaHandler.js`, `fileSystem.js`). Typed download subfolders: Images, Videos, Documents, Audio under `ChatFlow/`.
+- **Quick scripts (repo root):**
+  - `.\scripts\build-android.ps1` — `npm run build:mobile`, sync Capacitor, open Android Studio.
+  - `.\scripts\build-android.ps1 -AssembleDebug` — same + debug APK via Gradle.
+  - `.\scripts\deploy-aws.ps1` — `git push`, SSH deploy to AWS EC2 (pull, pip, PM2, frontend build, Nginx reload). Use `-SkipGitPush` to deploy only what is already on the remote. (`deploy-oci.ps1` is deprecated and forwards here.)
 - **Haptics:** `@capacitor/haptics` for chat-list long-press selection (`selectionHaptics.js`). After adding or upgrading native plugins, run `npm run cap:sync` from `frontend/`.
 - **Safe area:** status-bar spacer in `TopBar` / `ChatWindow`; notification banners and toasts use `notification-viewport-top` + `initSafeAreaInsets()` so they clear the Android status bar when `env(safe-area-inset-top)` is `0`.
 - **System back:** `useDoubleBackToExit.js` traps back at the app root and delegates drill-up (clear selection → close chat → admin sub-panels) before normal history.
@@ -260,6 +291,7 @@ On startup `_migrate_user_documents` runs:
 - `POST /api/conversations/start`, `POST /api/conversations/group`
 - `GET  /api/conversations/{id}/messages`, `POST /api/conversations/{id}/read`
 - `POST /api/messages`, `POST /api/upload`, `GET /api/files/{id}`
+- `GET  /api/media/thumbnail/{file_id}` — JPEG poster for video files (auth via cookie or `?token=`).
 - `WS   /api/ws?token=...`
 
 ### Public profiles
@@ -290,9 +322,14 @@ On startup `_migrate_user_documents` runs:
 
 ```
 chatflow/
+├─ scripts/
+│  ├─ build-android.ps1         ← mobile build + Capacitor sync + Android Studio
+│  ├─ deploy-aws.ps1            ← git push + SSH deploy to AWS EC2
+│  └─ deploy-aws.sh             ← same deploy (Git Bash / Linux / macOS)
 ├─ backend/
 │  ├─ server.py                 ← routes, RBAC, audit, FCM, migrations
-│  ├─ ecosystem.config.cjs      ← PM2 config for OCI/VPS
+│  ├─ media_thumbnails.py       ← video poster generation for /api/media/thumbnail
+│  ├─ ecosystem.config.cjs      ← PM2 config for AWS EC2
 │  ├─ requirements.txt
 │  ├─ .env(.example)
 │  ├─ uploads/                  ← local dev fallback for files
@@ -310,21 +347,24 @@ chatflow/
       │  ├─ useChatSocket.js
       │  └─ useOptimisticMessageSend.js
       ├─ lib/
-      │  ├─ api.js, backendUrl.js    ← JWT native auth; OCI /api gateway
+      │  ├─ api.js, backendUrl.js    ← JWT native auth; Nginx /api gateway
       │  ├─ push.js, notify.js, inAppNotifications.js
       │  ├─ notificationDisplay.js, safeAreaInsets.js
-      │  ├─ nativeAuthSync.js, nativeMedia.js, openDocument.js
-      │  ├─ conversationPreferences.js, optimisticMessages.js
+      │  ├─ nativeAuthSync.js, nativeMedia.js, mediaHandler.js
+      │  ├─ forcedLogout.js, videoThumbnailUrl.js, privacyPolicyContent.js
+      │  ├─ conversationPreferences.js, optimisticMessages.js, appInfo.js
       │  └─ appRoutes.js, chatListScroll.js, sharedMedia.js, …
+      ├─ utils/fileSystem.js           ← ChatFlow download folders (Capacitor)
       ├─ pages/
       │  ├─ ChatApp.jsx, AdminDashboard.jsx, Login.jsx
       │  ├─ DietPlanPage.jsx, MedicalProfilePage.jsx, RaiseComplaintPage.jsx
       │  ├─ ProfileSettingsPage.jsx, UserProfilePage.jsx, …
       └─ components/
          ├─ ChatSidebar.jsx, ChatWindow.jsx, TopBar.jsx
+         ├─ AboutSheet.jsx, PrivacyPolicyScreen.jsx, LanguageSheet.jsx
          ├─ InAppMessageBanner.jsx, PushNotificationBootstrap.jsx
          ├─ SplashScreenBootstrap.jsx, SharedMediaSection.jsx
-         └─ layout/PanelBottomNav.jsx, diet/, chat/, …
+         └─ layout/PanelBottomNav.jsx, diet/, chat/ (ChatVideoBlock, viewers/), …
 ```
 
 ---
@@ -390,7 +430,7 @@ REACT_APP_BACKEND_URL_MOBILE=http://192.168.1.13:8001
 WDS_SOCKET_PORT=0
 ```
 
-For a **production APK** against OCI, set both mobile and web URLs to your public HTTPS host (e.g. `https://140-245-209-196.sslip.io`) before `npm run build:mobile`.
+For a **production APK** against AWS, set both mobile and web URLs to your public HTTPS host (e.g. `https://vijay-chatflow.duckdns.org`) before `npm run build:mobile`.
 
 ---
 
@@ -413,23 +453,33 @@ For a **production APK** against OCI, set both mobile and web URLs to your publi
 
 ## Production deployment
 
-Stack in all setups: **MongoDB Atlas** + **AWS S3** for uploads. Choose either **OCI VPS** (Nginx + PM2) or **Render/Vercel** below.
+Stack in all setups: **MongoDB Atlas** + **AWS S3** for uploads. Primary production is **AWS EC2** (Nginx + PM2); **Render/Vercel** is also supported below.
 
-### Option A — Oracle Cloud (OCI) VPS
+### Option A — AWS EC2 (production)
 
-Typical layout: Ubuntu VM, Nginx serves the CRA `build/` and proxies `/api` → `127.0.0.1:8000`, PM2 runs Uvicorn, Atlas + S3 + Firebase for push.
+Typical layout: Ubuntu EC2 (`3.108.152.171`), Nginx serves the CRA `build/` and proxies `/api` → `127.0.0.1:8000`, PM2 runs Uvicorn, Atlas + S3 + Firebase for push. Public HTTPS: **https://vijay-chatflow.duckdns.org**.
 
 | Piece | Notes |
 | ----- | ----- |
-| **Repo on server** | e.g. `/home/ubuntu/chatflow` |
+| **Repo on server** | `/home/ubuntu/chatflow` |
 | **Backend** | `backend/.venv`, `uvicorn` on port `8000` (localhost only) |
 | **PM2** | [`backend/ecosystem.config.cjs`](./backend/ecosystem.config.cjs) — `pm2 start ecosystem.config.cjs` |
 | **Frontend** | `cd frontend && npm run build` → Nginx `root` points at `build/` |
-| **HTTPS** | sslip.io, Let’s Encrypt, or your domain |
-| **CORS** | Include `https://YOUR_HOST`, `http://localhost`, `capacitor://localhost`, `ionic://localhost` |
+| **HTTPS** | DuckDNS + Let's Encrypt (`scripts/configure-aws-domain.sh`) |
+| **CORS** | Include `https://vijay-chatflow.duckdns.org`, `http://localhost`, `capacitor://localhost`, `ionic://localhost` |
 | **Firebase** | `FIREBASE_SERVICE_ACCOUNT_FILE=/home/ubuntu/chatflow/backend/firebase-adminsdk.json` |
+| **SSH key** | `chatflow-aws.pem` (e.g. `OneDrive\Documents\chatflow-aws.pem`) |
 
-**Update commands (SSH into the VM):**
+**One-command deploy from Windows (after `git push`):**
+
+```powershell
+.\scripts\deploy-aws.ps1
+# Optional: -SshKey "C:\path\to\chatflow-aws.pem"  -SkipGitPush
+```
+
+This SSHs to `ubuntu@3.108.152.171`, runs `git pull`, reinstalls backend deps, `pm2 restart chatflow-backend`, `npm run build` in `frontend/`, and reloads Nginx.
+
+**Manual update (SSH into EC2):**
 
 ```bash
 cd /home/ubuntu/chatflow && git pull
@@ -445,9 +495,19 @@ sudo nginx -t && sudo systemctl reload nginx
 
 After `.env` changes: `pm2 restart chatflow-backend --update-env`.
 
-**Browser API URL:** on sslip.io hosts, the app uses same-origin `/api` automatically (`backendUrl.js`). No `:8000` in the public URL.
+**Live instance:** https://vijay-chatflow.duckdns.org
 
-**Mobile release:** set `REACT_APP_BACKEND_URL` and `REACT_APP_BACKEND_URL_MOBILE` to `https://YOUR_HOST`, run `npm run build:mobile`, then build a signed APK in Android Studio. Add your host to `capacitor.config.json` → `server.allowNavigation` if needed.
+**Browser API URL:** on DuckDNS / EC2 hosts, the app uses same-origin `/api` automatically (`backendUrl.js`). No `:8000` in the public URL.
+
+**Mobile release:** set `REACT_APP_BACKEND_URL` and `REACT_APP_BACKEND_URL_MOBILE` to `https://vijay-chatflow.duckdns.org`, then:
+
+```powershell
+.\scripts\build-android.ps1
+```
+
+Build a signed APK/AAB in Android Studio (**Build → Generate Signed Bundle / APK**). Add your host to `capacitor.config.json` → `server.allowNavigation` if needed.
+
+**Other scripts:** `scripts/bootstrap-aws.sh` (first-time server setup), `scripts/start-aws-backend.sh` (sync `.env` + restart PM2), `scripts/configure-aws-domain.sh` (DuckDNS + SSL).
 
 ---
 

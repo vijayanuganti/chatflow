@@ -45,9 +45,10 @@ function isValidHttpUrl(url) {
   }
 }
 
-/** Browser production on OCI — same host, Nginx proxies /api (no :8000). */
+/** Browser production on VPS — same host, Nginx proxies /api (no :8000). */
 function isNginxGatewayHost(hostname) {
-  return (hostname || "").includes("sslip.io");
+  const h = (hostname || "").toLowerCase();
+  return h.includes("sslip.io") || h.includes("duckdns.org") || h === "3.108.152.171";
 }
 
 /**
@@ -58,7 +59,7 @@ function isNginxGatewayHost(hostname) {
  * - **Capacitor (native):** `REACT_APP_BACKEND_URL_MOBILE`, then `REACT_APP_BACKEND_URL`.
  *   Never uses localhost — set your PC LAN IP (e.g. http://192.168.1.13:8000).
  * - **Browser + development:** same host as the page, port `8001`.
- * - **Browser + OCI (sslip.io):** same origin as the page (no port); `getApiBaseUrl()` → `/api`.
+ * - **Browser + AWS (DuckDNS / EC2 IP):** same origin as the page (no port); `getApiBaseUrl()` → `/api`.
  * - **Browser + other production:** `REACT_APP_BACKEND_URL`.
  */
 export function resolveBackendUrl() {

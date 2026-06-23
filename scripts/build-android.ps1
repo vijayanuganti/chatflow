@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 $Frontend = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "..\frontend"
 Push-Location $Frontend
 
-Write-Host "==> npm run build:mobile (OCI API URLs from frontend/.env)" -ForegroundColor Cyan
+Write-Host "==> npm run build:mobile (AWS API URLs from frontend/.env)" -ForegroundColor Cyan
 # CRA treats eslint warnings as errors when CI=true (e.g. left over from test runs).
 Remove-Item Env:CI -ErrorAction SilentlyContinue
 npm run build:mobile
@@ -28,6 +28,6 @@ Write-Host @"
 Android Studio opened.
   • Build signed release: Build > Generate Signed Bundle / APK
   • Ensure google-services.json is in frontend/android/app/
-  • API base (release): https://140-245-209-196.sslip.io
+  • API base (release): https://vijay-chatflow.duckdns.org/api
 
 "@ -ForegroundColor Green
