@@ -91,6 +91,7 @@ export default function ChatApp() {
   const inPanelLayout = !!panelCtx.panelLayout;
   const chatConvIdFromUrl = getChatConversationId(searchParams);
   const [conversations, setConversations] = useState([]);
+  const [conversationsLoading, setConversationsLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState({});
@@ -245,10 +246,11 @@ export default function ChatApp() {
     }
   }, []);
 
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async ({ silent = false } = {}) => {
     if (user?.role === "client") {
       return;
     }
+    if (!silent) setConversationsLoading(true);
     try {
       const res = await api.get("/conversations");
       setConversations(res.data);
@@ -264,6 +266,8 @@ export default function ChatApp() {
       setLastSeenByUser((prev) => ({ ...lastSeen, ...prev }));
     } catch (err) {
       toast.error(formatApiError(err));
+    } finally {
+      if (!silent) setConversationsLoading(false);
     }
   }, [user?.role]);
 
@@ -374,7 +378,7 @@ export default function ChatApp() {
         }
         loadMessages(activeId);
       } else {
-        loadConversations();
+        loadConversations({ silent: true });
       }
     };
     window.addEventListener(FCM_MESSAGE_EVENT, onFcmMessage);
@@ -533,7 +537,7 @@ export default function ChatApp() {
     });
     setConversations((prev) => {
       const exists = prev.find((c) => c.id === msg.conversation_id);
-      if (!exists) { loadConversations(); return prev; }
+      if (!exists) { loadConversations({ silent: true }); return prev; }
       const shouldIncrementUnread = (
         (!activeId || msg.conversation_id !== activeId) &&
         Array.isArray(msg.recipient_ids) &&
@@ -658,7 +662,7 @@ export default function ChatApp() {
     setMessages,
     setConversations,
     conversations,
-    onConversationMissing: loadConversations,
+    onConversationMissing: () => loadConversations({ silent: true }),
   });
 
   const handleMessageUpdated = useCallback((msg) => {
@@ -870,6 +874,7 @@ export default function ChatApp() {
           <div className={`${selected ? "hidden md:flex" : "flex"} h-full min-h-0 w-full flex-col md:w-auto md:flex-none`}>
             <ChatSidebar
               conversations={filteredConversations}
+              isLoading={conversationsLoading}
               onlineUsers={onlineUsers}
               selectedId={selected?.id}
               onSelect={(c) => openChat(c)}

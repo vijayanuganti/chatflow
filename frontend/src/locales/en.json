@@ -138,6 +138,7 @@
     "archivedSection": "Archived chats",
     "noArchived": "No archived conversations.",
     "noConversations": "No conversations yet.",
+    "loadingConversations": "Loading your chats…",
     "startChat": "Start a chat",
     "monitoring": "Monitoring",
     "sayHello": "Say hello 👋",

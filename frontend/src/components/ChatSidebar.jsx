@@ -12,6 +12,7 @@ import {
   Volume2,
   ChevronLeft,
   ArrowLeft,
+  Loader2,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -237,6 +238,7 @@ function SelectionActionBar({ conversation, selectionCount = 1, onClear, onPrefe
 
 export default function ChatSidebar({
   conversations,
+  isLoading = false,
   onlineUsers,
   selectedId,
   onSelect,
@@ -412,7 +414,15 @@ export default function ChatSidebar({
       )}
 
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto" data-testid="chat-list-scroll">
-        {filtered.length === 0 ? (
+        {isLoading ? (
+          <div
+            className="flex flex-col items-center justify-center gap-2 p-8 text-center text-gray-400 text-sm"
+            data-testid="chat-list-loading"
+          >
+            <Loader2 className="h-5 w-5 animate-spin text-emerald-800 dark:text-emerald-300" aria-hidden />
+            <span>{t("sidebar.loadingConversations")}</span>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="p-8 text-center text-gray-400 text-sm" data-testid="no-conversations">
             {showArchived ? t("sidebar.noArchived") : t("sidebar.noConversations")}
             {!adminView && !showArchived && !inSelectionMode && (

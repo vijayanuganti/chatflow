@@ -229,6 +229,7 @@ export default function AdminDashboard() {
   const [mobileChatStep, setMobileChatStep] = useState("list"); // list | chat
   const [allConvs, setAllConvs] = useState([]); // admin monitoring
   const [myConvs, setMyConvs] = useState([]);   // admin's own chats
+  const [conversationsLoading, setConversationsLoading] = useState(true);
   const monitoringConvs = useMemo(
     () => filterMonitoringConversations(allConvs),
     [allConvs],
@@ -379,7 +380,8 @@ export default function AdminDashboard() {
     [goToTab],
   );
 
-  const loadOverview = useCallback(async () => {
+  const loadOverview = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setConversationsLoading(true);
     try {
       const [s, u, c, my] = await Promise.all([
         api.get("/admin/stats"),
@@ -401,6 +403,8 @@ export default function AdminDashboard() {
       setLastSeenByUser(lastSeen);
     } catch (err) {
       toast.error(formatApiError(err));
+    } finally {
+      if (!silent) setConversationsLoading(false);
     }
   }, []);
 
@@ -829,7 +833,7 @@ export default function AdminDashboard() {
       const preview = msg.content || `[${msg.message_type}]`;
       const previewText = msg.conversation_type === "group" ? `${msg.sender_name}: ${preview}` : preview;
       const exists = prev.find((c) => c.id === msg.conversation_id);
-      if (!exists) { loadOverview(); return prev; }
+      if (!exists) { loadOverview({ silent: true }); return prev; }
       const shouldIncrementUnread = (
         (!activeId || msg.conversation_id !== activeId) &&
         Array.isArray(msg.recipient_ids) &&
@@ -1579,6 +1583,7 @@ export default function AdminDashboard() {
               </div>
               <ChatSidebar
                 conversations={currentConvs}
+                isLoading={conversationsLoading}
                 onlineUsers={onlineUsers}
                 selectedId={selected?.id}
                 onSelect={(c) => openAdminChat(c, tab)}
