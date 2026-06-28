@@ -4369,6 +4369,14 @@ class ConnectionManager:
             except Exception:
                 pass
 
+    async def send_to_user(self, user_id: str, event: dict) -> int:
+        """Deliver event to all sockets for user_id (used by call signaling)."""
+        await self.send_event(user_id, event)
+        return len(self.active.get(user_id, set()))
+
+    def connection_count(self, user_id: str) -> int:
+        return len(self.active.get(user_id, set()))
+
     async def send_force_logout(self, user_id: str, reason: str = SESSION_INVALID_REASON) -> None:
         """Notify connected clients then close sockets (single-session takeover)."""
         await self.send_event(user_id, {"type": "force_logout", "reason": reason})
@@ -4582,6 +4590,17 @@ async def websocket_endpoint(
                 ts = now_iso()
                 await db.users.update_one({"id": user_id}, {"$set": {"last_seen": ts}})
                 await websocket.send_json({"type": "pong"})
+
+            elif (payload.get("type") or "").startswith("call-"):
+                from call_signaling import handle_call_signal
+
+                await handle_call_signal(
+                    user_id=user_id,
+                    user=user,
+                    payload=payload,
+                    manager=manager,
+                    db=db,
+                )
 
     except WebSocketDisconnect:
         logger.info(f"WS disconnected: user_id={user_id}")
@@ -4956,6 +4975,7 @@ async def _folder_delete_storage_urls(urls: List[Optional[str]]) -> None:
                 pass
 
 
+from call_signaling import register_call_routes
 from diet_api import register_diet_routes
 from folders_api import migrate_folders_schema, register_folder_routes
 from reports_api import register_reports_routes
@@ -4984,6 +5004,14 @@ register_folder_routes(
     upload_fileobj=_folder_upload_fileobj,
     delete_storage_urls=_folder_delete_storage_urls,
     log_audit=log_audit,
+)
+
+register_call_routes(
+    api_router,
+    db=db,
+    require_admin=require_admin,
+    get_current_user=get_current_user,
+    clean_user=clean_user,
 )
 
 app.include_router(api_router, prefix="/api")

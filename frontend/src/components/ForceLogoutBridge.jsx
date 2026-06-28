@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
-import useChatSocket from "@/hooks/useChatSocket";
+import { useChatSocketHandlers } from "@/context/ChatSocketContext";
 import {
   LOGOUT_REASON_ANOTHER_DEVICE,
   performForcedLogout,
@@ -22,8 +22,7 @@ export default function ForceLogoutBridge() {
     performForcedLogout({ reason, showModal: true });
   };
 
-  useChatSocket({
-    enabled: Boolean(user?.id),
+  useChatSocketHandlers({
     onForceLogout,
   });
 

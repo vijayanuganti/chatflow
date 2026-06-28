@@ -56,7 +56,8 @@ export default function ChatPanelLayout() {
         }`}
       >
         <ChatPanelSidebar items={items} user={user} />
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden relative call-panel-content">
+          <MinimizedCallBadge />
           <Outlet context={{ panelLayout: true, setUnreadTotal, refreshUnread }} />
         </div>
       </div>

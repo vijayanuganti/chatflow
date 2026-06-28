@@ -7,7 +7,7 @@ import MobilePageShell from "@/components/layout/MobilePageShell";
 import { employeeBatchClientsPath, resolveBackTo } from "@/lib/appRoutes";
 import { api, formatApiError } from "@/lib/api";
 import { filterBatchForTab } from "@/lib/accountStatus";
-import useChatSocket from "@/hooks/useChatSocket";
+import { useChatSocketHandlers } from "@/context/ChatSocketContext";
 import { toast } from "sonner";
 
 const BATCH_TABS = [
@@ -33,7 +33,7 @@ export default function EmployeeDetailPage() {
     }
   }, []);
 
-  useChatSocket({ onPresence: handlePresence, enabled: true });
+  useChatSocketHandlers({ onPresence: handlePresence });
 
   const load = useCallback(async () => {
     setLoading(true);

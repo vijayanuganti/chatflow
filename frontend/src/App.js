@@ -4,6 +4,11 @@ import { registerServiceWorker } from "@/lib/notify";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { ChatProvider } from "@/context/ChatContext";
+import { ChatSocketProvider } from "@/context/ChatSocketContext";
+import { CallProvider } from "@/context/CallContext";
+import GlobalCallOverlay from "@/components/call/GlobalCallOverlay";
+import GlobalCallBridge from "@/components/call/GlobalCallBridge";
+import { GlobalCallBackground } from "@/hooks/useCallBackgroundRoute";
 import { ThemeProvider } from "@/context/ThemeContext";
 import LoginPage from "@/pages/Login";
 import ChatApp from "@/pages/ChatApp";
@@ -104,13 +109,18 @@ function App() {
       <I18nGate>
       <ThemeProvider>
       <AuthProvider>
+        <ChatSocketProvider>
+        <CallProvider>
+        <GlobalCallBridge />
+        <GlobalCallOverlay />
         <ForceLogoutBridge />
         <NotificationLaunchGuard />
         <ShareIntentProvider>
-        <ChatProvider>
         <NativeAuthBootstrap />
         <SplashScreenBootstrap />
         <BrowserRouter>
+          <ChatProvider>
+          <GlobalCallBackground />
           <PushNotificationBootstrap />
           <InAppMessageBanner />
           <Routes>
@@ -290,11 +300,13 @@ function App() {
             />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          <Toaster position="top-right" />
+          <NativeMediaOpenProgress />
+          </ChatProvider>
         </BrowserRouter>
-        <Toaster position="top-right" />
-        <NativeMediaOpenProgress />
-        </ChatProvider>
         </ShareIntentProvider>
+        </CallProvider>
+        </ChatSocketProvider>
       </AuthProvider>
       </ThemeProvider>
       </I18nGate>

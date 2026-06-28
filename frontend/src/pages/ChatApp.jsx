@@ -9,7 +9,9 @@ import {
   raiseComplaintPath,
 } from "@/lib/appRoutes";
 import TopBar from "@/components/TopBar";
-import useChatSocket from "@/hooks/useChatSocket";
+import { useChatSocketHandlers, useChatSocketTyping } from "@/context/ChatSocketContext";
+import useRegisterCallNavigation from "@/hooks/useRegisterCallNavigation";
+import MinimizedCallBadge from "@/components/call/MinimizedCallBadge";
 import usePanelMobileBack from "@/hooks/usePanelMobileBack";
 import useMobileChatViewport from "@/hooks/useMobileChatViewport";
 import { api, formatApiError } from "@/lib/api";
@@ -674,7 +676,7 @@ export default function ChatApp() {
     });
   }, [updateMessageById]);
 
-  const { sendTyping: wsSendTyping } = useChatSocket({
+  useChatSocketHandlers({
     onMessage: handleIncomingMessage,
     onTyping: handleTyping,
     onPresence: handlePresence,
@@ -682,8 +684,9 @@ export default function ChatApp() {
     onStatusUpdate: handleStatusUpdate,
     onMessageUpdated: handleMessageUpdated,
     onConversationRemoved: handleConversationRemoved,
-    enabled: Boolean(user?.id),
   });
+
+  const sendTyping = useChatSocketTyping();
 
   // Register SW first (Android WebView requires it for showNotification), then ask permission after login.
   useEffect(() => {
@@ -717,6 +720,8 @@ export default function ChatApp() {
     });
   }, [navigate, setActiveConversationId, isClient, clientEmployeeId, loadClientAssignedChat]);
 
+  useRegisterCallNavigation(openConversationById);
+
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
     const onMessage = (event) => {
@@ -745,10 +750,6 @@ export default function ChatApp() {
     const qs = next.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
   }, [isClient, conversations.length, openConversationById]);
-
-  const sendTyping = useCallback((conversationId, isTyping) => {
-    wsSendTyping(conversationId, isTyping);
-  }, [wsSendTyping]);
 
   const filteredConversations = React.useMemo(() => {
     // Inactive clients shouldn't clutter chat lists for anyone except admin
@@ -891,7 +892,8 @@ export default function ChatApp() {
             />
           </div>
         )}
-        <main className={`${isClient || selected || chatConvIdFromUrl ? "flex" : "hidden md:flex"} min-h-0 flex-1 flex-col overflow-hidden`}>
+        <main className={`call-panel-content relative ${isClient || selected || chatConvIdFromUrl ? "flex" : "hidden md:flex"} min-h-0 flex-1 flex-col overflow-hidden`}>
+          <MinimizedCallBadge fixedBelowTopBar={isClient && !chatConvIdFromUrl} />
           {isClient && !clientChatReady && !clientUnassigned ? (
             <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-gray-400" data-testid="client-chat-loading">
               {t("chat.loadingChat")}

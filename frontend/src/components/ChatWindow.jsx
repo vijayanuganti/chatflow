@@ -15,6 +15,7 @@ import {
   Forward,
   MoreVertical,
   Star,
+  Phone,
 } from "lucide-react";
 import SwipeableMessageRow from "@/components/chat/SwipeableMessageRow";
 import ForwardModal from "@/components/chat/ForwardModal";
@@ -41,6 +42,9 @@ import InAppMediaHost from "@/components/chat/InAppMediaHost";
 import { formatWhatsAppLastSeen } from "@/lib/datetime";
 import { useAuth } from "@/context/AuthContext";
 import { useChat } from "@/context/ChatContext";
+import { useCall } from "@/context/CallContext";
+import { CALL_STATE } from "@/lib/callConstants";
+import ChatCallHeader from "@/components/call/ChatCallHeader";
 import Avatar from "./Avatar";
 import MessageBubble from "./MessageBubble";
 import { monitoringBubbleAlignRight } from "@/lib/adminMonitoring";
@@ -87,6 +91,7 @@ export default function ChatWindow({
   const { t } = useTranslation();
   const { user } = useAuth();
   const { setActiveConversationId, setChatComposerActive } = useChat();
+  const { callState, startCallForChat, isCallActive } = useCall();
   const navigate = useNavigate();
 
   const resolvedBackTo =
@@ -904,10 +909,21 @@ export default function ChatWindow({
     navigate(path, { state: subPageState({ client: dietClient }) });
   };
 
+  const canPlaceCall = !isGroup && !readOnly && Boolean(otherUser?.id) && conversation?.type === "direct";
+  const handleStartCall = () => {
+    if (!canPlaceCall || callState !== CALL_STATE.IDLE) return;
+    void startCallForChat(
+      conversation.id,
+      otherUser.id,
+      otherUser.full_name || otherUser.username || "Contact",
+    );
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950" data-testid="chat-window">
       {/* Header: optional status-bar spacer when this window is the top chrome (admin mobile chat). */}
       <div className="chat-header z-10 flex shrink-0 flex-col border-b border-gray-200 bg-white/90 backdrop-blur-xl dark:border-gray-800 dark:bg-gray-950/80">
+        <ChatCallHeader conversationId={conversation.id} remoteName={otherUser?.full_name} />
         {statusBarInset ? (
           <div
             className="w-full shrink-0 bg-white/90 dark:bg-gray-950/80"
@@ -1018,6 +1034,18 @@ export default function ChatWindow({
           </div>
         </div>
         </button>
+        {canPlaceCall && callState === CALL_STATE.IDLE && !isCallActive ? (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="rounded-full shrink-0 text-emerald-700 dark:text-emerald-300"
+            onClick={handleStartCall}
+            data-testid="chat-call-btn"
+            title="Audio call"
+          >
+            <Phone className="h-5 w-5" />
+          </Button>
+        ) : null}
         <Button size="icon" variant="ghost" className="rounded-full shrink-0" onClick={() => setThreadSearchOpen((v) => !v)} data-testid="chat-thread-search-toggle" title={t("chat.searchInChat")}>
           <Search className="h-5 w-5" />
         </Button>

@@ -5,7 +5,9 @@ import ChatSidebar from "@/components/ChatSidebar";
 import ChatWindow from "@/components/ChatWindow";
 import ComposeIcon from "@/components/icons/ComposeIcon";
 import TopBar from "@/components/TopBar";
-import useChatSocket from "@/hooks/useChatSocket";
+import { useChatSocketHandlers, useChatSocketTyping } from "@/context/ChatSocketContext";
+import useRegisterCallNavigation from "@/hooks/useRegisterCallNavigation";
+import MinimizedCallBadge from "@/components/call/MinimizedCallBadge";
 import usePanelMobileBack from "@/hooks/usePanelMobileBack";
 import useMobileChatViewport from "@/hooks/useMobileChatViewport";
 import { api, formatApiError } from "@/lib/api";
@@ -280,6 +282,23 @@ export default function AdminDashboard() {
     },
     [navigate, tab, setActiveConversationId],
   );
+
+  const openConversationByIdForCall = useCallback(
+    (convId) => {
+      if (!convId) return;
+      const pools = [myConvs, adminMyChatsConvs, monitoringConvs];
+      for (const pool of pools) {
+        const conv = pool.find((c) => c.id === convId);
+        if (conv) {
+          openAdminChat(conv, "mychats");
+          return;
+        }
+      }
+    },
+    [myConvs, adminMyChatsConvs, monitoringConvs, openAdminChat],
+  );
+
+  useRegisterCallNavigation(openConversationByIdForCall);
 
   const closeAdminChat = useCallback(() => {
     clearActiveConversation();
@@ -938,7 +957,7 @@ export default function AdminDashboard() {
     });
   }, [updateMessageById]);
 
-  const { sendTyping } = useChatSocket({
+  useChatSocketHandlers({
     onMessage: handleIncoming,
     onTyping: handleTypingEvent,
     onPresence: handlePresence,
@@ -946,8 +965,9 @@ export default function AdminDashboard() {
     onStatusUpdate: handleStatusUpdate,
     onMessageUpdated: handleMessageUpdated,
     onConversationRemoved: handleConversationRemoved,
-    enabled: Boolean(user?.id),
   });
+
+  const sendTyping = useChatSocketTyping();
 
   const isSelectedAdminChat = selected && myConvs.find((c) => c.id === selected.id);
   const currentConvs = tab === "mychats" ? adminMyChatsConvs : monitoringConvs;
@@ -1548,7 +1568,8 @@ export default function AdminDashboard() {
             </div>
 
             {/* Chat */}
-            <main className="hidden md:flex min-h-0 flex-1 flex-col overflow-hidden">
+            <main className="call-panel-content relative hidden md:flex min-h-0 flex-1 flex-col overflow-hidden">
+              <MinimizedCallBadge />
               <ChatWindow
                 conversation={selected}
                 messages={messages}
@@ -1601,7 +1622,8 @@ export default function AdminDashboard() {
                 listScrollRef={listScrollRef}
               />
             </div>
-            <main className={`flex min-h-0 flex-1 flex-col overflow-hidden ${mobileChatStep !== "chat" ? "hidden md:flex" : ""}`}>
+            <main className={`call-panel-content relative flex min-h-0 flex-1 flex-col overflow-hidden ${mobileChatStep !== "chat" ? "hidden md:flex" : ""}`}>
+              <MinimizedCallBadge fixedBelowTopBar={mobileChatStep === "chat"} />
               <ChatWindow
                 conversation={selected}
                 messages={messages}
