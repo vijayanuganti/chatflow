@@ -30,8 +30,11 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 - **ChatFlow device folders (Android)** — downloaded chat media saved under `Download/ChatFlow/` (`frontend/src/utils/fileSystem.js`).
 - **In-app Privacy Policy** — full-screen scrollable policy from **About** (all portals); no external browser.
 - **i18n** — English, Hindi, and Telugu via `react-i18next` (language picker in the top-bar menu).
-- **Client referrals** — employees and clients can refer new clients from the top-bar menu.
-- **Role-aware mobile shells** — fixed ChatFlow header, panel footers (Chats · Diet · Settings for clients; Chats · Batches · Settings for employees), and native back-button handling.
+- **Client referrals** — employees and clients submit referrals from the top-bar menu; admins triage in **Referrals** (pending / converted / rejected).
+- **Admin reports** — search users, view JSON summaries, download client/employee PDFs (`reports_api.py`, `AdminReportsPane.jsx`).
+- **Android share intent** — share photos/files from other apps into a ChatFlow conversation or shared folder (`ShareIntentProvider`, native `ChatFlowShare` plugin).
+- **Login history** — recent sign-in sessions in Profile settings; revoke remote devices without logging out locally (`LoginHistorySection.jsx`).
+- **Role-aware mobile shells** — fixed ChatFlow header; client/employee footers (**Chats · My Diet · Folders** / **Chats · Folders**); employee batch filter in the chat sidebar; **Settings** via top-bar **⋮** menu; native back-button handling.
 - **Production on AWS EC2** — Nginx + PM2 + MongoDB Atlas + S3 + DuckDNS HTTPS (documented below); optional Render/Vercel path also supported.
 
 ---
@@ -57,7 +60,8 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 - **Scroll-to-bottom** floating button when scrolled up.
 - **Typing indicator** — shows `typing...` only.
 - **In-chat search** — find messages with highlighted matches.
-- **Starred messages** — star/unstar stored in `localStorage` per conversation (`frontend/src/lib/starredMessages.js`).
+- **Starred messages** — star/unstar persisted per user in `starred_messages`; in-chat panel via `StarredMessagesPanel.jsx` (`messageActionsApi.js`).
+- **Message edit** — long-press → Edit on your own text messages (`PATCH /api/messages/{message_id}`).
 - **Header tap** — opens the contact **User profile** page (mute toggle + shared media).
 
 ### Chat media (images, video, documents)
@@ -90,21 +94,28 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 - App title is always **ChatFlow** (not “Admin | Overview”, etc.).
 - **Refresh** in the three-dots menu re-fetches conversations, messages, and cache (no logout).
 - **Admin → Users** filter: All | Employees | Clients | Inactive Clients.
-- **Unread badge** on the admin mobile footer **Chats** tab (not on the logo).
-- **Mobile “More” hub** — Monitor chats, Batches, Accounts, Permissions, Activity (audit), Complaints, Storage, Inactive clients, Settings.
+- **Mobile footer** — Home · Chats · Contacts · Settings (More hub); unread badge on **Chats**, not the logo.
+- **Mobile “More” hub** — Monitor chats, Batches, Folders, Reports, Permissions, Referrals, Complaints, Storage (desktop sidebar also has Activity audit, Inactive clients, Accounts).
 - **Complaints inbox** — filter all / open / solved; mark solved or reopen.
 - **Storage** — admin view of upload usage; delete conversations or user accounts from the panel.
 - **Medical profile** — edit client medical data from user detail (`/admin/users/...` flows).
 
+### Shared folders (`/chat/folders`)
+
+- **Browse** — clients and employees open role-filtered folders from the **Folders** footer tab (`FolderBrowsePage.jsx`).
+- **Manage** — admins use **Admin → Folders**; employees create folders scoped to their clients (`AdminFoldersPane.jsx`, `folders_api.py`).
+- **Categories** — links, photos, videos, documents with role-based access rules (all clients, active only, specific user, etc.).
+- **Share into folder** — Android share intent can target a folder (`ShareDestinationSheet.jsx`).
+
 ### Mobile footers (`PanelBottomNav`)
 
-| Role     | Tabs                          |
-| -------- | ----------------------------- |
-| Client   | Chats · My Diet · Settings    |
-| Employee | Chats · Batches · Settings    |
-| Admin    | Overview · Chats · Users · …  |
+| Role     | Footer tabs                         | Settings / profile      |
+| -------- | ----------------------------------- | ----------------------- |
+| Client   | Chats · My Diet · Folders           | Top bar **⋮** menu      |
+| Employee | Chats · Folders                     | Top bar **⋮** menu      |
+| Admin    | Home · Chats · Contacts · Settings  | **More** hub + sidebar  |
 
-Footers hide only when a **conversation thread** is open, not during list selection.
+Employee **batch filter** lives in the chat sidebar (not the footer). Footers hide only when a **conversation thread** is open, not during list selection.
 
 ### Client diet
 
@@ -114,7 +125,9 @@ Footers hide only when a **conversation thread** is open, not during list select
 ### Client complaints & medical
 
 - **Raise a complaint** — clients use **Profile → Raise a complaint** (`RaiseComplaintPage.jsx`); stored with status `open` / `solved`.
+- **Submit a referral** — employees/clients use **⋮ → Refer a client**; admins convert pending referrals to accounts in **Referrals**.
 - **Medical profile** — `MedicalProfilePage.jsx` for clients; employees/admins view via user account detail and admin user tools.
+- **Login history** — **Profile → Login history** lists recent devices; revoke old sessions remotely.
 
 ### Notifications
 
@@ -147,6 +160,7 @@ Native shells live under `frontend/android` and `frontend/ios` (Capacitor 8).
 - **Auth on native:** JWT in `Authorization` header + `X-ChatFlow-Browser-Id` (not HttpOnly cookies — avoids WebView CORS issues). `nativeAuthSync.js` mirrors the token into Android shared prefs for FCM handlers.
 - **CORS for the native shell:** include `http://localhost`, `capacitor://localhost`, and `ionic://localhost` in backend `CORS_ORIGINS` for production APKs talking to a public API.
 - **Push:** `@capacitor/push-notifications` registers FCM tokens; custom `ChatFlowNative` plugin tracks active chat and notification sounds on Android (`frontend/android/.../ChatFlowNativePlugin.java`).
+- **Share intent (Android):** custom `ChatFlowShare` plugin receives shares from other apps; `ShareIntentProvider` routes to a conversation or shared folder (`frontend/src/lib/shareIntent/`).
 - **Firebase:** place `firebase-adminsdk.json` in `backend/` for local dev, or set `FIREBASE_SERVICE_ACCOUNT_FILE` on the server (see `backend/.env.example`). Add `google-services.json` in the Android app per Firebase console instructions.
 - **Camera and photos:** profile avatar and chat “Photo” attachments use `@capacitor/camera` (`nativeMedia.js`). iOS privacy strings are in `frontend/ios/App/App/Info.plist`.
 - **Files:** `@capacitor-community/file-opener` + `@capacitor/filesystem` for opening documents in chat (`mediaHandler.js`, `fileSystem.js`). Typed download subfolders: Images, Videos, Documents, Audio under `ChatFlow/`.
@@ -170,11 +184,12 @@ Native shells live under `frontend/android` and `frontend/ios` (Capacitor 8).
 └──────────────┘  ◄── HttpOnly JWT cookie (7d) ──────└────────────────┘
 ```
 
-- All other routes (chat, admin) re-validate the session via `/api/auth/verify`.
+- All other routes (chat, admin) re-validate the session via `/api/auth/verify` or `/api/auth/session/validate`.
 - **Web:** HttpOnly JWT cookie; axios sends `withCredentials`.
 - **Native (Capacitor):** JWT in `Authorization: Bearer` + `X-ChatFlow-Browser-Id` header (no cookies).
 - WebSocket upgrade uses the cookie or `?token=` query param.
-- There are **no** `/auth/register`, `/auth/forgot-password` or email-OTP endpoints.
+- **Single-session login** — a new sign-in deactivates prior `sessions` rows and clears old FCM tokens; users can review/revoke history at `/api/auth/login-history`.
+- There are **no** `/auth/register` or public `/auth/forgot-password` endpoints.
 
 ---
 
@@ -248,6 +263,44 @@ Per-user, per-conversation settings (not global for the thread).
 
 Index: `(user_id, conversation_id)` unique.
 
+### `sessions`
+Tracks active sign-in devices (single-session enforcement).
+
+| Field           | Type         | Notes                                      |
+| --------------- | ------------ | ------------------------------------------ |
+| `id`            | string (uuid)| Primary key.                               |
+| `user_id`       | string       | Account owner.                             |
+| `token_jti`     | string       | JWT ID bound to this session.              |
+| `is_active`     | bool         | `false` after logout or superseded login.  |
+| `created_at`    | iso datetime | Sign-in time.                              |
+| `last_active`   | iso datetime | Last activity / revoke time.               |
+| `user_agent`    | string       | Optional client hint.                      |
+| `ip_address`    | string       | Optional.                                  |
+
+### `starred_messages`
+Per-user starred chat messages.
+
+| Field              | Type   | Notes                    |
+| ------------------ | ------ | ------------------------ |
+| `id`               | string | UUID.                    |
+| `user_id`          | string | Who starred the message. |
+| `message_id`       | string | Starred message.         |
+| `conversation_id`  | string | Parent conversation.     |
+| `starred_at`       | iso    | When starred.            |
+
+### `referrals`
+Client referrals submitted by employees/clients; admin triage.
+
+| Field                  | Type   | Notes                                              |
+| ---------------------- | ------ | -------------------------------------------------- |
+| `id`                   | string | UUID.                                              |
+| `referred_by_id`       | string | Submitting user.                                   |
+| `referred_name/phone`  | string | Prospect contact.                                  |
+| `health_goal`          | string | e.g. `weight_loss`, `muscle_gain`, …               |
+| `status`               | string | `pending` \| `converted` \| `rejected`             |
+| `converted_client_id`  | string | Set when converted to a client account.            |
+| `created_at`           | iso    | Submission time.                                   |
+
 ### Migrations
 On startup `_migrate_user_documents` runs:
 
@@ -262,10 +315,13 @@ On startup `_migrate_user_documents` runs:
 ## REST API surface
 
 ### Auth
-- `POST /api/auth/login` — `{ phone_number, password }` → sets HttpOnly cookie.
-- `POST /api/auth/logout` — clears cookie.
+- `POST /api/auth/login` — `{ phone_number, password }` → sets HttpOnly cookie (deactivates prior sessions).
+- `POST /api/auth/logout` — clears cookie and current session.
 - `GET  /api/auth/verify` — returns the current session’s user.
 - `GET  /api/auth/me` — same shape, semantic alias.
+- `GET  /api/auth/session/validate` — lightweight `{ valid, reason? }` poll (foreground refresh).
+- `GET  /api/auth/login-history` — alias `GET /api/users/me/sessions`; recent sign-ins with `is_current`.
+- `POST /api/auth/sessions/{session_id}/revoke` — remote sign-out for a past device.
 
 ### Self
 - `PUT  /api/users/me` — update `full_name`, `bio`, `status`, `avatar_url`.
@@ -282,17 +338,40 @@ On startup `_migrate_user_documents` runs:
 - `GET  /api/admin/users/{id}` — includes `created_by_user` and `password_reset_by_user`.
 - `POST /api/admin/users/{id}/reset-password` — `{ new_password }`.
 - `POST /api/admin/users/{id}/permissions` — `{ account_creation_access: bool }`.
+- `POST /api/admin/users/{id}/active` — `{ is_active?, client_status? }` (employee activate/deactivate; client active/inactive/dropped).
+- `GET  /api/admin/clients` — client roster with lifecycle status.
 - `GET  /api/admin/audit-logs?action=...&limit=...`
 - `GET  /api/admin/stats`, `/admin/conversations`, `/admin/employees`, `/admin/batches`, `/admin/employees/{id}/batches`, `/admin/users/{id}/activity`.
+- `GET  /api/admin/storage` — MongoDB + S3 usage (optional quota env vars).
+- `DELETE /api/admin/conversations/{conv_id}`, `DELETE /api/admin/users/{user_id}`.
 
 ### Messaging & conversations
 - `GET  /api/conversations` — each row may include `is_pinned`, `is_archived`, `is_muted` for the current user; pinned-first sort applied server-side.
 - `PATCH /api/conversations/{conv_id}/preferences` — body `{ is_pinned?, is_archived?, is_muted? }` (partial update).
 - `POST /api/conversations/start`, `POST /api/conversations/group`
 - `GET  /api/conversations/{id}/messages`, `POST /api/conversations/{id}/read`
-- `POST /api/messages`, `POST /api/upload`, `GET /api/files/{id}`
+- `POST /api/messages`, `PATCH /api/messages/{message_id}` — edit own text messages.
+- `POST /api/messages/{message_id}/star`, `DELETE /api/messages/{message_id}/star`
+- `GET  /api/conversations/{chat_id}/starred` — starred messages in a thread.
+- `POST /api/upload`, `GET /api/files/{id}`
+- `GET  /api/media/stream` — authenticated stream for S3 uploads (incl. folder media).
 - `GET  /api/media/thumbnail/{file_id}` — JPEG poster for video files (auth via cookie or `?token=`).
 - `WS   /api/ws?token=...`
+
+### Shared folders
+- `GET  /api/folders`, `GET /api/folders/{folder_id}` — role-filtered browse (clients/employees).
+- `GET/POST/PATCH/DELETE /api/employee/folders…` — employee folder CRUD + items/links/upload.
+- `GET/POST/PATCH/DELETE /api/admin/folders…` — admin folder CRUD + user picker endpoints.
+
+### Referrals
+- `POST /api/referrals` — employee/client submits a referral.
+- `GET  /api/admin/referrals` — admin inbox (`?status=pending|converted|rejected`).
+- `GET  /api/admin/referrals/{referral_id}`, `PATCH /api/admin/referrals/{referral_id}` — triage / convert.
+
+### Admin reports
+- `GET  /api/admin/reports/search?q=…` — find users for reporting.
+- `GET  /api/admin/reports/client/{user_id}`, `/employee/{user_id}` — JSON report payload.
+- `GET  /api/admin/reports/client/{user_id}/pdf`, `/employee/{user_id}/pdf` — PDF download (requires ReportLab).
 
 ### Public profiles
 - `GET /api/users/{user_id}/public` — contact-safe profile fields for profile pages.
@@ -325,9 +404,14 @@ chatflow/
 ├─ scripts/
 │  ├─ build-android.ps1         ← mobile build + Capacitor sync + Android Studio
 │  ├─ deploy-aws.ps1            ← git push + SSH deploy to AWS EC2
-│  └─ deploy-aws.sh             ← same deploy (Git Bash / Linux / macOS)
+│  ├─ deploy-aws.sh             ← same deploy (Git Bash / Linux / macOS)
+│  └─ check-aws-backend.sh      ← remote health probe
 ├─ backend/
 │  ├─ server.py                 ← routes, RBAC, audit, FCM, migrations
+│  ├─ diet_api.py               ← diet plan routes
+│  ├─ folders_api.py            ← shared folder CRUD + access rules
+│  ├─ reports_api.py            ← admin reports + PDF export
+│  ├─ report_pdf.py             ← ReportLab PDF builders
 │  ├─ media_thumbnails.py       ← video poster generation for /api/media/thumbnail
 │  ├─ ecosystem.config.cjs      ← PM2 config for AWS EC2
 │  ├─ requirements.txt
@@ -336,14 +420,15 @@ chatflow/
 │  └─ firebase-adminsdk.json    ← local dev only (gitignored in prod)
 └─ frontend/
    ├─ capacitor.config.json
-   ├─ android/                   ← Capacitor Android + ChatFlow FCM services
+   ├─ android/                   ← Capacitor Android + ChatFlow FCM / Share plugins
    ├─ ios/
    ├─ public/sw.js                ← web push service worker
    └─ src/
-      ├─ App.js                      ← routes, Toaster, InAppMessageBanner, bootstraps
+      ├─ App.js                      ← routes, Toaster, InAppMessageBanner, ShareIntentProvider
       ├─ context/AuthContext.jsx
       ├─ hooks/
       │  ├─ useDoubleBackToExit.js
+      │  ├─ useChatPanelNav.js       ← client/employee sidebar + footer items
       │  ├─ useChatSocket.js
       │  └─ useOptimisticMessageSend.js
       ├─ lib/
@@ -353,18 +438,22 @@ chatflow/
       │  ├─ nativeAuthSync.js, nativeMedia.js, mediaHandler.js
       │  ├─ forcedLogout.js, videoThumbnailUrl.js, privacyPolicyContent.js
       │  ├─ conversationPreferences.js, optimisticMessages.js, appInfo.js
+      │  ├─ messageActionsApi.js, foldersApi.js, reportsApi.js
+      │  ├─ shareIntent/             ← Android share-to-chat/folder pipeline
       │  └─ appRoutes.js, chatListScroll.js, sharedMedia.js, …
       ├─ utils/fileSystem.js           ← ChatFlow download folders (Capacitor)
       ├─ pages/
       │  ├─ ChatApp.jsx, AdminDashboard.jsx, Login.jsx
-      │  ├─ DietPlanPage.jsx, MedicalProfilePage.jsx, RaiseComplaintPage.jsx
-      │  ├─ ProfileSettingsPage.jsx, UserProfilePage.jsx, …
+      │  ├─ DietPlanPage.jsx, FolderBrowsePage.jsx, MedicalProfilePage.jsx
+      │  ├─ RaiseComplaintPage.jsx, ProfileSettingsPage.jsx, UserProfilePage.jsx, …
       └─ components/
          ├─ ChatSidebar.jsx, ChatWindow.jsx, TopBar.jsx
          ├─ AboutSheet.jsx, PrivacyPolicyScreen.jsx, LanguageSheet.jsx
-         ├─ InAppMessageBanner.jsx, PushNotificationBootstrap.jsx
-         ├─ SplashScreenBootstrap.jsx, SharedMediaSection.jsx
-         └─ layout/PanelBottomNav.jsx, diet/, chat/ (ChatVideoBlock, viewers/), …
+         ├─ LoginHistorySection.jsx, InAppMessageBanner.jsx
+         ├─ PushNotificationBootstrap.jsx, SplashScreenBootstrap.jsx
+         ├─ SharedMediaSection.jsx, share/ShareIntentProvider.jsx
+         ├─ admin/AdminReportsPane.jsx, AdminReferralsPane.jsx
+         └─ layout/PanelBottomNav.jsx, folders/, diet/, chat/ (ChatVideoBlock, viewers/), …
 ```
 
 ---
@@ -395,12 +484,20 @@ ADMIN_PHONE="+910000000001"
 MIN_PASSWORD_LENGTH=6
 DEFAULT_PHONE_COUNTRY=IN
 
-CORS_ORIGINS="http://localhost:3000"
+CORS_ORIGINS="http://localhost:3000,capacitor://localhost,ionic://localhost"
 COOKIE_SECURE=false
-COOKIE_SAMESITE=strict
+COOKIE_SAMESITE=lax
 
 # Optional — push notifications (local: place firebase-adminsdk.json in backend/)
 # FIREBASE_SERVICE_ACCOUNT_FILE=
+
+# Optional — S3 uploads (recommended for production; local dev can use backend/uploads/)
+# S3_BUCKET=  S3_REGION=ap-south-1  AWS_ACCESS_KEY_ID=  AWS_SECRET_ACCESS_KEY=
+# S3_PUBLIC_BASE_URL=
+
+# Optional — admin storage dashboard ring quotas
+# MONGO_STORAGE_QUOTA_BYTES=536870912
+# S3_STORAGE_QUOTA_BYTES=5368709120
 ```
 
 On first boot the server seeds:
@@ -507,7 +604,7 @@ After `.env` changes: `pm2 restart chatflow-backend --update-env`.
 
 Build a signed APK/AAB in Android Studio (**Build → Generate Signed Bundle / APK**). Add your host to `capacitor.config.json` → `server.allowNavigation` if needed.
 
-**Other scripts:** `scripts/bootstrap-aws.sh` (first-time server setup), `scripts/start-aws-backend.sh` (sync `.env` + restart PM2), `scripts/configure-aws-domain.sh` (DuckDNS + SSL).
+**Other scripts:** `scripts/bootstrap-aws.sh` (first-time server setup), `scripts/start-aws-backend.sh` (sync `.env` + restart PM2), `scripts/check-aws-backend.sh` (health probe), `scripts/configure-aws-domain.sh` (DuckDNS + SSL).
 
 ---
 

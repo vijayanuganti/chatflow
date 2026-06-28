@@ -6,7 +6,7 @@
         </trust-anchors>
     </base-config>
     <domain-config cleartextTrafficPermitted="false">
-        <domain includeSubdomains="true">sslip.io</domain>
+        <domain includeSubdomains="true">duckdns.org</domain>
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
