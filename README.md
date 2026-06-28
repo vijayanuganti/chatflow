@@ -22,6 +22,7 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 - **Client medical profiles** — conditions, medications, and notes; visible to assigned employees and admins.
 - **Complaints** — clients raise issues against their employee; admins triage from the panel (open / solved).
 - **Push notifications** — Firebase Cloud Messaging (FCM) on web (service worker) and Android (native tray + actions); muted chats skip FCM.
+- **1:1 audio calling (WebRTC)** — voice calls between conversation participants; global WebSocket signaling so incoming calls reach any screen; full-screen overlay with minimize-to-chat badge and in-thread call header (see [architecture reference](#audio-calling-webrtc--architecture-reference)).
 - **Foreground message banner** — in-app dropdown when a new message arrives while the app is open (positioned below the status bar on native).
 - **Single-session login** — one active device per account; logging in elsewhere signs out the previous session and clears push tokens.
 - **Shared folders** — admins/employees create folders with media, documents, and links; role-gated view/edit access.
@@ -62,7 +63,8 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 - **In-chat search** — find messages with highlighted matches.
 - **Starred messages** — star/unstar persisted per user in `starred_messages`; in-chat panel via `StarredMessagesPanel.jsx` (`messageActionsApi.js`).
 - **Message edit** — long-press → Edit on your own text messages (`PATCH /api/messages/{message_id}`).
-- **Header tap** — opens the contact **User profile** page (mute toggle + shared media).
+- **Audio call** — phone icon in header for 1:1 threads; compact call status row while connected (`ChatCallHeader.jsx`).
+- **Header tap** — opens the contact **User profile** page (mute toggle + shared media). Call controls sit outside the profile tap target so End/Decline does not open the profile.
 
 ### Chat media (images, video, documents)
 
@@ -141,6 +143,256 @@ Employee **batch filter** lives in the chat sidebar (not the footer). Footers hi
 | **Toasts** | Sonner toasts for errors/success; top offset uses `--app-safe-area-top` so banners sit below the OS status bar on Android (`safeAreaInsets.js`). |
 
 Token registration: `POST /api/users/me/fcm-token` after login on native (`PushNotificationBootstrap.jsx`).
+
+---
+
+## Audio calling (WebRTC) — architecture reference
+
+1:1 **audio-only** calls between two participants in a direct (non-group) conversation.
+This section is the **full infrastructure map** for understanding, implementing, or porting the feature.
+
+> **Implementation note:** The files listed below (`call_signaling.py`, `CallContext.jsx`, etc.) are the **target layout** for this feature. If they are missing from your checkout, use the [Cursor porting prompt](#porting-this-call-feature-to-another-project-cursor-prompt) at the end of this README to implement them.
+
+### High-level architecture
+
+```mermaid
+flowchart TB
+  subgraph Frontend["React frontend"]
+    CS[ChatSocketProvider<br/>single WS per user]
+    CP[CallProvider<br/>session + UI state]
+    UAC[useAudioCall<br/>RTCPeerConnection + state machine]
+    GCO[GlobalCallOverlay<br/>full-screen UI]
+    MCB[MinimizedCallBadge<br/>right-panel banner]
+    CCH[ChatCallHeader<br/>in-thread status]
+    CS -->|inbound call frames| CP
+    CP --> UAC
+    CP --> GCO
+    CP --> MCB
+    ChatWindow --> CCH
+  end
+
+  subgraph Backend["FastAPI backend"]
+    WS["/api/ws"]
+    CM[ConnectionManager<br/>user_id → Set WebSocket]
+    CSIG[call_signaling.py<br/>validate + relay SDP/ICE]
+    LOGS[(MongoDB call_logs)]
+    WS --> CM
+    WS --> CSIG
+    CSIG --> CM
+    CSIG --> LOGS
+  end
+
+  UAC <-->|call-offer / answer / ice / end| WS
+  UAC <-->|RTP audio P2P| P2P[WebRTC peer connection]
+```
+
+**Design principle:** signaling rides the **existing chat WebSocket**, relayed by **`user_id`** (global socket registry), **not** by conversation room. The callee receives incoming calls on **any screen** (chat, settings, diet plan, admin panel).
+
+### Provider stack (mount order matters)
+
+```
+AuthProvider
+  └─ ChatSocketProvider          ← one WebSocket, sendSignal(), ensureHealthy()
+       └─ CallProvider            ← activeCallSession, useAudioCall, remote <audio>
+            ├─ GlobalCallBridge   ← confirms listener is live (no UI)
+            ├─ GlobalCallOverlay  ← full-screen call UI (all routes)
+            └─ BrowserRouter
+                 └─ GlobalCallBackground  ← auto-minimize on route change
+                      └─ ChatProvider     ← activeConversationId for badge logic
+                           └─ routes / ChatApp / ChatPanelLayout
+                                └─ MinimizedCallBadge (right panel only)
+```
+
+Reference: [`frontend/src/App.js`](./frontend/src/App.js).
+
+### Call state machine (frontend)
+
+| State | Meaning | UI |
+| ----- | ------- | -- |
+| `idle` | No active call | Phone icon in chat header |
+| `outgoing` | Caller sent offer, waiting for answer | Full-screen “Calling…” |
+| `incoming` | Callee received offer/ring | Full-screen Accept / Decline |
+| `connecting` | SDP answer exchanged, ICE in progress | “Connecting…” |
+| `connected` | `RTCPeerConnection` connected | Overlay + timer + Mute/Speaker/Chat/End |
+| `disconnected` / `failed` | Teardown | Overlay closes, badge hides |
+
+Constants: [`frontend/src/lib/callConstants.js`](./frontend/src/lib/callConstants.js) (`CALL_STATE`, `CALL_SIGNAL`).
+
+### Signaling protocol
+
+**Client → server** (same WebSocket as chat; payload includes `type`):
+
+| type | payload | notes |
+| ---- | ------- | ----- |
+| `call-offer` | `{ call_id, conversation_id, target_user_id, sdp }` | Caller initiates; server validates both users are conversation participants |
+| `call-answer` | `{ call_id, sdp }` | Callee answers |
+| `ice-candidate` | `{ call_id, candidate }` | Trickle ICE |
+| `call-decline` | `{ call_id, reason? }` | Callee rejects |
+| `call-end` | `{ call_id, reason? }` | Either side hangs up |
+
+**Server → client** (relayed to peer’s global sockets):
+
+| type | when |
+| ---- | ---- |
+| `call-offer` | Forwarded to callee with `caller_id`, `caller_name`, `sdp` |
+| `call-ring` | UI hint to callee (metadata only) |
+| `call-ringing` | Ack to caller that offer reached server |
+| `call-answer` | SDP answer forwarded to caller |
+| `ice-candidate` | ICE forwarded to peer |
+| `call-decline` / `call-end` / `call-ended` | Teardown both sides |
+| `call-error` | e.g. `callee_offline`, `forbidden`, `invalid_offer` |
+
+Backend relay: [`backend/call_signaling.py`](./backend/call_signaling.py).  
+WS hook in [`backend/server.py`](./backend/server.py) — inbound frames with call types dispatch to `handle_call_signal()`.
+
+### Complete file inventory
+
+**Backend**
+
+| File | Role |
+| ---- | ---- |
+| `backend/call_signaling.py` | Validates participants, in-memory call registry, relays SDP/ICE, writes `call_logs` |
+| `backend/server.py` | `ConnectionManager` (`user_id → Set[WebSocket]`), WS endpoint, `GET /api/call-history/me`, `GET /api/admin/call-logs` |
+
+**Frontend — core**
+
+| File | Role |
+| ---- | ---- |
+| `context/CallContext.jsx` | Orchestration: session, inbound signal queue, UI minimize, navigation ref |
+| `context/ChatSocketContext.jsx` | Wraps `useChatSocket`; exposes `sendSignal`, `ensureHealthy`, `reconnect` |
+| `hooks/useAudioCall.js` | `RTCPeerConnection`, mic stream, mute, state machine, ICE buffering |
+| `hooks/useChatSocket.js` | WS connect, routes `CALL_INBOUND_TYPES` to `callSignalListenerRef` |
+| `lib/callConstants.js` | States, signal types, ICE servers, SDP normalization |
+| `lib/callSignalBridge.js` | Sync ref `{ current: onCallSignalReceived }` — avoids useEffect race |
+| `lib/callSignalingLog.js` | Debug logging (`ws.inbound`, `session.incoming`, etc.) |
+| `lib/callHistoryFormat.js` | Timer formatting for UI |
+
+**Frontend — UI**
+
+| File | Role |
+| ---- | ---- |
+| `components/call/GlobalCallOverlay.jsx` | WhatsApp-style full-screen call UI (incoming + connected) |
+| `components/call/MinimizedCallBadge.jsx` | Green banner in **right panel only** when call minimized |
+| `components/call/ChatCallHeader.jsx` | Compact “On call with …” row inside chat header |
+| `components/call/callOverlay.css` | Overlay animations, dock layout, badge styles |
+| `components/call/GlobalCallBridge.jsx` | Mounts `useGlobalCallListener` at app root |
+| `components/call/GlobalCallBackground.jsx` | Mounts `useCallBackgroundRoute` inside Router |
+
+**Frontend — integration hooks**
+
+| File | Role |
+| ---- | ---- |
+| `hooks/useRegisterCallNavigation.js` | Registers `openConversationById` so Accept/Chat navigate to thread |
+| `hooks/useGlobalCallListener.js` | Confirms shell listener is registered per user session |
+| `hooks/useCallBackgroundRoute.js` | Auto-minimize overlay when leaving call thread (audio keeps running) |
+| `components/ChatWindow.jsx` | Phone icon, `ChatCallHeader`, `startCallForChat()` |
+| `pages/ChatApp.jsx` | `useRegisterCallNavigation`, badge on admin `<main>` |
+| `components/layout/ChatPanelLayout.jsx` | Badge in employee/client right panel |
+
+**Frontend — history / admin (optional)**
+
+| File | Role |
+| ---- | ---- |
+| `pages/CallHistoryPage.jsx` | Employee/client call history |
+| `components/call/CallHistoryList.jsx` | Shared list UI |
+| `components/admin/AdminCallLogsPane.jsx` | Admin call log tab |
+
+### UI behavior matrix
+
+| Scenario | What shows |
+| -------- | ---------- |
+| Outgoing / incoming (not minimized) | `GlobalCallOverlay` full-screen |
+| Connected, overlay open | Overlay with Mute · Speaker · Chat · End dock |
+| Connected, user taps Chat | `returnToCallChat()` → minimize overlay, navigate to thread, show badge |
+| Connected, viewing **that** call’s thread | `ChatCallHeader` only — **no** floating badge |
+| Connected, viewing **different** chat / settings / diet | `MinimizedCallBadge` at top of **right panel** (not over sidebar) |
+| Mobile `/chat` home (no sidebar) | Badge fixed below TopBar |
+| Call ended | Overlay + badge disappear instantly |
+
+### WebSocket requirements (critical for reliability)
+
+1. **Single backend instance** on the WS port — multiple uvicorn workers each have their own in-memory `ConnectionManager`; caller and callee can land on different instances and never see each other’s frames.
+2. **`ensureHealthy()` before placing a call** — ping/pong on the socket; stale sockets after `uvicorn --reload` must reconnect.
+3. **Global `user_id` registry** — `send_to_user(target_user_id, event)` delivers to **all** open tabs for that user.
+4. **Inbound routing** — `useChatSocket` checks `CALL_INBOUND_TYPES` and invokes `callSignalListenerRef.current` **synchronously** (set by `CallProvider`, not via React effect).
+5. **Signal queue** — both `call-offer` and `call-ring` are queued; dropping either breaks incoming calls.
+
+### Backend: ConnectionManager pattern
+
+```python
+# server.py — user_id -> Set[WebSocket], NOT conversation rooms
+class ConnectionManager:
+    async def send_to_user(self, user_id: str, event: dict) -> int: ...
+    def connection_count(self, user_id: str) -> int: ...
+```
+
+Call signaling **never** joins a “conversation room”. The server looks up the callee’s `user_id` and forwards to every registered socket.
+
+### MongoDB `call_logs` collection
+
+Written by `call_signaling.py` on offer / answer / decline / end:
+
+```json
+{
+  "call_id": "uuid",
+  "conversation_id": "...",
+  "caller_id": "...",
+  "callee_id": "...",
+  "started_at": "ISO8601",
+  "answered_at": "ISO8601 | null",
+  "ended_at": "ISO8601 | null",
+  "duration_seconds": 123,
+  "status": "missed | answered | declined"
+}
+```
+
+REST: `GET /api/call-history/me`, `GET /api/admin/call-logs?user_id=...`
+
+### Environment / media
+
+| Variable | Purpose |
+| -------- | ------- |
+| `REACT_APP_ICE_SERVERS` | Optional JSON array of ICE servers (TURN for strict NAT). Default: Google STUN |
+| HTTPS or `localhost` | Required for `navigator.mediaDevices.getUserMedia()` |
+
+### User flow (end-to-end)
+
+1. User taps **phone** in 1:1 chat header → `startCallForChat(conversationId, remoteUserId, remoteName)`.
+2. `useAudioCall.startCall()` → `ensureHealthy()` → get mic → create offer → `sendSignal('call-offer', ...)`.
+3. Server validates participants → relays to callee → sends `call-ringing` to caller.
+4. Callee: `GlobalCallOverlay` shows incoming; Accept → `acceptCall()` → answer SDP → navigate to thread.
+5. ICE trickle → `connectionState === 'connected'` → timer starts.
+6. Minimize: Chat button or route change → overlay hides, badge shows (unless already in that thread).
+7. End: `endActiveCall('hangup')` → `call-end` signaling → cleanup tracks + reset session.
+
+### Local testing
+
+1. Start **one** backend on `8001` and frontend on `3000`; hard-refresh **both** browser sessions.
+2. Log in as two users in a direct conversation.
+3. Place a call; watch backend logs:
+   ```
+   call_signal call-offer accepted: call_id=... callee_id=...
+   call_signal relay call-offer: target_user_id=... online (1 socket(s)) ...
+   ```
+4. If callee shows `OFFLINE (0 global sockets)` — refresh tab, wait for chat WS to connect.
+5. Browser console: look for `ws.health.ok`, `session.incoming`, `audio.incoming`.
+
+### Known pitfalls
+
+| Symptom | Cause | Fix |
+| ------- | ----- | --- |
+| Caller stuck on “Calling…”, callee sees nothing | Multiple uvicorn processes / stale WS | Single instance; `ensureHealthy()` + reconnect |
+| Callee gets ring but no SDP | Only `call-ring` processed, offer dropped | Queue **all** inbound call frames |
+| Badge overlaps sidebar | Badge mounted at app root with `fixed` full width | Mount inside right-panel `position: relative` container |
+| Duplicate call UI in thread | Badge + `ChatCallHeader` both visible | Hide badge when `activeConversationId === callConversationId` |
+| `useEffect` registration race | Listener registered after first WS frame | Use sync ref (`callSignalListenerRef`) |
+
+### Limitations (v1)
+
+- Direct (1:1) chats only — group calls rejected server-side.
+- In-memory `_active_calls` dict — use Redis + TTL for multi-worker production.
+- Speaker toggle is UI-only on web (no browser speaker routing API).
+- Audio only — no video tracks.
 
 ---
 
@@ -301,6 +553,21 @@ Client referrals submitted by employees/clients; admin triage.
 | `converted_client_id`  | string | Set when converted to a client account.            |
 | `created_at`           | iso    | Submission time.                                   |
 
+### `call_logs`
+WebRTC call history (written by `call_signaling.py`).
+
+| Field               | Type   | Notes                                    |
+| ------------------- | ------ | ---------------------------------------- |
+| `call_id`           | string | UUID per call attempt.                   |
+| `conversation_id`   | string | Direct (1:1) conversation.               |
+| `caller_id`         | string | Initiator.                               |
+| `callee_id`         | string | Recipient.                               |
+| `started_at`        | iso    | Offer time.                              |
+| `answered_at`       | iso    | Null if missed/declined.                 |
+| `ended_at`          | iso    | Hang-up time.                            |
+| `duration_seconds`  | int    | Connected duration.                      |
+| `status`            | string | `missed` \| `answered` \| `declined`     |
+
 ### Migrations
 On startup `_migrate_user_documents` runs:
 
@@ -356,7 +623,32 @@ On startup `_migrate_user_documents` runs:
 - `POST /api/upload`, `GET /api/files/{id}`
 - `GET  /api/media/stream` — authenticated stream for S3 uploads (incl. folder media).
 - `GET  /api/media/thumbnail/{file_id}` — JPEG poster for video files (auth via cookie or `?token=`).
-- `WS   /api/ws?token=...`
+- `WS   /api/ws?token=...&bid=...` — chat events, typing, presence, **and WebRTC call signaling**
+
+**WebSocket → client call events (server relay):**
+
+| Event | When |
+| ----- | ---- |
+| `call-offer` | Forwarded to callee with `call_id`, `conversation_id`, `caller_id`, `caller_name`, `sdp` |
+| `call-ring` | UI hint to callee (same metadata, no SDP) |
+| `call-ringing` | Ack to caller that offer was accepted by server |
+| `call-answer` | SDP answer forwarded to caller |
+| `ice-candidate` | Trickle ICE to peer |
+| `call-decline` / `call-end` / `call-ended` | Teardown on either side |
+| `call-error` | e.g. invalid offer, callee offline |
+
+**Client → server signaling (same socket):**
+
+| Event | Payload |
+| ----- | ------- |
+| `call-offer` | `{ call_id, conversation_id, target_user_id, sdp }` |
+| `call-answer` | `{ call_id, sdp }` |
+| `ice-candidate` | `{ call_id, candidate }` |
+| `call-decline` / `call-end` | `{ call_id, reason? }` |
+
+### Call history
+- `GET /api/call-history/me` — current user’s call log.
+- `GET /api/admin/call-logs?user_id=...` — admin call log search.
 
 ### Shared folders
 - `GET  /api/folders`, `GET /api/folders/{folder_id}` — role-filtered browse (clients/employees).
@@ -407,7 +699,8 @@ chatflow/
 │  ├─ deploy-aws.sh             ← same deploy (Git Bash / Linux / macOS)
 │  └─ check-aws-backend.sh      ← remote health probe
 ├─ backend/
-│  ├─ server.py                 ← routes, RBAC, audit, FCM, migrations
+│  ├─ server.py                 ← routes, RBAC, audit, FCM, WebSocket manager
+│  ├─ call_signaling.py         ← WebRTC signaling relay (1:1 audio)
 │  ├─ diet_api.py               ← diet plan routes
 │  ├─ folders_api.py            ← shared folder CRUD + access rules
 │  ├─ reports_api.py            ← admin reports + PDF export
@@ -424,15 +717,24 @@ chatflow/
    ├─ ios/
    ├─ public/sw.js                ← web push service worker
    └─ src/
-      ├─ App.js                      ← routes, Toaster, InAppMessageBanner, ShareIntentProvider
-      ├─ context/AuthContext.jsx
+      ├─ App.js                      ← CallProvider, GlobalCallOverlay, ShareIntentProvider
+      ├─ context/
+      │  ├─ AuthContext.jsx
+      │  ├─ CallContext.jsx          ← activeCallSession, WebRTC orchestration
+      │  ├─ ChatContext.jsx          ← activeConversationId (badge visibility)
+      │  └─ ChatSocketContext.jsx    ← single global WebSocket
       ├─ hooks/
+      │  ├─ useAudioCall.js          ← RTCPeerConnection + call state machine
+      │  ├─ useCallBackgroundRoute.js
+      │  ├─ useGlobalCallListener.js
+      │  ├─ useRegisterCallNavigation.js
       │  ├─ useDoubleBackToExit.js
       │  ├─ useChatPanelNav.js       ← client/employee sidebar + footer items
       │  ├─ useChatSocket.js
       │  └─ useOptimisticMessageSend.js
       ├─ lib/
       │  ├─ api.js, backendUrl.js    ← JWT native auth; Nginx /api gateway
+      │  ├─ callConstants.js, callSignalBridge.js
       │  ├─ push.js, notify.js, inAppNotifications.js
       │  ├─ notificationDisplay.js, safeAreaInsets.js
       │  ├─ nativeAuthSync.js, nativeMedia.js, mediaHandler.js
@@ -448,6 +750,7 @@ chatflow/
       │  ├─ RaiseComplaintPage.jsx, ProfileSettingsPage.jsx, UserProfilePage.jsx, …
       └─ components/
          ├─ ChatSidebar.jsx, ChatWindow.jsx, TopBar.jsx
+         ├─ call/GlobalCallOverlay.jsx, MinimizedCallBadge.jsx, ChatCallHeader.jsx
          ├─ AboutSheet.jsx, PrivacyPolicyScreen.jsx, LanguageSheet.jsx
          ├─ LoginHistorySection.jsx, InAppMessageBanner.jsx
          ├─ PushNotificationBootstrap.jsx, SplashScreenBootstrap.jsx
@@ -479,7 +782,7 @@ JWT_SECRET="replace-with-a-strong-secret"
 
 ADMIN_USERNAME="admin"
 ADMIN_PASSWORD="admin123"
-ADMIN_PHONE="+910000000001"
+ADMIN_PHONE="+919000000001"
 
 MIN_PASSWORD_LENGTH=6
 DEFAULT_PHONE_COUNTRY=IN
@@ -491,6 +794,9 @@ COOKIE_SAMESITE=lax
 # Optional — push notifications (local: place firebase-adminsdk.json in backend/)
 # FIREBASE_SERVICE_ACCOUNT_FILE=
 
+# Optional — WebRTC TURN (frontend/.env, JSON array)
+# REACT_APP_ICE_SERVERS=[{"urls":"turn:your-turn-server:3478","username":"...","credential":"..."}]
+
 # Optional — S3 uploads (recommended for production; local dev can use backend/uploads/)
 # S3_BUCKET=  S3_REGION=ap-south-1  AWS_ACCESS_KEY_ID=  AWS_SECRET_ACCESS_KEY=
 # S3_PUBLIC_BASE_URL=
@@ -500,13 +806,15 @@ COOKIE_SAMESITE=lax
 # S3_STORAGE_QUOTA_BYTES=5368709120
 ```
 
-On first boot the server seeds:
+On first boot the server seeds (phones must pass E.164 validation for region `IN`):
 
 | Username    | Phone           | Password      | Role     |
 | ----------- | --------------- | ------------- | -------- |
-| `admin`     | `+910000000001` | `admin123`    | admin    |
-| `employee1` | `+910000000011` | `employee123` | employee |
-| `client1`   | `+910000000021` | `client123`   | client   |
+| `admin`     | `+919000000001` | `admin123`    | admin    |
+| `employee1` | `+919000000011` | `employee123` | employee |
+| `client1`   | `+919000000021` | `client123`   | client   |
+
+> **Note:** Older docs used `+910000000001`-style placeholders; those fail `phonenumbers` validation. Use the `+9190000000xx` seed values above, or set `ADMIN_PHONE` in `.env` to match a valid Indian mobile number.
 
 Sign in with the **phone number** (not the username) on the login page.
 
@@ -525,7 +833,11 @@ REACT_APP_BACKEND_URL=http://localhost:8001
 # Native APK dev on a phone (LAN IP, match uvicorn port):
 REACT_APP_BACKEND_URL_MOBILE=http://192.168.1.13:8001
 WDS_SOCKET_PORT=0
+# Optional TURN for WebRTC behind strict NAT:
+# REACT_APP_ICE_SERVERS=[{"urls":"stun:stun.l.google.com:19302"}]
 ```
+
+**Provider stack at app root** (`App.js`): `AuthProvider` → `ChatSocketProvider` → `CallProvider` → `GlobalCallOverlay` → `BrowserRouter` → `GlobalCallBackground`. `MinimizedCallBadge` mounts inside the chat **right panel** (`ChatPanelLayout` / `ChatApp` `<main>`), not at app root. See [Audio calling architecture](#audio-calling-webrtc--architecture-reference) for the full map.
 
 For a **production APK** against AWS, set both mobile and web URLs to your public HTTPS host (e.g. `https://vijay-chatflow.duckdns.org`) before `npm run build:mobile`.
 
@@ -679,3 +991,129 @@ After the first deploy:
 1. Visit the frontend, sign in with `ADMIN_PHONE` + `ADMIN_PASSWORD` from your env.
 2. Open **Profile → Change password** and set a strong password.
 3. Use the admin panel to create real employee / client accounts.
+
+---
+
+## Porting this call feature to another project (Cursor prompt)
+
+Copy the block below into a **new Cursor chat** in your target project. Adjust paths/stack names to match that repo.
+
+<details>
+<summary><strong>Click to expand — full Cursor implementation prompt</strong></summary>
+
+```
+Implement 1:1 WebRTC audio calling using the ChatFlow architecture below.
+Adapt file paths to this project's conventions but preserve the design patterns.
+
+## Goal
+- Audio-only calls between two users in a direct (1:1) conversation
+- Signaling over the EXISTING chat WebSocket (no separate call server)
+- Incoming calls reach the user on ANY screen (global user_id socket routing)
+- Full-screen call overlay + minimized badge + in-chat header row
+
+## Architecture (must follow)
+
+### Backend
+1. Add `call_signaling.py` (or equivalent) that:
+   - Handles WS frame types: call-offer, call-answer, ice-candidate, call-decline, call-end
+   - Validates both users are participants in conversation_id (reject groups)
+   - Maintains in-memory call registry: call_id → { caller_id, callee_id, conversation_id, state }
+   - Relays SDP + ICE to peer via ConnectionManager.send_to_user(user_id, event)
+   - On offer: forward call-offer + call-ring to callee, call-ringing to caller
+   - On callee offline (0 sockets): send call-error to caller, remove call
+   - Optionally persist call_logs to DB on offer/answer/decline/end
+
+2. ConnectionManager MUST map user_id → Set[WebSocket] (global registry, NOT conversation rooms)
+
+3. In websocket handler, dispatch call frame types to handle_call_signal()
+
+### Frontend provider stack
+AuthProvider → ChatSocketProvider → CallProvider → GlobalCallOverlay
+  → BrowserRouter → GlobalCallBackground → ChatProvider → routes
+
+CallProvider responsibilities:
+- Hold activeCallSession { callId, conversationId, remoteUserId, remoteName, direction }
+- Hold session { conversationId, remoteUserId, remoteName } for WebRTC hook
+- callUiMinimized state + minimizeCallUi / expandCallUi / returnToCallChat
+- registerNavigateToConversation(ref) for Accept/Chat navigation
+- onCallSignalReceived: update session, queue ALL inbound frames, bump inboundSignalTick
+- Set callSignalListenerRef.current = onCallSignalReceived SYNCHRONOUSLY (not useEffect)
+- Wrap useAudioCall hook; expose startCallForChat, acceptIncomingCall, declineIncomingCall, endActiveCall
+- Hidden <audio ref={remoteAudioRef} autoPlay playsInline /> for remote stream
+
+### useAudioCall hook (WebRTC state machine)
+States: idle | outgoing | incoming | connecting | connected | disconnected | failed
+
+- startCall: ensureHealthy WS → getUserMedia(audio) → RTCPeerConnection → createOffer → send call-offer
+- acceptCall: getUserMedia → createAnswer → send call-answer
+- declineCall / endCall: send signaling + cleanup tracks + close PC
+- Queue trickle ICE until remoteDescription set
+- onicecandidate → send ice-candidate
+- Inbound handler (drain queue on inboundSignalTick):
+  - call-offer → setRemoteDescription, state=incoming
+  - call-ring → state=incoming (metadata)
+  - call-ringing → state=outgoing (caller ack)
+  - call-answer → setRemoteDescription, state=connecting
+  - ice-candidate → addIceCandidate (buffer if needed)
+  - call-decline | call-end | call-ended → teardown
+- Mute: local audio track.enabled toggle
+- Timer when connected
+
+### useChatSocket additions
+- CALL_INBOUND_TYPES Set routes to callSignalListenerRef.current
+- sendSignal(type, targetUserId, payload) sends JSON on WS
+- ensureHealthy(): ping/pong before calls; reconnect if stale
+
+### UI components
+1. GlobalCallOverlay — full-screen WhatsApp-style UI:
+   - Incoming: Decline (red) / Accept (green)
+   - Connected: avatar, timer, dock: Mute | Speaker | Chat | End (64px red)
+   - Chat button calls returnToCallChat() (minimize + navigate)
+   - Hidden when isMinimized
+
+2. MinimizedCallBadge — ONLY in right panel container (position:absolute top:0):
+   - Show when isMinimized && connected && NOT viewing active call's conversation
+   - Hide when user is in that call's chat thread (ChatCallHeader handles it)
+   - Mobile /chat home: fixed below app header
+   - Tap → maximizeCall(); end button → endActiveCall
+
+3. ChatCallHeader — inside chat window header when call active for this conversation:
+   - "On call with {name}" + timer + end button
+   - Clicks must not bubble to profile header
+
+4. ChatWindow — phone icon when idle; wire startCallForChat from useCall()
+
+### Integration hooks
+- useRegisterCallNavigation(openConversationById) in chat shell
+- useCallBackgroundRoute: auto-minimize when navigating away from call thread
+- useGlobalCallListener at app root (GlobalCallBridge)
+
+### Signaling constants (shared)
+CALL_SIGNAL: call-offer, call-ring, call-ringing, call-answer, ice-candidate, call-decline, call-end, call-ended, call-error
+CALL_STATE: idle, outgoing, incoming, connecting, connected, disconnected, failed
+ICE: default stun:stun.l.google.com:19302; optional REACT_APP_ICE_SERVERS JSON
+
+## Rules
+- Do NOT use conversation-room WS routing for calls — always user_id global registry
+- Do NOT register call listener in useEffect — use synchronous ref
+- Queue both call-offer AND call-ring inbound frames
+- ensureHealthy() before startCall
+- Single backend worker for dev (or shared Redis call state for prod)
+- 1:1 conversations only
+
+## Reference implementation (ChatFlow)
+If you have access to the source repo, mirror these files:
+- backend/call_signaling.py
+- frontend/src/context/CallContext.jsx
+- frontend/src/hooks/useAudioCall.js
+- frontend/src/hooks/useChatSocket.js (call routing + ensureHealthy)
+- frontend/src/lib/callConstants.js, callSignalBridge.js
+- frontend/src/components/call/GlobalCallOverlay.jsx
+- frontend/src/components/call/MinimizedCallBadge.jsx
+- frontend/src/components/call/ChatCallHeader.jsx
+
+Scan the target codebase first for existing WebSocket provider, chat context, and layout shells before creating files.
+Wire CallProvider above Router; mount GlobalCallBackground inside Router; mount MinimizedCallBadge inside the main content / right panel wrapper only.
+```
+
+</details>
