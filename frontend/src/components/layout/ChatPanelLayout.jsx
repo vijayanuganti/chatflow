@@ -4,6 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useChat } from "@/context/ChatContext";
 import { api } from "@/lib/api";
 import PanelBottomNav from "@/components/layout/PanelBottomNav";
+import MinimizedCallBadge from "@/components/call/MinimizedCallBadge";
 import { ChatPanelSidebar, useChatPanelNav } from "@/hooks/useChatPanelNav";
 import { getChatConversationId } from "@/lib/chatMobileNav";
 
