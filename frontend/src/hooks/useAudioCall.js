@@ -26,6 +26,7 @@ export default function useAudioCall({
   inboundQueueRef,
   remoteAudioRef,
   onCallEnded,
+  onCallError,
 }) {
   const [callState, setCallState] = useState(CALL_STATE.IDLE);
   const [durationSec, setDurationSec] = useState(0);
@@ -308,6 +309,7 @@ export default function useAudioCall({
       }
       if (type === CALL_SIGNAL.ERROR) {
         teardown(CALL_STATE.FAILED);
+        onCallError?.(frame.reason, frame.detail);
         onCallEnded?.();
       }
     };
@@ -322,6 +324,7 @@ export default function useAudioCall({
     flushIceQueue,
     teardown,
     onCallEnded,
+    onCallError,
     activeCallIdRef,
   ]);
 

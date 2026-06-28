@@ -4591,7 +4591,7 @@ async def websocket_endpoint(
                 await db.users.update_one({"id": user_id}, {"$set": {"last_seen": ts}})
                 await websocket.send_json({"type": "pong"})
 
-            elif (payload.get("type") or "").startswith("call-"):
+            elif (payload.get("type") or "").startswith("call-") or payload.get("type") == "ice-candidate":
                 from call_signaling import handle_call_signal
 
                 await handle_call_signal(

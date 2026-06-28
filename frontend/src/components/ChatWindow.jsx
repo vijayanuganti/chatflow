@@ -912,6 +912,10 @@ export default function ChatWindow({
   const canPlaceCall = !isGroup && !readOnly && Boolean(otherUser?.id) && conversation?.type === "direct";
   const handleStartCall = () => {
     if (!canPlaceCall || callState !== CALL_STATE.IDLE) return;
+    if (!isOnline) {
+      toast.error("Contact is offline. They need ChatFlow open in their browser to receive your call.");
+      return;
+    }
     void startCallForChat(
       conversation.id,
       otherUser.id,

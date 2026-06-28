@@ -6,6 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
 import { CALL_STATE } from "@/lib/callConstants";
 import { callSignalListenerRef } from "@/lib/callSignalBridge";
 import { logCallSignal } from "@/lib/callSignalingLog";
@@ -34,6 +35,16 @@ export function CallProvider({ children }) {
     activeCallIdRef.current = null;
   }, []);
 
+  const onCallError = useCallback((reason) => {
+    const messages = {
+      callee_offline:
+        "Contact is offline. They need ChatFlow open in their browser to receive your call.",
+      forbidden: "You can't place a call in this conversation.",
+      invalid_offer: "Could not start the call. Please try again.",
+    };
+    toast.error(messages[reason] || "Call could not be connected.");
+  }, []);
+
   const onCallEnded = useCallback(() => {
     clearCallSession();
   }, [clearCallSession]);
@@ -47,6 +58,7 @@ export function CallProvider({ children }) {
     inboundQueueRef,
     remoteAudioRef,
     onCallEnded,
+    onCallError,
   });
 
   const onCallSignalReceived = useCallback((frame) => {
@@ -111,9 +123,14 @@ export function CallProvider({ children }) {
         direction: "outgoing",
       });
       setCallUiMinimized(false);
-      return audio.startCall(nextSession);
+      const ok = await audio.startCall(nextSession);
+      if (!ok) {
+        clearCallSession();
+        toast.error("Could not start the call. Check microphone permission and try again.");
+      }
+      return ok;
     },
-    [audio],
+    [audio, clearCallSession],
   );
 
   const acceptIncomingCall = useCallback(async () => {
