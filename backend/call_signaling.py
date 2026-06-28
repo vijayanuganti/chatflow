@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
-from fastapi import HTTPException
+from fastapi import Depends, HTTPException, Query
 
 logger = logging.getLogger(__name__)
 
