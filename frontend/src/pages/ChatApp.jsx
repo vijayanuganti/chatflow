@@ -797,7 +797,7 @@ export default function ChatApp({ clientHomeMode = false }) {
   }, [navigate, setActiveConversationId, isClient, clientEmployeeId, loadClientAssignedChat, clientHomeMode, panelCtx]);
 
   useRegisterCallNavigation(openConversationById);
-  useRegisterCallThreadRefresh({ loadMessages, setMessages, selectedIdRef });
+  useRegisterCallThreadRefresh({ loadMessages, setMessages, selectedIdRef, userIdRef });
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;

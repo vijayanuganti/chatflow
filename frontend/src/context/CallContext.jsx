@@ -148,11 +148,6 @@ export function CallProvider({ children }) {
         endedCallIdsRef.current.add(callId);
       }
 
-      const shouldSync = Boolean(callId) && serverConfirmedCallIdsRef.current.has(callId);
-      if (callId) {
-        serverConfirmedCallIdsRef.current.delete(callId);
-      }
-
       localHangupInitiatedRef.current = false;
       lastCallEndedAtRef.current = Date.now();
 
@@ -166,19 +161,18 @@ export function CallProvider({ children }) {
         }
       };
 
-      if (shouldSync) {
+      if (callId) {
+        serverConfirmedCallIdsRef.current.delete(callId);
         void api
           .post("/call-history/sync-thread-message", { call_id: callId })
-          .then((res) => refreshThread(res.data?.message))
-          .catch(() => {
-            if (convId) window.setTimeout(() => refreshThread(null), 800);
-          })
+          .then((res) => refreshThread(res.data?.message || null))
+          .catch(() => refreshThread(null))
           .finally(() => {
             persistedCallIdRef.current = null;
           });
       } else {
         persistedCallIdRef.current = null;
-        if (convId) window.setTimeout(() => refreshThread(null), 800);
+        if (convId) refreshThread(null);
       }
     },
     [clearCallSession, forceIdleCallState],

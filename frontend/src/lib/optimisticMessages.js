@@ -206,6 +206,39 @@ export function collapseCallMessagesByCallId(list) {
   return out;
 }
 
+/** Insert or replace a call thread row (sync API / post-call refresh). */
+export function upsertCallThreadMessage(prev, incoming) {
+  if (!Array.isArray(prev) || !incoming) return prev || [];
+  const normalized = ensureMessageTimestamp(incoming);
+
+  const byIdIdx = prev.findIndex((m) => m?.id && String(m.id) === String(normalized.id));
+  if (byIdIdx !== -1) {
+    const next = prev.slice();
+    next[byIdIdx] = { ...prev[byIdIdx], ...normalized };
+    return collapseCallMessagesByCallId(sortMessagesChronologically(next));
+  }
+
+  if (normalized.call_id && isCallThreadMessage(normalized)) {
+    const byCallIdx = prev.findIndex(
+      (m) =>
+        m?.call_id &&
+        String(m.call_id) === String(normalized.call_id) &&
+        isCallThreadMessage(m),
+    );
+    if (byCallIdx !== -1) {
+      const existing = prev[byCallIdx];
+      if (callMessageRank(normalized) < callMessageRank(existing)) {
+        return prev;
+      }
+      const next = prev.slice();
+      next[byCallIdx] = { ...existing, ...normalized };
+      return collapseCallMessagesByCallId(sortMessagesChronologically(next));
+    }
+  }
+
+  return appendToMessageList(prev, normalized);
+}
+
 /**
  * Merge a live WebSocket/API message into the thread without duplicate bubbles.
  * @returns {{ next: object[], changed: boolean }}
@@ -216,19 +249,41 @@ export function mergeIncomingLiveMessage(prev, incoming, currentUserId) {
   }
 
   if (prev.some((m) => String(m.id) === String(incoming.id))) {
+    const idx = prev.findIndex((m) => String(m.id) === String(incoming.id));
+    if (idx === -1) {
+      return { next: prev, changed: false };
+    }
+    const existing = prev[idx];
+    if (isCallThreadMessage(incoming) && callMessageRank(incoming) > callMessageRank(existing)) {
+      const next = prev.slice();
+      next[idx] = { ...existing, ...incoming };
+      return {
+        next: collapseCallMessagesByCallId(sortMessagesChronologically(next)),
+        changed: true,
+      };
+    }
     return { next: prev, changed: false };
   }
 
-  if (
-    incoming.call_id
-    && prev.some(
+  if (incoming.call_id && isCallThreadMessage(incoming)) {
+    const idx = prev.findIndex(
       (m) =>
-        m.call_id
-        && String(m.call_id) === String(incoming.call_id)
-        && isCallThreadMessage(m),
-    )
-  ) {
-    return { next: prev, changed: false };
+        m?.call_id &&
+        String(m.call_id) === String(incoming.call_id) &&
+        isCallThreadMessage(m),
+    );
+    if (idx !== -1) {
+      const existing = prev[idx];
+      if (callMessageRank(incoming) > callMessageRank(existing)) {
+        const next = prev.slice();
+        next[idx] = { ...existing, ...incoming };
+        return {
+          next: collapseCallMessagesByCallId(sortMessagesChronologically(next)),
+          changed: true,
+        };
+      }
+      return { next: prev, changed: false };
+    }
   }
 
   if (String(incoming.sender_id) === String(currentUserId)) {

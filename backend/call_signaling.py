@@ -166,6 +166,45 @@ async def _insert_call_message(
     return msg, True
 
 
+async def _patch_call_message_from_log(db, call_id: str, log: dict) -> Optional[dict]:
+    """Refresh an existing call bubble from the authoritative call log."""
+    if db is None or not call_id or not log:
+        return None
+    existing = await db.messages.find_one(
+        {"call_id": call_id, "message_type": "call"},
+        {"_id": 0},
+    )
+    if not existing:
+        return None
+
+    status = log.get("status") or existing.get("call_status") or "ringing"
+    subtype = _call_subtype_for_status(status)
+    duration = log.get("duration_seconds")
+    if status == "answered":
+        duration_value = max(0, int(duration or 0))
+    else:
+        duration_value = int(duration) if duration and int(duration) > 0 else None
+
+    patch = {
+        "call_status": status,
+        "call_subtype": subtype,
+        "duration_seconds": duration_value,
+        "content": _call_preview_text(
+            subtype,
+            duration_value if status == "answered" else duration,
+        ),
+    }
+    changed = any(existing.get(k) != patch.get(k) for k in patch)
+    if not changed:
+        return existing
+
+    await db.messages.update_one({"call_id": call_id, "message_type": "call"}, {"$set": patch})
+    return await db.messages.find_one(
+        {"call_id": call_id, "message_type": "call"},
+        {"_id": 0},
+    )
+
+
 async def _broadcast_call_message(manager: Any, db: Any, msg: dict) -> None:
     if manager is None or db is None or not msg:
         return
@@ -562,7 +601,8 @@ async def ensure_call_thread_message(
         {"_id": 0},
     )
     if existing_msg:
-        return existing_msg
+        refreshed = await _patch_call_message_from_log(db, call_id, log)
+        return refreshed or existing_msg
 
     status = log.get("status") or "ringing"
     if status not in ("answered", "missed", "declined"):
@@ -574,10 +614,13 @@ async def ensure_call_thread_message(
             status = "declined"
         await _finalize_call(db, call_id, status, "client_sync", manager)
 
-    return await db.messages.find_one(
+    final_msg = await db.messages.find_one(
         {"call_id": call_id, "message_type": "call"},
         {"_id": 0},
     )
+    if final_msg and log:
+        return await _patch_call_message_from_log(db, call_id, log) or final_msg
+    return final_msg
 
 
 def register_call_routes(
@@ -634,6 +677,8 @@ def register_call_routes(
         msg = await ensure_call_thread_message(db, call_id, user["id"], manager)
         if not msg:
             return {"message": None, "ok": False}
+        if manager is not None and msg.get("conversation_id"):
+            await _broadcast_call_message(manager, db, msg)
         return {"message": msg, "ok": True}
 
     @router.get("/admin/call-logs")
