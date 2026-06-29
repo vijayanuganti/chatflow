@@ -6,6 +6,8 @@ import {
   setStoredAccessToken,
   setStoredUser,
   syncBrowserIdFromToken,
+  clearAuthIfBackendOriginChanged,
+  markCurrentBackendOrigin,
   AUTH_TOKEN_KEY,
   AUTH_USER_KEY,
   AUTH_REMEMBER_KEY,
@@ -57,6 +59,7 @@ export function AuthProvider({ children }) {
 
     async function boot() {
       const generation = ++bootGenerationRef.current;
+      clearAuthIfBackendOriginChanged();
 
       if (!getStoredAccessToken()) {
         await runLoggedOutNotificationGuard();
@@ -183,6 +186,13 @@ export function AuthProvider({ children }) {
     if (accessToken) {
       syncBrowserIdFromToken(accessToken);
       setStoredAccessToken(accessToken, staySignedIn);
+    }
+    markCurrentBackendOrigin();
+    if (!accessToken || !getStoredAccessToken()) {
+      clearAuthSession();
+      setUserState(null);
+      setLoading(false);
+      return;
     }
     const normalized = normalizeUser(userData) || null;
     if (normalized) setStoredUser(normalized, staySignedIn);

@@ -7,10 +7,13 @@ import {
   newConversationPath,
   newConversationState,
   raiseComplaintPath,
+  callHistoryPath,
+  adminCallLogsPath,
 } from "@/lib/appRoutes";
 import TopBar from "@/components/TopBar";
 import { useChatSocketHandlers, useChatSocketTyping } from "@/context/ChatSocketContext";
 import useRegisterCallNavigation from "@/hooks/useRegisterCallNavigation";
+import useRegisterCallThreadRefresh from "@/hooks/useRegisterCallThreadRefresh";
 import MinimizedCallBadge from "@/components/call/MinimizedCallBadge";
 import usePanelMobileBack from "@/hooks/usePanelMobileBack";
 import useMobileChatViewport from "@/hooks/useMobileChatViewport";
@@ -37,6 +40,7 @@ import {
 } from "@/lib/notificationTone";
 import { clearActiveChatState } from "@/lib/activeChatState";
 import { showInAppMessageBanner } from "@/lib/inAppNotifications";
+import { avatarUrlForUser } from "@/lib/userAvatar";
 import { FCM_MESSAGE_EVENT, NOTIFICATION_MARK_READ_EVENT } from "@/lib/push";
 import {
   getCachedMessages,
@@ -81,7 +85,7 @@ import {
   isClientPortalUser,
 } from "@/lib/clientChat";
 
-export default function ChatApp() {
+export default function ChatApp({ clientHomeMode = false }) {
   useMobileChatViewport();
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -130,8 +134,28 @@ export default function ChatApp() {
       const conv = res.data?.conversation || null;
       if (conv) {
         setConversations([conv]);
-        setSelected(conv);
-        setActiveConversationId(conv.id);
+        if (!clientHomeMode) {
+          setSelected(conv);
+          setActiveConversationId(conv.id);
+        }
+        const online = {};
+        const lastSeen = {};
+        const employee = res.data?.employee;
+        if (employee?.id) {
+          online[employee.id] = !!employee.online;
+          if (employee.last_seen) lastSeen[employee.id] = employee.last_seen;
+        }
+        const other = conv.other_user;
+        if (other?.id) {
+          online[other.id] = !!other.online;
+          if (other.last_seen) lastSeen[other.id] = other.last_seen;
+        }
+        if (Object.keys(online).length) {
+          setOnlineUsers((prev) => ({ ...online, ...prev }));
+        }
+        if (Object.keys(lastSeen).length) {
+          setLastSeenByUser((prev) => ({ ...lastSeen, ...prev }));
+        }
       } else {
         setConversations([]);
         setSelected(null);
@@ -145,7 +169,7 @@ export default function ChatApp() {
     } finally {
       setClientChatReady(true);
     }
-  }, [setActiveConversationId, clearActiveConversation]);
+  }, [setActiveConversationId, clearActiveConversation, clientHomeMode]);
 
   // Restore thread from URL, push, or sessionStorage (returning from diet/medical).
   useEffect(() => {
@@ -176,6 +200,18 @@ export default function ChatApp() {
   ]);
 
   useEffect(() => {
+    if (!isClient || !clientHomeMode) return;
+    panelCtx.setClientInChatThread?.(!!selected);
+  }, [isClient, clientHomeMode, selected, panelCtx]);
+
+  useEffect(() => {
+    if (!isClient || !clientHomeMode) return undefined;
+    return () => {
+      panelCtx.setClientInChatThread?.(false);
+    };
+  }, [isClient, clientHomeMode, panelCtx]);
+
+  useEffect(() => {
     if (selected?.id) setActiveConversationId(selected.id);
   }, [selected?.id, setActiveConversationId]);
 
@@ -194,6 +230,9 @@ export default function ChatApp() {
     (conv) => {
       if (!conv?.id) return;
       if (isClient && conv.other_user?.id !== clientEmployeeId) return;
+      if (isClient && clientHomeMode) {
+        panelCtx.setClientTab?.("chats");
+      }
       setListSelection(null);
       setSelected(conv);
       setActiveConversationId(conv.id);
@@ -201,10 +240,17 @@ export default function ChatApp() {
         navigate(chatOpenTarget(conv.id), { push: true });
       }
     },
-    [navigate, setActiveConversationId, isClient, clientEmployeeId],
+    [navigate, setActiveConversationId, isClient, clientEmployeeId, clientHomeMode, panelCtx],
   );
 
   const closeChat = useCallback(() => {
+    if (isClient && clientHomeMode) {
+      setSelected(null);
+      clearActiveConversation();
+      void clearActiveChatState();
+      panelCtx.setClientInChatThread?.(false);
+      return;
+    }
     if (isClient) return;
     restoreNavRef.current = true;
     setSelected(null);
@@ -214,7 +260,7 @@ export default function ChatApp() {
     queueMicrotask(() => {
       restoreNavRef.current = false;
     });
-  }, [isClient, clearActiveConversation, navigate]);
+  }, [isClient, clientHomeMode, clearActiveConversation, navigate, panelCtx]);
 
   // Return from full-screen new-conversation page with a started thread.
   useEffect(() => {
@@ -448,9 +494,12 @@ export default function ChatApp() {
     if (conv?.is_muted) return;
 
     const sender = msg.sender_name || "Someone";
-    const preview = msg.message_type === "text"
-      ? (msg.content || "")
-      : `[${msg.message_type}]`;
+    const preview =
+      msg.message_type === "text"
+        ? (msg.content || "")
+        : msg.message_type === "call"
+          ? (msg.content || "📞 Voice call")
+          : `[${msg.message_type}]`;
     const title = msg.conversation_type === "group"
       ? `${sender} (group)`
       : sender;
@@ -464,10 +513,16 @@ export default function ChatApp() {
 
     if (shouldShowInAppAlert(convId)) {
       void playSoftForegroundTone();
+      const avatarUrl = avatarUrlForUser(msg.sender_id, {
+        conversation: conv,
+        fallbackUrl: msg.sender_avatar_url,
+      });
       showInAppMessageBanner({
         title,
         body: preview,
         conversationId: convId,
+        avatarUrl,
+        message: msg,
         onOpen: () => {
           const target = conversations.find((c) => c.id === convId);
           if (target) setSelected(target);
@@ -511,8 +566,22 @@ export default function ChatApp() {
     markMessageSeen(msg.id, seenInflightRef.current);
   }, [user.id]);
 
+  const markContactOnline = useCallback((userId) => {
+    if (!userId || userId === user.id) return;
+    setOnlineUsers((prev) => (prev[userId] ? prev : { ...prev, [userId]: true }));
+    setConversations((prev) => prev.map((c) => {
+      if (c.type === "group") return c;
+      const other = c.other_user;
+      if (!other || other.id !== userId || other.online) return c;
+      return { ...c, other_user: { ...other, online: true } };
+    }));
+  }, [user.id]);
+
   const handleIncomingMessage = useCallback((msg) => {
     if (!msg) return;
+    if (msg.sender_id && msg.sender_id !== user.id) {
+      markContactOnline(msg.sender_id);
+    }
     const activeId = selectedIdRef.current;
     const own = isOwnMessage(msg, user.id);
     const inOpenThread =
@@ -556,16 +625,19 @@ export default function ChatApp() {
       updated.sort((a, b) => (b.last_message_at || "").localeCompare(a.last_message_at || ""));
       return updated;
     });
-  }, [user.id, loadConversations, maybeNotify, ackMessageDelivered, ackMessageSeen]);
+  }, [user.id, loadConversations, maybeNotify, ackMessageDelivered, ackMessageSeen, markContactOnline]);
 
   const handleTyping = useCallback((data) => {
+    if (data.is_typing && data.sender_id && data.sender_id !== user.id) {
+      markContactOnline(data.sender_id);
+    }
     setTypingUsers((prev) => {
       const convMap = { ...(prev[data.conversation_id] || {}) };
       if (data.is_typing) convMap[data.sender_id] = data.sender_name || "Someone";
       else delete convMap[data.sender_id];
       return { ...prev, [data.conversation_id]: convMap };
     });
-  }, []);
+  }, [markContactOnline]);
 
   const handlePresence = useCallback((data) => {
     setOnlineUsers((prev) => ({ ...prev, [data.user_id]: data.online }));
@@ -701,6 +773,10 @@ export default function ChatApp() {
   // conversation. The SW also focused the tab/opened a new one.
   const openConversationById = useCallback((convId) => {
     if (!convId) return;
+    if (isClient && clientHomeMode) {
+      panelCtx.setClientTab?.("chats");
+      navigate("/chat", { replace: true, state: { clientTab: "chats" } });
+    }
     setConversations((prev) => {
       const target = prev.find((c) => c.id === convId);
       if (target) {
@@ -718,9 +794,10 @@ export default function ChatApp() {
       }
       return prev;
     });
-  }, [navigate, setActiveConversationId, isClient, clientEmployeeId, loadClientAssignedChat]);
+  }, [navigate, setActiveConversationId, isClient, clientEmployeeId, loadClientAssignedChat, clientHomeMode, panelCtx]);
 
   useRegisterCallNavigation(openConversationById);
+  useRegisterCallThreadRefresh({ loadMessages, setMessages, selectedIdRef });
 
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
@@ -800,6 +877,10 @@ export default function ChatApp() {
   }, [unreadTotal, panelCtx]);
 
   const handlePanelBack = useCallback(() => {
+    if (isClient && clientHomeMode && selected) {
+      closeChat();
+      return true;
+    }
     if (isClient) return false;
     if (listSelection) {
       setListSelection(null);
@@ -810,16 +891,16 @@ export default function ChatApp() {
       return true;
     }
     return false;
-  }, [isClient, listSelection, chatConvIdFromUrl, selected, closeChat]);
+  }, [isClient, clientHomeMode, selected, listSelection, chatConvIdFromUrl, closeChat]);
 
   usePanelMobileBack({
     enabled: user?.role === "client" || user?.role === "employee",
     onBack: handlePanelBack,
     onExitApp: () =>
-      (user?.role === "client" || user?.role === "employee") &&
-      !isClient &&
+      (user?.role === "client" && clientHomeMode && !selected && location.pathname === "/chat") ||
+      (user?.role === "employee" &&
       !chatConvIdFromUrl &&
-      location.pathname === "/chat",
+      location.pathname === "/chat"),
   });
 
   const openUserProfile = useCallback((profileUser, conv) => {
@@ -840,9 +921,11 @@ export default function ChatApp() {
   }, []);
 
   const inChatThread =
-    !isClient && Boolean(chatConvIdFromUrl) && Boolean(selected);
+    isClient && clientHomeMode
+      ? Boolean(selected)
+      : !isClient && Boolean(chatConvIdFromUrl) && Boolean(selected);
   const showMobileFooter =
-    inPanelLayout && !chatComposerActive && (isClient || !inChatThread);
+    inPanelLayout && !chatComposerActive && (isClient && !clientHomeMode ? true : isClient ? false : !inChatThread);
   const clientThreadReadOnly = isClient && selected && selected.client_can_write === false;
 
   return (
@@ -860,6 +943,13 @@ export default function ChatApp() {
             navigate(profilePath(user?.role));
           }}
           onRefresh={handleRefresh}
+          onCallHistory={() => {
+            if (user?.role === "admin") {
+              navigate(adminCallLogsPath());
+              return;
+            }
+            navigate(callHistoryPath());
+          }}
           onRaiseComplaint={
             user?.role === "client"
               ? () => navigate(raiseComplaintPath(), { push: true })
@@ -892,9 +982,40 @@ export default function ChatApp() {
             />
           </div>
         )}
-        <main className={`call-panel-content relative ${isClient || selected || chatConvIdFromUrl ? "flex" : "hidden md:flex"} min-h-0 flex-1 flex-col overflow-hidden`}>
-          <MinimizedCallBadge fixedBelowTopBar={isClient && !chatConvIdFromUrl} />
-          {isClient && !clientChatReady && !clientUnassigned ? (
+        {isClient && clientHomeMode && !selected && (
+          <div className="flex h-full min-h-0 w-full flex-col">
+            {clientUnassigned ? (
+              <div
+                className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-sm text-gray-500 dark:text-gray-400"
+                data-testid="client-unassigned-home"
+              >
+                {t("chat.clientUnassigned", { defaultValue: "Your nutrition expert will be assigned soon." })}
+              </div>
+            ) : (
+              <ChatSidebar
+                conversations={conversations}
+                isLoading={!clientChatReady}
+                onlineUsers={onlineUsers}
+                selectedId={null}
+                onSelect={(c) => openChat(c)}
+                readOnlyPrefs
+                clientHomeList
+                listScrollRef={listScrollRef}
+              />
+            )}
+          </div>
+        )}
+        <main
+          className={`call-panel-content relative ${
+            isClient && clientHomeMode && !selected
+              ? "hidden"
+              : isClient || selected || chatConvIdFromUrl
+                ? "flex"
+                : "hidden md:flex"
+          } min-h-0 flex-1 flex-col overflow-hidden`}
+        >
+          <MinimizedCallBadge fixedBelowTopBar={isClient && clientHomeMode && !selected} />
+          {isClient && !clientChatReady && !clientUnassigned && !(clientHomeMode && !selected) ? (
             <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-gray-400" data-testid="client-chat-loading">
               {t("chat.loadingChat")}
             </div>
@@ -910,8 +1031,8 @@ export default function ChatApp() {
               onlineUsers={onlineUsers}
               lastSeenByUser={lastSeenByUser}
               sendTyping={sendTyping}
-              onBack={isClient ? undefined : closeChat}
-              hideBackButton={isClient}
+              onBack={isClient && clientHomeMode ? closeChat : isClient ? undefined : closeChat}
+              hideBackButton={isClient && !clientHomeMode}
               clientUnassigned={clientUnassigned}
               readOnly={clientThreadReadOnly}
               chatBackTo="/chat"

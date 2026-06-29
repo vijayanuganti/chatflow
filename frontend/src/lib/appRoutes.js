@@ -113,6 +113,19 @@ export function raiseComplaintPath() {
   return "/chat/complaint";
 }
 
+/** Employee / client call history (voice). */
+export function callHistoryPath() {
+  return "/chat/calls";
+}
+
+export function ringtoneSettingsPath(role) {
+  return `${panelBase(role)}/settings/ringtone`;
+}
+
+export function adminCallLogsPath() {
+  return "/admin/calllogs";
+}
+
 /** Contact info page for a user in a direct chat. */
 export function userProfilePath(role, userId) {
   if (role === "admin") {

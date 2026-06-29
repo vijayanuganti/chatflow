@@ -10,7 +10,7 @@ import { Camera, Loader2, Phone, Stethoscope, ChevronRight, Sun, Moon, Monitor, 
 import Avatar from "@/components/Avatar";
 import PasswordInput from "@/components/PasswordInput";
 import MobilePageShell from "@/components/layout/MobilePageShell";
-import { medicalPath, panelBase } from "@/lib/appRoutes";
+import { medicalPath, panelBase, ringtoneSettingsPath } from "@/lib/appRoutes";
 import { api, formatApiError } from "@/lib/api";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
@@ -398,6 +398,23 @@ export default function ProfileSettingsPage({ panelLayout = false }) {
           </TabsContent>
 
           <TabsContent value="alerts" className="mt-4 space-y-4" data-testid="profile-alerts-pane">
+            <button
+              type="button"
+              className="w-full flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-4 text-left dark:border-gray-700 dark:bg-gray-900"
+              onClick={() => navigate(ringtoneSettingsPath(user?.role))}
+              data-testid="profile-ringtone-settings-link"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-500/15 text-violet-600 dark:text-violet-300">
+                  <Bell className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                </span>
+                <div>
+                  <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Ringtone</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Incoming call sound & vibration</div>
+                </div>
+              </div>
+              <ChevronRight className="h-5 w-5 shrink-0 text-gray-400" aria-hidden />
+            </button>
             <div className="flex items-start justify-between gap-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
               <div className="min-w-0 flex-1 space-y-1">
                 <Label htmlFor="conversation-sounds-toggle" className="text-sm font-semibold text-gray-900 dark:text-gray-100">

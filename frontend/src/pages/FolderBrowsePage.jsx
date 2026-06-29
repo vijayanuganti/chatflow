@@ -90,7 +90,7 @@ function FolderList({ folders, emptyMessage, onOpen, showViewOnly, onDelete, onE
   );
 }
 
-export default function FolderBrowsePage() {
+export default function FolderBrowsePage({ tabEmbedded = false }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const role = user?.role;
@@ -130,7 +130,11 @@ export default function FolderBrowsePage() {
   }, [load]);
 
   const openFolder = (f, section) => {
-    navigate(`/chat/folders/${f.id}`, { state: { backTo, section } });
+    navigate(`/chat/folders/${f.id}`, {
+      state: tabEmbedded
+        ? { backTo: "/chat", clientTab: "folders", section }
+        : { backTo, section },
+    });
   };
 
   const openCreate = () => {
@@ -288,10 +292,10 @@ export default function FolderBrowsePage() {
     >
       <TopBar
         title="Folders"
-        onOpenSettings={() => navigate(profilePath(user?.role), { state: { backTo } })}
-        onBack={() => navigate("/chat")}
+        onOpenSettings={() => navigate(profilePath(user?.role), { state: { backTo: tabEmbedded ? "/chat" : backTo } })}
+        onBack={tabEmbedded ? undefined : () => navigate("/chat")}
       />
-      <div className="flex-1 overflow-y-auto p-4 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-4">
+      <div className={`flex-1 overflow-y-auto p-4 ${tabEmbedded ? "pb-4" : "pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-4"}`}>
         {loading && <p className="text-sm text-gray-500">Loading...</p>}
         {!loading && isEmployee && employeeTabs}
         {!loading && isClient && clientTabs}

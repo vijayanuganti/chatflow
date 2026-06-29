@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useNavigateBack } from "@/hooks/useNavigateBack";
 
-export default function DietPlanPage({ panelLayout = false }) {
+export default function DietPlanPage({ panelLayout = false, tabEmbedded = false }) {
   const { clientId: chatClientId, userId: adminClientId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -63,9 +63,10 @@ export default function DietPlanPage({ panelLayout = false }) {
   return (
     <MobilePageShell
       embedded={panelLayout}
+      hideBack={tabEmbedded}
       title={client ? `Diet log | ${client.full_name}` : "Diet log"}
       description={description}
-      onBack={handleBack}
+      onBack={tabEmbedded ? undefined : handleBack}
       testId="diet-plan-page"
     >
       {client?.id ? (

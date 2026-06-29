@@ -3,15 +3,19 @@ import "@/App.css";
 import { registerServiceWorker } from "@/lib/notify";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { getStoredAccessToken } from "@/lib/api";
 import { ChatProvider } from "@/context/ChatContext";
 import { ChatSocketProvider } from "@/context/ChatSocketContext";
 import { CallProvider } from "@/context/CallContext";
 import GlobalCallOverlay from "@/components/call/GlobalCallOverlay";
 import GlobalCallBridge from "@/components/call/GlobalCallBridge";
+import CallHistoryPage from "@/pages/CallHistoryPage";
+import RingtoneSettingsPage from "@/pages/RingtoneSettingsPage";
 import { GlobalCallBackground } from "@/hooks/useCallBackgroundRoute";
 import { ThemeProvider } from "@/context/ThemeContext";
 import LoginPage from "@/pages/Login";
 import ChatApp from "@/pages/ChatApp";
+import ChatIndexRoute from "@/components/layout/ChatIndexRoute";
 import ChatPortalEntry from "@/components/layout/ChatPortalEntry";
 import AdminDashboard from "@/pages/AdminDashboard";
 import ProfileSettingsPage from "@/pages/ProfileSettingsPage";
@@ -56,7 +60,7 @@ function Protected({ children, roles }) {
       </div>
     );
   }
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user || !getStoredAccessToken()) return <Navigate to="/login" replace />;
   const role = (user.role || "").toLowerCase();
   if (roles && !roles.includes(role)) return <Navigate to="/" replace />;
   return children;
@@ -138,8 +142,16 @@ function App() {
                 </Protected>
               }
             >
-              <Route index element={<ChatApp />} />
+              <Route index element={<ChatIndexRoute />} />
               <Route path="profile" element={<ProfileSettingsPage panelLayout />} />
+              <Route
+                path="settings/ringtone"
+                element={
+                  <Protected roles={["employee", "client"]}>
+                    <RingtoneSettingsPage panelLayout />
+                  </Protected>
+                }
+              />
               <Route path="tools" element={<ToolsPage panelLayout />} />
               <Route path="diet-plan" element={<DietPlanPage panelLayout />} />
               <Route path="diet-plan/:clientId" element={<DietPlanPage panelLayout />} />
@@ -156,6 +168,14 @@ function App() {
                 element={
                   <Protected roles={["employee", "client"]}>
                     <FolderDetailPage />
+                  </Protected>
+                }
+              />
+              <Route
+                path="calls"
+                element={
+                  <Protected roles={["employee", "client"]}>
+                    <CallHistoryPage panelLayout />
                   </Protected>
                 }
               />
@@ -213,6 +233,14 @@ function App() {
               element={
                 <Protected roles={["admin"]}>
                   <ProfileSettingsPage />
+                </Protected>
+              }
+            />
+            <Route
+              path="/admin/settings/ringtone"
+              element={
+                <Protected roles={["admin"]}>
+                  <RingtoneSettingsPage />
                 </Protected>
               }
             />

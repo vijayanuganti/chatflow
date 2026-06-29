@@ -7,6 +7,7 @@ import ComposeIcon from "@/components/icons/ComposeIcon";
 import TopBar from "@/components/TopBar";
 import { useChatSocketHandlers, useChatSocketTyping } from "@/context/ChatSocketContext";
 import useRegisterCallNavigation from "@/hooks/useRegisterCallNavigation";
+import useRegisterCallThreadRefresh from "@/hooks/useRegisterCallThreadRefresh";
 import MinimizedCallBadge from "@/components/call/MinimizedCallBadge";
 import usePanelMobileBack from "@/hooks/usePanelMobileBack";
 import useMobileChatViewport from "@/hooks/useMobileChatViewport";
@@ -31,9 +32,10 @@ import {
   MessageCircle, Eye, Plus, Layers, UserPlus, ShieldCheck,
   KeyRound, ShieldAlert, UserCheck, UserX, PowerOff, Power, Stethoscope,
   ArrowRightLeft, FolderPlus, Inbox, CheckCircle2, Clock, RotateCcw, Loader2,
-  HardDrive, Trash2, Settings, Folder, FileBarChart,
+  HardDrive, Trash2, Settings, Folder, FileBarChart, Phone,
 } from "lucide-react";
 import AdminReportsPane from "@/components/admin/AdminReportsPane";
+import AdminCallLogsPane from "@/components/admin/AdminCallLogsPane";
 import AdminReferralsPane from "@/components/admin/AdminReferralsPane";
 import {
   filterAdminMyChatConversations,
@@ -114,7 +116,7 @@ import {
 
 const ADMIN_TAB_IDS = new Set([
   "overview", "batches", "chats", "mychats", "users", "referrals", "folders", "reports",
-  "permissions", "inactive", "complaints", "storage", "more",
+  "permissions", "inactive", "complaints", "storage", "calllogs", "more",
 ]);
 
 /** ASCII-only stat display (avoids em-dash mojibake in Android WebView). */
@@ -418,8 +420,8 @@ export default function AdminDashboard() {
         online[x.id] = !!x.online;
         if (x.last_seen) lastSeen[x.id] = x.last_seen;
       });
-      setOnlineUsers(online);
-      setLastSeenByUser(lastSeen);
+      setOnlineUsers((prev) => ({ ...online, ...prev }));
+      setLastSeenByUser((prev) => ({ ...lastSeen, ...prev }));
     } catch (err) {
       toast.error(formatApiError(err));
     } finally {
@@ -520,6 +522,8 @@ export default function AdminDashboard() {
       }
     });
   }, [user?.id]);
+
+  useRegisterCallThreadRefresh({ loadMessages, setMessages, selectedIdRef });
 
   /** Sync open chat from URL (?c=) after browser / system back. */
   useEffect(() => {
@@ -803,8 +807,16 @@ export default function AdminDashboard() {
     });
   }, [navigate, location.pathname]);
 
+  const markContactOnline = useCallback((userId) => {
+    if (!userId || userId === user.id) return;
+    setOnlineUsers((prev) => (prev[userId] ? prev : { ...prev, [userId]: true }));
+  }, [user.id]);
+
   const handleIncoming = useCallback((msg) => {
     if (!msg) return;
+    if (msg.sender_id && msg.sender_id !== user.id) {
+      markContactOnline(msg.sender_id);
+    }
     const own = isOwnMessage(msg, user.id);
     const recipientIds = Array.isArray(msg?.recipient_ids) ? msg.recipient_ids : [];
     const inRecipientList = recipientIds.some((id) => String(id) === String(user.id));
@@ -871,7 +883,7 @@ export default function AdminDashboard() {
     };
     setAllConvs(updater);
     setMyConvs(updater);
-  }, [loadOverview, user.id, user.role]);
+  }, [loadOverview, user.id, user.role, markContactOnline]);
 
   const handlePresence = useCallback((data) => {
     setOnlineUsers((prev) => ({ ...prev, [data.user_id]: data.online }));
@@ -881,13 +893,16 @@ export default function AdminDashboard() {
   }, []);
 
   const handleTypingEvent = useCallback((data) => {
+    if (data.is_typing && data.sender_id && data.sender_id !== user.id) {
+      markContactOnline(data.sender_id);
+    }
     setTypingUsers((prev) => {
       const convMap = { ...(prev[data.conversation_id] || {}) };
       if (data.is_typing) convMap[data.sender_id] = data.sender_name || "Someone";
       else delete convMap[data.sender_id];
       return { ...prev, [data.conversation_id]: convMap };
     });
-  }, []);
+  }, [markContactOnline]);
 
   const handleReadReceipt = useCallback((data) => {
     const activeId = selectedIdRef.current;
@@ -1249,6 +1264,7 @@ export default function AdminDashboard() {
         <NavButton icon={UserPlus} label={t("nav.adminReferrals")} active={tab === "referrals"} onClick={() => goToTab("referrals")} testId="admin-nav-referrals" />
         <NavButton icon={Folder} label={t("nav.adminFolders")} active={tab === "folders"} onClick={() => goToTab("folders")} testId="admin-nav-folders" />
         <NavButton icon={FileBarChart} label={t("nav.adminReports")} active={tab === "reports"} onClick={() => goToTab("reports")} testId="admin-nav-reports" />
+        <NavButton icon={Phone} label="Call logs" active={tab === "calllogs"} onClick={() => goToTab("calllogs")} testId="admin-nav-calllogs" />
         <NavButton icon={Inbox} label={t("nav.adminComplaints")} active={tab === "complaints"} onClick={() => goToTab("complaints")} testId="admin-nav-complaints" badge={stats?.complaints_pending || 0} />
         <NavButton icon={HardDrive} label={t("nav.adminStorage")} active={tab === "storage"} onClick={() => goToTab("storage")} testId="admin-nav-storage" />
         <NavButton icon={Settings} label={t("nav.adminMore")} active={tab === "more"} onClick={() => goToTab("more")} testId="admin-nav-more" />
@@ -1341,6 +1357,7 @@ export default function AdminDashboard() {
               <AdminMoreTile icon={Layers} title={t("nav.adminBatches")} subtitle={t("admin.moreBatchesSub")} onClick={() => goToSettingsTool("batches", { mobileBatchesStep: "employees" })} testId="more-batches" />
               <AdminMoreTile icon={Folder} title={t("nav.adminFolders")} subtitle={t("admin.moreFoldersSub")} onClick={() => goToSettingsTool("folders")} testId="more-folders" />
               <AdminMoreTile icon={FileBarChart} title={t("nav.adminReports")} subtitle={t("admin.moreReportsSub")} onClick={() => goToSettingsTool("reports")} testId="more-reports" />
+              <AdminMoreTile icon={Phone} title="Call logs" subtitle="Voice call history & export" onClick={() => goToSettingsTool("calllogs")} testId="more-calllogs" />
               <AdminMoreTile icon={ShieldCheck} title={t("nav.adminPermissions")} subtitle={t("admin.morePermissionsSub")} onClick={() => goToSettingsTool("permissions")} testId="more-permissions" />
               <AdminMoreTile icon={UserPlus} title={t("nav.adminReferrals")} subtitle={t("admin.moreReferralsSub")} onClick={() => goToSettingsTool("referrals")} testId="more-referrals" />
               <AdminMoreTile icon={Inbox} title={t("nav.adminComplaints")} subtitle={stats?.complaints_pending ? t("admin.moreComplaintsOpen", { count: stats.complaints_pending }) : t("admin.moreComplaintsSub")} onClick={() => goToSettingsTool("complaints")} testId="more-complaints" />
@@ -1654,6 +1671,12 @@ export default function AdminDashboard() {
         {tab === "reports" && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <AdminReportsPane />
+          </div>
+        )}
+
+        {tab === "calllogs" && (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <AdminCallLogsPane />
           </div>
         )}
 

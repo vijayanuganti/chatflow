@@ -28,6 +28,39 @@ import {
 export const AUTH_TOKEN_KEY = "cf_access_token";
 export const AUTH_USER_KEY = "cf_user";
 export const AUTH_REMEMBER_KEY = "cf_remember_auth";
+const LAST_API_ORIGIN_KEY = "cf_last_api_origin";
+
+/** Drop stale JWT/user when switching API host (e.g. production ↔ localhost). */
+export function clearAuthIfBackendOriginChanged() {
+  if (typeof window === "undefined") return false;
+  try {
+    const current = normalizeBackendOrigin(resolveBackendUrl());
+    const previous = (localStorage.getItem(LAST_API_ORIGIN_KEY) || "").trim();
+    const isLocal = /localhost|127\.0\.0\.1/i.test(current);
+    const wasRemote = previous && !/localhost|127\.0\.0\.1/i.test(previous);
+    const shouldClear =
+      (previous && current && previous !== current) || (wasRemote && isLocal);
+
+    if (shouldClear) {
+      clearAuthSession();
+    }
+    if (current) localStorage.setItem(LAST_API_ORIGIN_KEY, current);
+    return shouldClear;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+export function markCurrentBackendOrigin() {
+  if (typeof window === "undefined") return;
+  try {
+    const current = normalizeBackendOrigin(resolveBackendUrl());
+    if (current) localStorage.setItem(LAST_API_ORIGIN_KEY, current);
+  } catch {
+    /* ignore */
+  }
+}
 
 /** Stable per Chrome profile / origin — sent with API + WS so JWTs cannot be replayed from another install. */
 export const BROWSER_ID_KEY = "cf_browser_id";
@@ -38,12 +71,16 @@ export function getOrCreateBrowserId() {
   try {
     let id = (localStorage.getItem(BROWSER_ID_KEY) || "").trim();
     if (!id) {
+      id = (sessionStorage.getItem(BROWSER_ID_KEY) || "").trim();
+    }
+    if (!id) {
       id =
         typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
           : `b-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-      localStorage.setItem(BROWSER_ID_KEY, id);
     }
+    localStorage.setItem(BROWSER_ID_KEY, id);
+    sessionStorage.setItem(BROWSER_ID_KEY, id);
     return id;
   } catch {
     try {
@@ -91,18 +128,6 @@ export function syncBrowserIdFromToken(token) {
   return true;
 }
 
-/** JWT `bid` must match this install; align storage from the token when possible. */
-function tokenMatchesThisInstall(token) {
-  const p = decodeJwtPayload(token);
-  if (!p) return false;
-  const bid = p.bid;
-  if (bid == null || String(bid).trim() === "") return false;
-  const bidStr = String(bid).trim();
-  const install = getOrCreateBrowserId();
-  if (install === bidStr) return true;
-  return syncBrowserIdFromToken(token);
-}
-
 let didMigrateSessionToLocal = false;
 
 /** One-time: legacy installs had a token in localStorage without `cf_remember_auth`. */
@@ -119,20 +144,33 @@ export function migrateAuthFromSessionStorage() {
   }
 }
 
-export function getStoredAccessToken() {
+/** JWT `bid` must match this install; align local browser id from the token when present. */
+function tokenMatchesThisInstall(token) {
+  const p = decodeJwtPayload(token);
+  if (!p) return false;
+  const bid = p.bid;
+  if (bid == null || String(bid).trim() === "") return false;
+  syncBrowserIdFromToken(token);
+  return true;
+}
+
+function readStoredAccessToken() {
   migrateAuthFromSessionStorage();
   try {
     const st = (sessionStorage.getItem(AUTH_TOKEN_KEY) || "").trim();
     if (st) {
-      if (!tokenMatchesThisInstall(st)) return null;
-      return st;
+      if (tokenMatchesThisInstall(st)) return st;
+      try {
+        sessionStorage.removeItem(AUTH_TOKEN_KEY);
+      } catch {
+        /* ignore */
+      }
     }
 
     const remember = (localStorage.getItem(AUTH_REMEMBER_KEY) || "").trim();
     const lt = (localStorage.getItem(AUTH_TOKEN_KEY) || "").trim();
     if (!lt) return null;
     if (!tokenMatchesThisInstall(lt)) return null;
-    // Explicit "this browser is not remembered" — do not hydrate from localStorage.
     if (remember === "0") return null;
 
     if (remember === "1" || remember === "") {
@@ -154,6 +192,10 @@ export function getStoredAccessToken() {
   } catch {
     return null;
   }
+}
+
+export function getStoredAccessToken() {
+  return readStoredAccessToken();
 }
 
 /** @param {string|null|undefined} token @param {boolean} [remember=true] */

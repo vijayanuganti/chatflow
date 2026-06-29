@@ -14,7 +14,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import PasswordInput from "@/components/PasswordInput";
-import { api, formatApiError, BROWSER_ID_KEY } from "@/lib/api";
+import { api, formatApiError, BROWSER_ID_KEY, syncBrowserIdFromToken, getStoredAccessToken } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 import COUNTRIES, { DEFAULT_COUNTRY_CODE, getCountry } from "@/lib/countries";
@@ -63,7 +63,7 @@ export default function LoginPage() {
   // button from inside the app and somehow landed here), bounce them right
   // back to their dashboard instead of asking them to log in again.
   useEffect(() => {
-    if (loading || !user) return;
+    if (loading || !user || !getStoredAccessToken()) return;
     const target = user.role === "admin" ? "/admin" : "/chat";
     navigate(target, { replace: true });
   }, [loading, user, navigate]);
@@ -130,11 +130,16 @@ export default function LoginPage() {
       const res = await api.post("/auth/login", payload);
       const installId = res.data?.browser_install_id;
       if (installId && typeof installId === "string") {
+        const bid = installId.trim();
         try {
-          localStorage.setItem(BROWSER_ID_KEY, installId.trim());
+          localStorage.setItem(BROWSER_ID_KEY, bid);
+          sessionStorage.setItem(BROWSER_ID_KEY, bid);
         } catch {
           /* ignore */
         }
+      }
+      if (res.data?.access_token) {
+        syncBrowserIdFromToken(res.data.access_token);
       }
       login(res.data.user, res.data.access_token, staySignedIn);
       if (Capacitor.isNativePlatform()) {

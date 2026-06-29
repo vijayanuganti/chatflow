@@ -433,10 +433,21 @@ export async function initCapacitorPush(userId, onNotificationAction, onMarkRead
 
       if (showInApp) {
         void playSoftForegroundTone();
+        const callMessage =
+          data.message_type === "call"
+            ? {
+                message_type: "call",
+                call_subtype: data.call_subtype,
+                caller_id: data.caller_id,
+                callee_id: data.callee_id,
+                conversation_id: convId,
+              }
+            : null;
         showInAppMessageBanner({
           title,
           body,
           conversationId: convId,
+          message: callMessage,
           onOpen: () => {
             onNotificationActionRef?.({
               data: { conversation_id: convId },

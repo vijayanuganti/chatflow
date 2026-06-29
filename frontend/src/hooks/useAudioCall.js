@@ -115,6 +115,7 @@ export default function useAudioCall({
       }
     };
     pc.onconnectionstatechange = () => {
+      if (pc !== pcRef.current) return;
       const state = pc.connectionState;
       if (state === "connected") {
         setCallState(CALL_STATE.CONNECTED);
@@ -143,13 +144,20 @@ export default function useAudioCall({
   }, []);
 
   const startCall = useCallback(async (overrideSession) => {
-    const s = overrideSession || session;
-    if (!s?.conversationId || !s?.remoteUserId) return false;
+    const s = overrideSession || sessionRef.current;
+    if (!s?.conversationId || !s?.remoteUserId) {
+      return { ok: false, error: "missing_session" };
+    }
     try {
+      cleanupMedia();
+      setCallState(CALL_STATE.IDLE);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
       await ensureHealthy();
       const callId = newCallId();
       callIdRef.current = callId;
       if (activeCallIdRef) activeCallIdRef.current = callId;
+      sessionRef.current = s;
       setCallState(CALL_STATE.OUTGOING);
       const pc = createPeerConnection();
       await attachLocalAudio(pc);
@@ -160,19 +168,29 @@ export default function useAudioCall({
         conversation_id: s.conversationId,
         sdp: offer.sdp,
       });
-      return true;
+      return { ok: true, callId };
     } catch (err) {
       logCallSignal("startCall.failed", err?.message);
-      teardown(CALL_STATE.FAILED);
-      return false;
+      teardown(CALL_STATE.IDLE);
+      const name = err?.name || "";
+      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+        return { ok: false, error: "mic_denied" };
+      }
+      if (name === "NotReadableError" || name === "AbortError") {
+        return { ok: false, error: "mic_busy" };
+      }
+      if (String(err?.message || "").includes("WebSocket")) {
+        return { ok: false, error: "network" };
+      }
+      return { ok: false, error: "unknown" };
     }
   }, [
-    session,
     ensureHealthy,
     createPeerConnection,
     attachLocalAudio,
     sendSignal,
     teardown,
+    cleanupMedia,
     activeCallIdRef,
   ]);
 
@@ -215,34 +233,38 @@ export default function useAudioCall({
   const declineCall = useCallback(
     (reason = "declined") => {
       const callId = callIdRef.current;
-      if (callId && session?.remoteUserId) {
-        sendSignal(CALL_SIGNAL.DECLINE, session.remoteUserId, { call_id: callId, reason });
+      const remoteUserId = sessionRef.current?.remoteUserId;
+      if (callId && remoteUserId) {
+        sendSignal(CALL_SIGNAL.DECLINE, remoteUserId, { call_id: callId, reason });
       }
       teardown(CALL_STATE.IDLE);
       onCallEnded?.();
     },
-    [session, sendSignal, teardown, onCallEnded],
+    [sendSignal, teardown, onCallEnded],
   );
 
   const endCall = useCallback(
     (reason = "hangup") => {
       const callId = callIdRef.current;
-      if (callId && session?.remoteUserId) {
-        sendSignal(CALL_SIGNAL.END, session.remoteUserId, { call_id: callId, reason });
+      const remoteUserId = sessionRef.current?.remoteUserId;
+      if (callId && remoteUserId) {
+        sendSignal(CALL_SIGNAL.END, remoteUserId, { call_id: callId, reason });
       }
       teardown(CALL_STATE.IDLE);
       onCallEnded?.();
     },
-    [session, sendSignal, teardown, onCallEnded],
+    [sendSignal, teardown, onCallEnded],
   );
 
   const toggleMute = useCallback(() => {
     const tracks = localStreamRef.current?.getAudioTracks() || [];
-    const next = !tracks[0]?.enabled;
-    tracks.forEach((t) => {
-      t.enabled = !next;
+    setIsMuted((prev) => {
+      const nextMuted = !prev;
+      tracks.forEach((t) => {
+        t.enabled = !nextMuted;
+      });
+      return nextMuted;
     });
-    setIsMuted(next);
   }, []);
 
   const toggleSpeaker = useCallback(() => {
@@ -275,7 +297,7 @@ export default function useAudioCall({
       }
       if (type === CALL_SIGNAL.ANSWER) {
         const pc = pcRef.current;
-        if (!pc || !frame.sdp) return;
+        if (!pc || !frame.sdp || callIdRef.current !== frame.call_id) return;
         try {
           await pc.setRemoteDescription({ type: "answer", sdp: normalizeSdp(frame.sdp) });
           remoteDescSetRef.current = true;
@@ -303,6 +325,10 @@ export default function useAudioCall({
         return;
       }
       if (type === CALL_SIGNAL.DECLINE || type === CALL_SIGNAL.END || type === CALL_SIGNAL.ENDED) {
+        if (frame.call_id && callIdRef.current && frame.call_id !== callIdRef.current) {
+          logCallSignal("session.ignore.end.other", type);
+          return;
+        }
         teardown(CALL_STATE.IDLE);
         onCallEnded?.();
         return;
@@ -343,5 +369,6 @@ export default function useAudioCall({
     toggleSpeaker,
     teardown,
     callIdRef,
+    peerConnectionRef: pcRef,
   };
 }

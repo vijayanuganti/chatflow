@@ -12,7 +12,7 @@ export { registerLogoutCleanup, runLogoutRegistryCleanup as runCleanup } from ".
 
 export { getForceLogoutMessage, consumeForceLogoutPending } from "./logoutFlow";
 
-/** Parse 401 response for single-session invalidation. */
+/** Parse 401 response for single-session invalidation (not browser-id or generic auth errors). */
 export function get401LogoutReason(err) {
   if (err?.response?.status !== 401) return null;
   const detail = err?.response?.data?.detail;
@@ -20,15 +20,8 @@ export function get401LogoutReason(err) {
   if (detail && typeof detail === "object" && detail.code === LOGOUT_REASON_ANOTHER_DEVICE) {
     return LOGOUT_REASON_ANOTHER_DEVICE;
   }
-  if (typeof detail === "string") {
-    const lower = detail.toLowerCase();
-    if (
-      lower.includes("session expired")
-      || lower.includes("session is not valid")
-      || lower.includes("sign in again")
-    ) {
-      return LOGOUT_REASON_ANOTHER_DEVICE;
-    }
+  if (typeof detail === "string" && detail === "token_expired") {
+    return LOGOUT_REASON_ANOTHER_DEVICE;
   }
   return null;
 }

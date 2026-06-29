@@ -4,6 +4,7 @@ WebRTC audio call signaling — relay SDP/ICE over the existing chat WebSocket.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -22,6 +23,9 @@ CALL_SIGNAL_TYPES = frozenset({
 })
 
 _active_calls: Dict[str, dict] = {}
+_call_message_inserted: set = set()
+_call_message_broadcast: set = set()
+_finalize_locks: Dict[str, asyncio.Lock] = {}
 
 
 def _now_iso() -> str:
@@ -54,15 +58,190 @@ async def _assert_direct_participants(db, conversation_id: str, user_id: str, ta
 
 
 async def _upsert_call_log(db, call_id: str, patch: dict) -> None:
-    if not db:
+    if db is None:
         return
     await db.call_logs.update_one({"call_id": call_id}, {"$set": patch, "$setOnInsert": {"call_id": call_id}}, upsert=True)
 
 
-async def _finalize_call(db, call_id: str, status: str, ended_reason: Optional[str] = None) -> None:
-    entry = _active_calls.pop(call_id, None)
-    if not db or not entry:
+def _call_subtype_for_status(status: str) -> str:
+    if status == "answered":
+        return "call_answered"
+    if status == "missed":
+        return "call_missed"
+    if status == "declined":
+        return "call_declined"
+    return "call_ended"
+
+
+def _call_preview_text(subtype: str, duration: Optional[int]) -> str:
+    if subtype == "call_answered":
+        if duration and duration >= 1:
+            m, s = divmod(int(duration), 60)
+            dur = f"{m}m {s}s" if m else f"{s}s"
+            return f"📞 Voice call · {dur}"
+        return "📞 Voice call"
+    if subtype == "call_missed":
+        return "📵 Missed voice call"
+    if subtype == "call_declined":
+        return "📵 Declined voice call"
+    return "📞 Voice call"
+
+
+async def _insert_call_message(
+    db, conversation_id: str, sender_id: str, call_log: dict
+) -> tuple[Optional[dict], bool]:
+    """Insert a system call message into the conversation thread.
+
+    Returns (message, inserted) where inserted is False when a row already exists.
+    Uses an atomic upsert so concurrent finalizers cannot create two rows per call.
+    """
+    if db is None or not conversation_id:
+        return None, False
+    call_id = call_log.get("call_id")
+    if not call_id:
+        return None, False
+
+    status = call_log.get("status")
+    subtype = _call_subtype_for_status(status or "")
+    duration = call_log.get("duration_seconds")
+    caller_id = call_log.get("caller_id")
+    callee_id = call_log.get("callee_id")
+    created_at = _now_iso()
+    if status == "answered":
+        duration_value = max(0, int(duration or 0))
+    else:
+        duration_value = int(duration) if duration and int(duration) > 0 else None
+
+    caller = await db.users.find_one({"id": caller_id}, {"_id": 0, "full_name": 1, "username": 1})
+    sender_name = (caller or {}).get("full_name") or (caller or {}).get("username") or "Caller"
+
+    conv = await db.conversations.find_one({"id": conversation_id}, {"_id": 0, "type": 1, "participants": 1})
+    participants = list((conv or {}).get("participants") or [])
+    recipient_ids = [p for p in participants if p != sender_id]
+
+    msg = {
+        "id": str(uuid.uuid4()),
+        "conversation_id": conversation_id,
+        "conversation_type": (conv or {}).get("type") or "direct",
+        "sender_id": sender_id,
+        "sender_name": sender_name,
+        "recipient_ids": recipient_ids,
+        "message_type": "call",
+        "call_subtype": subtype,
+        "call_status": status,
+        "call_id": call_id,
+        "caller_id": caller_id,
+        "callee_id": callee_id,
+        "duration_seconds": duration_value,
+        "content": _call_preview_text(subtype, duration_value if status == "answered" else duration),
+        "created_at": created_at,
+        "read_by": [sender_id],
+        "status": "sent",
+    }
+
+    result = await db.messages.update_one(
+        {"call_id": call_id, "message_type": "call"},
+        {"$setOnInsert": dict(msg)},
+        upsert=True,
+    )
+    if not result.upserted_id:
+        existing = await db.messages.find_one(
+            {"call_id": call_id, "message_type": "call"},
+            {"_id": 0},
+        )
+        return existing, False
+
+    preview = msg["content"]
+    conv_update = {
+        "last_message": preview,
+        "last_message_at": created_at,
+        "last_message_sender_id": sender_id,
+        "last_message_type": "call",
+        "last_message_call_subtype": subtype,
+        "last_message_read_by": [sender_id],
+    }
+    if subtype == "call_answered" and duration_value is not None and int(duration_value) > 0:
+        conv_update["last_message_duration_seconds"] = int(duration_value)
+    await db.conversations.update_one({"id": conversation_id}, {"$set": conv_update})
+    return msg, True
+
+
+async def _broadcast_call_message(manager: Any, db: Any, msg: dict) -> None:
+    if manager is None or db is None or not msg:
         return
+    conv = await db.conversations.find_one({"id": msg["conversation_id"]}, {"_id": 0})
+    if not conv:
+        return
+    event = {
+        "type": "message",
+        "message": msg,
+        "conversation": {
+            "id": conv["id"],
+            "type": conv.get("type"),
+            "name": conv.get("name"),
+            "participants": conv.get("participants") or [],
+        },
+    }
+    for pid in conv.get("participants") or []:
+        await send_to_user(manager, pid, event)
+
+
+async def _broadcast_call_message_once(manager: Any, db: Any, msg: dict) -> None:
+    call_id = (msg or {}).get("call_id")
+    if call_id:
+        if call_id in _call_message_broadcast:
+            return
+        _call_message_broadcast.add(call_id)
+    await _broadcast_call_message(manager, db, msg)
+
+
+async def _finalize_call(
+    db,
+    call_id: str,
+    status: str,
+    ended_reason: Optional[str] = None,
+    manager: Any = None,
+) -> None:
+    if db is None or not call_id:
+        return
+    lock = _finalize_locks.setdefault(call_id, asyncio.Lock())
+    async with lock:
+        await _finalize_call_locked(db, call_id, status, ended_reason, manager)
+    if not lock.locked():
+        _finalize_locks.pop(call_id, None)
+
+
+async def _finalize_call_locked(
+    db,
+    call_id: str,
+    status: str,
+    ended_reason: Optional[str] = None,
+    manager: Any = None,
+) -> None:
+    existing_log = await db.call_logs.find_one({"call_id": call_id}, {"_id": 0, "status": 1})
+    if existing_log and existing_log.get("status") in ("answered", "missed", "declined"):
+        existing_msg = await db.messages.find_one(
+            {"call_id": call_id, "message_type": "call"},
+            {"_id": 0},
+        )
+        if existing_msg:
+            _call_message_inserted.add(call_id)
+            return
+
+    entry = _active_calls.pop(call_id, None)
+    message_already_inserted = bool(entry and entry.get("message_inserted"))
+    if not entry:
+        log = await db.call_logs.find_one({"call_id": call_id}, {"_id": 0})
+        if not log:
+            logger.warning("call finalize: no active entry or log for call_id=%s", call_id)
+            return
+        entry = {
+            "conversation_id": log.get("conversation_id"),
+            "caller_id": log.get("caller_id"),
+            "callee_id": log.get("callee_id"),
+            "started_at": log.get("started_at"),
+            "answered_at": log.get("answered_at"),
+        }
     ended_at = _now_iso()
     started = entry.get("started_at")
     answered_at = entry.get("answered_at")
@@ -74,21 +253,54 @@ async def _finalize_call(db, call_id: str, status: str, ended_reason: Optional[s
             duration = max(0, int((e - a).total_seconds()))
         except Exception:
             duration = 0
-    await _upsert_call_log(
-        db,
-        call_id,
-        {
-            "conversation_id": entry.get("conversation_id"),
-            "caller_id": entry.get("caller_id"),
-            "callee_id": entry.get("callee_id"),
-            "started_at": started,
-            "answered_at": answered_at,
-            "ended_at": ended_at,
-            "duration_seconds": duration,
-            "status": status,
-            "ended_reason": ended_reason,
-        },
-    )
+    log_doc = {
+        "conversation_id": entry.get("conversation_id"),
+        "caller_id": entry.get("caller_id"),
+        "callee_id": entry.get("callee_id"),
+        "started_at": started,
+        "answered_at": answered_at,
+        "ended_at": ended_at,
+        "duration_seconds": duration,
+        "status": status,
+        "ended_reason": ended_reason,
+        "call_id": call_id,
+    }
+    await _upsert_call_log(db, call_id, log_doc)
+
+    if status in ("answered", "missed", "declined"):
+        conversation_id = entry.get("conversation_id")
+        caller_id = entry.get("caller_id")
+        if not conversation_id:
+            logger.warning(
+                "call message skipped: missing conversation_id call_id=%s status=%s",
+                call_id,
+                status,
+            )
+        elif message_already_inserted or call_id in _call_message_inserted:
+            logger.debug("call message already inserted call_id=%s", call_id)
+        else:
+            existing_msg = await db.messages.find_one(
+                {"call_id": call_id, "message_type": "call"},
+                {"_id": 0},
+            )
+            if existing_msg:
+                _call_message_inserted.add(call_id)
+            else:
+                active_record = _active_calls.get(call_id)
+                if active_record is not None:
+                    active_record["message_inserted"] = True
+                msg, inserted = await _insert_call_message(db, conversation_id, caller_id, log_doc)
+                if msg:
+                    _call_message_inserted.add(call_id)
+                    if inserted:
+                        await _broadcast_call_message_once(manager, db, msg)
+                else:
+                    logger.warning(
+                        "call message insert failed call_id=%s conv=%s status=%s",
+                        call_id,
+                        conversation_id,
+                        status,
+                    )
 
 
 async def handle_call_signal(
@@ -140,15 +352,22 @@ async def _handle_call_offer(user_id: str, user: dict, payload: dict, manager: A
 
     callee_sockets = connection_count(manager, target_user_id)
     if callee_sockets <= 0:
-        logger.info("call_signal call-offer rejected: callee offline user_id=%s", target_user_id)
-        await send_to_user(
-            manager,
-            user_id,
-            {"type": "call-error", "call_id": call_id, "reason": "callee_offline"},
+        logger.info(
+            "call_signal call-offer: callee has no WebSocket user_id=%s — ringing caller anyway",
+            target_user_id,
         )
-        return
 
     started_at = _now_iso()
+    stale_ids = [
+        cid
+        for cid, entry in list(_active_calls.items())
+        if entry.get("caller_id") == user_id
+        and entry.get("callee_id") == target_user_id
+        and entry.get("state") == "ringing"
+    ]
+    for stale_id in stale_ids:
+        _active_calls.pop(stale_id, None)
+
     _active_calls[call_id] = {
         "call_id": call_id,
         "conversation_id": conversation_id,
@@ -252,6 +471,8 @@ async def _handle_call_decline(user_id: str, payload: dict, manager: Any, db: An
     if not call_id:
         return
     entry = _active_calls.get(call_id)
+    if not entry and db is not None:
+        entry = await db.call_logs.find_one({"call_id": call_id}, {"_id": 0})
     if not entry:
         return
     caller_id = entry.get("caller_id")
@@ -267,7 +488,7 @@ async def _handle_call_decline(user_id: str, payload: dict, manager: Any, db: An
     )
     await send_to_user(manager, user_id, {"type": "call-ended", "call_id": call_id, "reason": reason})
     await send_to_user(manager, peer_id, {"type": "call-ended", "call_id": call_id, "reason": reason})
-    await _finalize_call(db, call_id, "declined" if user_id == callee_id else "missed", reason)
+    await _finalize_call(db, call_id, "declined" if user_id == callee_id else "missed", reason, manager)
 
 
 async def _handle_call_end(user_id: str, payload: dict, manager: Any, db: Any) -> None:
@@ -275,6 +496,8 @@ async def _handle_call_end(user_id: str, payload: dict, manager: Any, db: Any) -
     if not call_id:
         return
     entry = _active_calls.get(call_id)
+    if not entry and db is not None:
+        entry = await db.call_logs.find_one({"call_id": call_id}, {"_id": 0})
     if not entry:
         return
     caller_id = entry.get("caller_id")
@@ -291,13 +514,54 @@ async def _handle_call_end(user_id: str, payload: dict, manager: Any, db: Any) -
     await send_to_user(manager, user_id, {"type": "call-ended", "call_id": call_id, "reason": reason})
     await send_to_user(manager, peer_id, {"type": "call-ended", "call_id": call_id, "reason": reason})
     status = "answered" if entry.get("answered_at") else ("missed" if user_id == caller_id else "declined")
-    await _finalize_call(db, call_id, status, reason)
+    await _finalize_call(db, call_id, status, reason, manager)
+
+
+async def ensure_call_thread_message(
+    db,
+    call_id: str,
+    user_id: str,
+    manager: Any = None,
+) -> Optional[dict]:
+    """Idempotent: finalize call log if needed and ensure a thread message exists."""
+    if db is None or not call_id:
+        return None
+    log = await db.call_logs.find_one({"call_id": call_id}, {"_id": 0})
+    if not log:
+        return None
+    caller_id = log.get("caller_id")
+    callee_id = log.get("callee_id")
+    if user_id not in {caller_id, callee_id}:
+        return None
+
+    existing_msg = await db.messages.find_one(
+        {"call_id": call_id, "message_type": "call"},
+        {"_id": 0},
+    )
+    if existing_msg:
+        return existing_msg
+
+    status = log.get("status") or "ringing"
+    if status not in ("answered", "missed", "declined"):
+        if log.get("answered_at"):
+            status = "answered"
+        elif user_id == caller_id:
+            status = "missed"
+        else:
+            status = "declined"
+        await _finalize_call(db, call_id, status, "client_sync", manager)
+
+    return await db.messages.find_one(
+        {"call_id": call_id, "message_type": "call"},
+        {"_id": 0},
+    )
 
 
 def register_call_routes(
     router,
     *,
     db,
+    manager: Any = None,
     require_admin: Callable,
     get_current_user: Callable,
     clean_user: Callable,
@@ -313,6 +577,41 @@ def register_call_routes(
             .to_list(100)
         )
         return {"items": rows}
+
+    @router.post("/call-history/rate")
+    async def rate_call(payload: dict, user: dict = Depends(get_current_user)):
+        call_id = payload.get("call_id")
+        rating = payload.get("rating")
+        reason = payload.get("reason")
+        if not call_id or rating is None:
+            raise HTTPException(status_code=400, detail="call_id and rating required")
+        try:
+            rating_val = int(rating)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="invalid rating")
+        if rating_val < 1 or rating_val > 5:
+            raise HTTPException(status_code=400, detail="rating must be 1–5")
+        log = await db.call_logs.find_one({"call_id": call_id}, {"_id": 0})
+        if not log:
+            raise HTTPException(status_code=404, detail="call not found")
+        uid = user["id"]
+        if uid not in (log.get("caller_id"), log.get("callee_id")):
+            raise HTTPException(status_code=403, detail="forbidden")
+        update = {"rating": rating_val}
+        if reason:
+            update["reason"] = str(reason)[:120]
+        await db.call_logs.update_one({"call_id": call_id}, {"$set": update})
+        return {"ok": True}
+
+    @router.post("/call-history/sync-thread-message")
+    async def sync_call_thread_message(payload: dict, user: dict = Depends(get_current_user)):
+        call_id = (payload.get("call_id") or "").strip()
+        if not call_id:
+            raise HTTPException(status_code=400, detail="call_id required")
+        msg = await ensure_call_thread_message(db, call_id, user["id"], manager)
+        if not msg:
+            raise HTTPException(status_code=404, detail="call not found or not eligible")
+        return {"message": msg}
 
     @router.get("/admin/call-logs")
     async def admin_call_logs(

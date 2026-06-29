@@ -51,6 +51,18 @@ function isNginxGatewayHost(hostname) {
   return h.includes("sslip.io") || h.includes("duckdns.org") || h === "3.108.152.171";
 }
 
+function isLocalDevBrowser() {
+  if (typeof window === "undefined") return false;
+  if (process.env.NODE_ENV !== "development") return false;
+  const h = (window.location.hostname || "").toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1";
+}
+
+function localDevBackendUrl() {
+  const port = trimUrl(process.env.REACT_APP_DEV_BACKEND_PORT) || "8002";
+  return `${window.location.protocol}//${window.location.hostname}:${port}`;
+}
+
 /**
  * Resolves the FastAPI base URL (no path, no trailing slash).
  *
@@ -58,7 +70,7 @@ function isNginxGatewayHost(hostname) {
  *
  * - **Capacitor (native):** `REACT_APP_BACKEND_URL_MOBILE`, then `REACT_APP_BACKEND_URL`.
  *   Never uses localhost — set your PC LAN IP (e.g. http://192.168.1.13:8000).
- * - **Browser + development:** same host as the page, port `8001`.
+ * - **Browser + development on localhost:** always `hostname:8002` (ignores production .env).
  * - **Browser + AWS (DuckDNS / EC2 IP):** same origin as the page (no port); `getApiBaseUrl()` → `/api`.
  * - **Browser + other production:** `REACT_APP_BACKEND_URL`.
  */
@@ -95,6 +107,10 @@ export function resolveBackendUrl() {
     return candidate;
   }
 
+  if (isLocalDevBrowser()) {
+    return localDevBackendUrl();
+  }
+
   if (explicit) return explicit;
 
   if (isNginxGatewayHost(window.location.hostname)) {
@@ -102,7 +118,7 @@ export function resolveBackendUrl() {
   }
 
   if (process.env.NODE_ENV === "development") {
-    return `${window.location.protocol}//${window.location.hostname}:8001`;
+    return localDevBackendUrl();
   }
 
   if (general) return general;

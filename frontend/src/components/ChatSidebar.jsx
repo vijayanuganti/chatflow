@@ -10,6 +10,7 @@ import {
   Archive,
   VolumeX,
   Volume2,
+  Phone,
   ChevronLeft,
   ArrowLeft,
   Loader2,
@@ -22,7 +23,7 @@ import { partitionConversations } from "@/lib/conversationPreferences";
 import { loadChatListScroll, saveChatListScroll } from "@/lib/chatListScroll";
 import { hapticSelectionStart } from "@/lib/selectionHaptics";
 import ComposeIcon from "@/components/icons/ComposeIcon";
-import { getLastMsgPreview, LastMessageTicks } from "@/lib/chatListPreview";
+import { getLastMsgPreview, LastMessageTicks, isUnreadMissedCall } from "@/lib/chatListPreview";
 
 function formatLastTime(iso, t) {
   if (!iso) return "";
@@ -58,7 +59,14 @@ function ConversationRow({
     : adminView
       ? (c.participants_info || []).map((p) => p?.full_name || "?").join(" ↔ ")
       : (other?.full_name || t("common.unknown"));
-  const isOnline = adminView || isGroup ? false : !!onlineUsers[other?.id];
+  const isOnline = adminView || isGroup ? false : !!(onlineUsers[other?.id] || other?.online);
+  const missedCallUnread = !adminView && currentUserId ? isUnreadMissedCall(c, currentUserId) : false;
+  const outgoingNoAnswer =
+    !adminView &&
+    currentUserId &&
+    c.last_message_type === "call" &&
+    c.last_message_call_subtype === "call_missed" &&
+    String(c.last_message_sender_id) === String(currentUserId);
   const isSelectionHighlight = selectionModeId === c.id;
   const isActiveChat = activeChatId === c.id;
 
@@ -142,11 +150,19 @@ function ConversationRow({
               )}
             </span>
             <div className="flex items-center gap-2 shrink-0">
-              {unreadCount > 0 && (
+              {missedCallUnread ? (
+                <span
+                  className="h-5 w-5 rounded-full bg-rose-500/15 text-rose-500 flex items-center justify-center"
+                  data-testid={`conv-missed-call-${c.id}`}
+                  aria-label="Missed call"
+                >
+                  <Phone className="h-3 w-3" strokeWidth={2} />
+                </span>
+              ) : unreadCount > 0 ? (
                 <span className="h-5 min-w-[20px] px-1.5 rounded-full bg-emerald-600 text-white text-[10px] font-semibold flex items-center justify-center">
                   {unreadCount > 99 ? t("common.badgeOverflow") : unreadCount}
                 </span>
-              )}
+              ) : null}
               <span className={`text-[11px] ${unreadCount > 0 ? "text-emerald-700 dark:text-emerald-300 font-medium" : "text-gray-400"}`}>
                 {formatLastTime(c.last_message_at, t)}
               </span>
@@ -159,9 +175,17 @@ function ConversationRow({
               </span>
             ) : null}
             <span
-              className={`truncate ${unreadCount > 0 ? "text-gray-800 dark:text-gray-200 font-medium" : "text-gray-500 dark:text-gray-400"}`}
+              className={`truncate ${
+                missedCallUnread
+                  ? "text-rose-600 dark:text-rose-400 font-medium"
+                  : outgoingNoAnswer
+                    ? "text-amber-600 dark:text-amber-400 font-medium"
+                    : unreadCount > 0
+                      ? "text-gray-800 dark:text-gray-200 font-medium"
+                      : "text-gray-500 dark:text-gray-400"
+              }`}
             >
-              {getLastMsgPreview(c) || (adminView ? t("sidebar.monitoring") : t("sidebar.sayHello"))}
+              {getLastMsgPreview(c, currentUserId) || (adminView ? t("sidebar.monitoring") : t("sidebar.sayHello"))}
             </span>
           </div>
         </div>
@@ -253,6 +277,7 @@ export default function ChatSidebar({
   onSelectedConversationChange,
   onAvatarPress,
   listScrollRef: externalListScrollRef,
+  clientHomeList = false,
 }) {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -286,7 +311,7 @@ export default function ChatSidebar({
     });
   }, [sourceList, q, adminView]);
 
-  const showBatches = !adminView && user?.role === "employee" && !showArchived;
+  const showBatches = !adminView && user?.role === "employee" && !showArchived && !clientHomeList;
 
   useLayoutEffect(() => {
     const el = listRef.current;
@@ -314,7 +339,9 @@ export default function ChatSidebar({
 
   return (
     <aside
-      className="chat-sidebar flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden border-r border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-950 md:h-full md:w-80 md:flex-none lg:w-96"
+      className={`chat-sidebar flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-white dark:border-gray-800 dark:bg-gray-950 md:h-full md:w-80 md:flex-none lg:w-96 ${
+        clientHomeList ? "border-r-0" : "border-r border-gray-200"
+      }`}
       data-testid="chat-sidebar"
     >
       <div className="hidden md:flex p-4 border-b border-gray-100 dark:border-gray-800 items-center gap-3">
@@ -368,7 +395,7 @@ export default function ChatSidebar({
         </div>
       )}
 
-      {!adminView && archivedList.length > 0 && (
+      {!clientHomeList && !adminView && archivedList.length > 0 && (
         <div className="px-3 pt-2 border-b border-gray-100 dark:border-gray-800">
           <button
             type="button"
@@ -382,6 +409,7 @@ export default function ChatSidebar({
         </div>
       )}
 
+      {!clientHomeList && (
       <div className="shrink-0 border-b border-gray-100 dark:border-gray-800">
         {inSelectionMode ? (
           <SelectionActionBar
@@ -406,6 +434,7 @@ export default function ChatSidebar({
           </div>
         )}
       </div>
+      )}
 
       {showArchived && !inSelectionMode && (
         <div className="px-4 py-2 text-[10px] uppercase tracking-[0.2em] text-gray-400 border-b border-gray-50 dark:border-gray-800">

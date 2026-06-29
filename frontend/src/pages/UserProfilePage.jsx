@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { Bell, ChevronRight, Loader2 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import MobilePageShell from "@/components/layout/MobilePageShell";
 import SharedMediaSection from "@/components/SharedMediaSection";
 import Avatar from "@/components/Avatar";
 import { api, formatApiError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useCall } from "@/context/CallContext";
 import { updateConversationPreferences } from "@/lib/conversationPreferences";
+import { ringtoneSettingsPath } from "@/lib/appRoutes";
 import { toast } from "sonner";
 
 export default function UserProfilePage() {
@@ -15,6 +17,7 @@ export default function UserProfilePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user: me } = useAuth();
+  const { ringtoneSettings } = useCall();
   const backTo = location.state?.backTo || "/chat";
   const pendingChat = location.state?.pendingChat;
   const conversationId = location.state?.conversationId;
@@ -77,6 +80,7 @@ export default function UserProfilePage() {
   };
 
   const displayName = profile?.full_name || "Contact";
+  const hasCustomRingtone = !!ringtoneSettings?.contactOverrides?.[userId];
 
   return (
     <MobilePageShell
@@ -108,6 +112,35 @@ export default function UserProfilePage() {
               <p className="mt-1 text-xs text-gray-400 capitalize">{profile?.role || "user"}</p>
             </div>
           </div>
+
+          {profile?.id && profile.id !== me?.id && (
+            <button
+              type="button"
+              className="w-full flex items-center justify-between rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 px-4 py-3 text-left"
+              onClick={() =>
+                navigate(`${ringtoneSettingsPath(me?.role)}?contactId=${encodeURIComponent(userId)}`, {
+                  state: { contactId: userId, contactName: displayName, backTo: location.pathname },
+                })
+              }
+              data-testid="contact-custom-ringtone"
+            >
+              <div className="flex items-center gap-3">
+                <Bell className="h-5 w-5 text-violet-500" strokeWidth={1.75} />
+                <div>
+                  <div className="text-sm font-medium dark:text-gray-100 inline-flex items-center gap-2">
+                    Custom ringtone
+                    {hasCustomRingtone ? (
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-violet-500 bg-violet-500/10 px-1.5 py-0.5 rounded">
+                        Custom
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Override default for this contact</div>
+                </div>
+              </div>
+              <ChevronRight className="h-5 w-5 text-gray-400" />
+            </button>
+          )}
 
           {conversationId && me?.id && profile?.id !== me.id && (
             <div

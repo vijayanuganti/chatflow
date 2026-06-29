@@ -18,8 +18,16 @@ export default function ForceLogoutBridge() {
   const pollRef = useRef(null);
 
   const onForceLogout = (data) => {
-    const reason = data?.reason || LOGOUT_REASON_ANOTHER_DEVICE;
-    performForcedLogout({ reason, showModal: true });
+    void (async () => {
+      try {
+        const result = await validateSessionQuick();
+        if (result.valid) return;
+      } catch {
+        /* proceed with logout */
+      }
+      const reason = data?.reason || LOGOUT_REASON_ANOTHER_DEVICE;
+      performForcedLogout({ reason, showModal: true });
+    })();
   };
 
   useChatSocketHandlers({
@@ -28,6 +36,19 @@ export default function ForceLogoutBridge() {
 
   useEffect(() => {
     if (!user?.id) return undefined;
+
+    const onWsAuthFailed = () => {
+      void (async () => {
+        try {
+          const result = await validateSessionQuick();
+          if (!result.valid) {
+            performForcedLogout({ reason: result.reason || LOGOUT_REASON_ANOTHER_DEVICE, showModal: true });
+          }
+        } catch {
+          performForcedLogout({ reason: LOGOUT_REASON_ANOTHER_DEVICE, showModal: true });
+        }
+      })();
+    };
 
     const check = async () => {
       try {
@@ -44,6 +65,7 @@ export default function ForceLogoutBridge() {
       if (document.visibilityState === "visible") void check();
     };
     document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("chatflow:ws_auth_failed", onWsAuthFailed);
 
     pollRef.current = window.setInterval(() => {
       if (document.visibilityState === "visible") void check();
@@ -51,6 +73,7 @@ export default function ForceLogoutBridge() {
 
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("chatflow:ws_auth_failed", onWsAuthFailed);
       if (pollRef.current) window.clearInterval(pollRef.current);
       pollRef.current = null;
     };

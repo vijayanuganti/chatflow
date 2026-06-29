@@ -8,6 +8,7 @@ import {
   isOptimisticMessageId,
   ensureMessageTimestamp,
   sortMessagesChronologically,
+  collapseCallMessagesByCallId,
 } from "./optimisticMessages";
 
 const memory = new Map();
@@ -65,7 +66,7 @@ export function mergeMessageLists(cached, fresh) {
     byId.set(key, mergeMessageRecord(byId.get(key), m));
   }
 
-  const merged = sortMessages([...byId.values(), ...pending]);
+  const merged = collapseCallMessagesByCallId(sortMessages([...byId.values(), ...pending]));
   return merged.slice(-MAX_MESSAGES_PER_CONV);
 }
 

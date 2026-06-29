@@ -21,7 +21,7 @@ import SwipeableMessageRow from "@/components/chat/SwipeableMessageRow";
 import ForwardModal from "@/components/chat/ForwardModal";
 import { messageReplySnippet } from "@/lib/messageReply";
 import { groupMessagesByDate } from "@/lib/chatDateGroups";
-import { sortMessagesChronologically } from "@/lib/optimisticMessages";
+import { sortMessagesChronologically, collapseCallMessagesByCallId } from "@/lib/optimisticMessages";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -43,10 +43,10 @@ import { formatWhatsAppLastSeen } from "@/lib/datetime";
 import { useAuth } from "@/context/AuthContext";
 import { useChat } from "@/context/ChatContext";
 import { useCall } from "@/context/CallContext";
-import { CALL_STATE } from "@/lib/callConstants";
 import ChatCallHeader from "@/components/call/ChatCallHeader";
 import Avatar from "./Avatar";
 import MessageBubble from "./MessageBubble";
+import CallMessageBubble, { isCallMessage } from "@/components/chat/CallMessageBubble";
 import { monitoringBubbleAlignRight } from "@/lib/adminMonitoring";
 import {
   adminChatTabBackTo,
@@ -91,7 +91,7 @@ export default function ChatWindow({
   const { t } = useTranslation();
   const { user } = useAuth();
   const { setActiveConversationId, setChatComposerActive } = useChat();
-  const { callState, startCallForChat, isCallActive } = useCall();
+  const { startCallForChat, isCallActive, consumeComposerPrefill, composerPrefillTick } = useCall();
   const navigate = useNavigate();
 
   const resolvedBackTo =
@@ -148,6 +148,15 @@ export default function ChatWindow({
   const typingTimeoutRef = useRef(null);
   const lastTypingPingRef = useRef(0);
   const [mediaViewer, setMediaViewer] = useState(null);
+
+  useEffect(() => {
+    if (!conversation?.id) return;
+    const prefill = consumeComposerPrefill(conversation.id);
+    if (prefill) {
+      setText(prefill);
+      window.requestAnimationFrame(() => composerRef.current?.focus());
+    }
+  }, [conversation?.id, composerPrefillTick, consumeComposerPrefill]);
 
   const handleOpenInAppMedia = useCallback((payload) => {
     setMediaViewer(payload);
@@ -239,10 +248,11 @@ export default function ChatWindow({
      refetches asynchronously), which is what made some chats open in the
      middle of an older thread. */
   const visibleMessages = useMemo(() => {
+    const convId = conversation?.id;
     const filtered = (messages || []).filter(
-      (m) => !conversation?.id || m.conversation_id === conversation.id,
+      (m) => !convId || String(m.conversation_id) === String(convId),
     );
-    return sortMessagesChronologically(filtered);
+    return collapseCallMessagesByCallId(sortMessagesChronologically(filtered));
   }, [messages, conversation?.id]);
 
   /* Track whether the user is "near the bottom" so we only auto-scroll when
@@ -858,7 +868,9 @@ export default function ChatWindow({
 
   const isGroup = conversation.type === "group";
   const otherUser = isGroup ? null : conversation.other_user;
-  const isOnline = otherUser ? !!onlineUsers[otherUser.id] : false;
+  const isOnline = otherUser
+    ? !!(onlineUsers[otherUser.id] || otherUser.online)
+    : false;
 
   // Header
   const headerName = isGroup ? conversation.name : otherUser?.full_name;
@@ -911,15 +923,28 @@ export default function ChatWindow({
 
   const canPlaceCall = !isGroup && !readOnly && Boolean(otherUser?.id) && conversation?.type === "direct";
   const handleStartCall = () => {
-    if (!canPlaceCall || callState !== CALL_STATE.IDLE) return;
-    if (!isOnline) {
-      toast.error("Contact is offline. They need ChatFlow open in their browser to receive your call.");
-      return;
-    }
+    if (!canPlaceCall || isCallActive) return;
     void startCallForChat(
       conversation.id,
       otherUser.id,
       otherUser.full_name || otherUser.username || "Contact",
+      otherUser.avatar_url || null,
+    );
+  };
+
+  const handleCallBack = (callMsg) => {
+    if (readOnly || !callMsg?.conversation_id) return;
+    const uid = String(user?.id || "");
+    const isOutgoing = String(callMsg.caller_id || callMsg.sender_id) === uid;
+    const remoteUserId = isOutgoing ? callMsg.callee_id : callMsg.caller_id;
+    const remoteName = isOutgoing
+      ? otherUser?.full_name || otherUser?.username || "Contact"
+      : callMsg.sender_name || otherUser?.full_name || "Contact";
+    void startCallForChat(
+      callMsg.conversation_id,
+      remoteUserId,
+      remoteName,
+      otherUser?.avatar_url || null,
     );
   };
 
@@ -1038,7 +1063,7 @@ export default function ChatWindow({
           </div>
         </div>
         </button>
-        {canPlaceCall && callState === CALL_STATE.IDLE && !isCallActive ? (
+        {canPlaceCall && !isCallActive ? (
           <Button
             size="icon"
             variant="ghost"
@@ -1190,6 +1215,18 @@ export default function ChatWindow({
             ? monitoringBubbleAlignRight(m, conversation)
             : m.sender_id === user?.id;
           const mKey = messageKey(m);
+
+          if (isCallMessage(m)) {
+            return (
+              <CallMessageBubble
+                key={mKey}
+                message={m}
+                currentUserId={user?.id}
+                onCallBack={readOnly ? undefined : handleCallBack}
+              />
+            );
+          }
+
           const isActionTarget = actionMessageId === mKey;
           return (
             <div

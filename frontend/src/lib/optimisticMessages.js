@@ -65,10 +65,9 @@ export function sortMessagesChronologically(list) {
 
 /** Force a new array reference and keep timeline order locked. */
 export function appendToMessageList(prev, message) {
-  return sortMessagesChronologically([
-    ...(prev || []),
-    ensureMessageTimestamp(message),
-  ]);
+  return collapseCallMessagesByCallId(
+    sortMessagesChronologically([...(prev || []), ensureMessageTimestamp(message)]),
+  );
 }
 
 /** Client-side optimistic message id (prefixed for dedup with WebSocket echoes). */
@@ -171,6 +170,42 @@ export function findOptimisticCounterpartIndex(messages, incoming, currentUserId
   return messages.findIndex((m) => isOptimisticCounterpart(m, incoming, currentUserId));
 }
 
+/** True when the payload is a persisted call thread row. */
+export function isCallThreadMessage(message) {
+  if (!message) return false;
+  return message.message_type === "call" || message.type === "call";
+}
+
+function callMessageRank(message) {
+  let score = 0;
+  if (message.call_subtype || message.subtype) score += 100;
+  if (message.call_status) score += 50;
+  if (message.duration_seconds != null && Number(message.duration_seconds) >= 0) score += 40;
+  if (!isOptimisticMessageId(message.id)) score += 25;
+  return score + getMessageTimeMs(message) / 1e15;
+}
+
+/** Keep at most one call bubble per call_id (handles legacy duplicate DB rows). */
+export function collapseCallMessagesByCallId(list) {
+  const seen = new Map();
+  const out = [];
+  for (const m of list || []) {
+    if (isCallThreadMessage(m) && m.call_id) {
+      const key = String(m.call_id);
+      const idx = seen.get(key);
+      if (idx === undefined) {
+        seen.set(key, out.length);
+        out.push(m);
+      } else if (callMessageRank(m) > callMessageRank(out[idx])) {
+        out[idx] = m;
+      }
+    } else {
+      out.push(m);
+    }
+  }
+  return out;
+}
+
 /**
  * Merge a live WebSocket/API message into the thread without duplicate bubbles.
  * @returns {{ next: object[], changed: boolean }}
@@ -181,6 +216,18 @@ export function mergeIncomingLiveMessage(prev, incoming, currentUserId) {
   }
 
   if (prev.some((m) => String(m.id) === String(incoming.id))) {
+    return { next: prev, changed: false };
+  }
+
+  if (
+    incoming.call_id
+    && prev.some(
+      (m) =>
+        m.call_id
+        && String(m.call_id) === String(incoming.call_id)
+        && isCallThreadMessage(m),
+    )
+  ) {
     return { next: prev, changed: false };
   }
 

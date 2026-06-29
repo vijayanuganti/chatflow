@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ArrowLeft, MessageCircle, MoreVertical, Settings, LogOut, UserPlus, Sun, Moon, ShieldAlert, RefreshCw, Info, Languages } from "lucide-react";
+import { ArrowLeft, MessageCircle, MoreVertical, Settings, LogOut, UserPlus, Sun, Moon, ShieldAlert, RefreshCw, Info, Languages, Phone } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import AboutSheet from "@/components/AboutSheet";
 import LanguageSheet from "@/components/LanguageSheet";
@@ -27,6 +27,7 @@ export default function TopBar({
   onRefresh,
   hideThemeToggle = false,
   hideMenu = false,
+  onCallHistory,
 }) {
   const { user, logout } = useAuth();
   const { toggleTheme, isDark } = useTheme();
@@ -120,6 +121,11 @@ export default function TopBar({
             {onRefresh && (
               <DropdownMenuItem onClick={() => onRefresh?.()} data-testid="topbar-refresh-item">
                 <RefreshCw /> {t("common.refresh")}
+              </DropdownMenuItem>
+            )}
+            {onCallHistory && (
+              <DropdownMenuItem onClick={() => onCallHistory?.()} data-testid="topbar-call-history-item">
+                <Phone /> Call history
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onClick={() => onOpenSettings?.()} data-testid="topbar-settings-item">

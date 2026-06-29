@@ -151,8 +151,6 @@ Token registration: `POST /api/users/me/fcm-token` after login on native (`PushN
 1:1 **audio-only** calls between two participants in a direct (non-group) conversation.
 This section is the **full infrastructure map** for understanding, implementing, or porting the feature.
 
-> **Implementation note:** The files listed below (`call_signaling.py`, `CallContext.jsx`, etc.) are the **target layout** for this feature. If they are missing from your checkout, use the [Cursor porting prompt](#porting-this-call-feature-to-another-project-cursor-prompt) at the end of this README to implement them.
-
 ### High-level architecture
 
 ```mermaid
@@ -240,10 +238,10 @@ Constants: [`frontend/src/lib/callConstants.js`](./frontend/src/lib/callConstant
 | `call-answer` | SDP answer forwarded to caller |
 | `ice-candidate` | ICE forwarded to peer |
 | `call-decline` / `call-end` / `call-ended` | Teardown both sides |
-| `call-error` | e.g. `callee_offline`, `forbidden`, `invalid_offer` |
+| `call-error` | e.g. `forbidden`, `invalid_offer` (calls are **not** blocked when callee has no WebSocket — caller still gets `call-ringing`) |
 
 Backend relay: [`backend/call_signaling.py`](./backend/call_signaling.py).  
-WS hook in [`backend/server.py`](./backend/server.py) — inbound frames with call types dispatch to `handle_call_signal()`.
+WS hook in [`backend/server.py`](./backend/server.py) — inbound frames whose `type` starts with `call-`, plus `ice-candidate`, dispatch to `handle_call_signal()`.
 
 ### Complete file inventory
 
@@ -261,7 +259,8 @@ WS hook in [`backend/server.py`](./backend/server.py) — inbound frames with ca
 | `context/CallContext.jsx` | Orchestration: session, inbound signal queue, UI minimize, navigation ref |
 | `context/ChatSocketContext.jsx` | Wraps `useChatSocket`; exposes `sendSignal`, `ensureHealthy`, `reconnect` |
 | `hooks/useAudioCall.js` | `RTCPeerConnection`, mic stream, mute, state machine, ICE buffering |
-| `hooks/useChatSocket.js` | WS connect, routes `CALL_INBOUND_TYPES` to `callSignalListenerRef` |
+| `hooks/useChatSocket.js` | WS connect, routes `CALL_INBOUND_TYPES` to `callSignalListenerRef`; `4401` auth close triggers session re-check |
+| `components/ForceLogoutBridge.jsx` | Single-session poll + WS auth-failure handler |
 | `lib/callConstants.js` | States, signal types, ICE servers, SDP normalization |
 | `lib/callSignalBridge.js` | Sync ref `{ current: onCallSignalReceived }` — avoids useEffect race |
 | `lib/callSignalingLog.js` | Debug logging (`ws.inbound`, `session.incoming`, etc.) |
@@ -314,8 +313,11 @@ WS hook in [`backend/server.py`](./backend/server.py) — inbound frames with ca
 1. **Single backend instance** on the WS port — multiple uvicorn workers each have their own in-memory `ConnectionManager`; caller and callee can land on different instances and never see each other’s frames.
 2. **`ensureHealthy()` before placing a call** — ping/pong on the socket; stale sockets after `uvicorn --reload` must reconnect.
 3. **Global `user_id` registry** — `send_to_user(target_user_id, event)` delivers to **all** open tabs for that user.
-4. **Inbound routing** — `useChatSocket` checks `CALL_INBOUND_TYPES` and invokes `callSignalListenerRef.current` **synchronously** (set by `CallProvider`, not via React effect).
-5. **Signal queue** — both `call-offer` and `call-ring` are queued; dropping either breaks incoming calls.
+4. **Presence snapshot on connect** — when a tab opens `/api/ws`, the server sends `presence` events for every user already in `ConnectionManager.active` (fixes “offline” on fresh tabs).
+5. **Live `online` in REST responses** — conversation/user APIs set `online` from `has_active_connection()` (same check as call routing), not stale DB flags alone.
+6. **Inbound routing** — `useChatSocket` checks `CALL_INBOUND_TYPES` and invokes `callSignalListenerRef.current` **synchronously** (set by `CallProvider`, not via React effect).
+7. **Signal queue** — both `call-offer` and `call-ring` are queued; dropping either breaks incoming calls.
+8. **Activity fallback** — incoming messages/typing mark the sender online in the UI when presence events were missed.
 
 ### Backend: ConnectionManager pattern
 
@@ -367,25 +369,35 @@ REST: `GET /api/call-history/me`, `GET /api/admin/call-logs?user_id=...`
 
 ### Local testing
 
-1. Start **one** backend on `8001` and frontend on `3000`; hard-refresh **both** browser sessions.
-2. Log in as two users in a direct conversation.
-3. Place a call; watch backend logs:
+1. Start **one** backend on port **`8002`** and frontend on `3000` (browser dev ignores production `.env` URLs and uses `hostname:8002` — see `frontend/src/lib/backendUrl.js`).
+2. Optional: copy `frontend/.env.local` with `REACT_APP_BACKEND_URL=http://localhost:8002` if you need explicit overrides.
+3. Hard-refresh **both** browser sessions (normal + incognito). Log in as **two different users** in a direct conversation — not the same account twice (single-session login invalidates the other tab’s WebSocket).
+4. Place a call; watch backend logs:
    ```
-   call_signal call-offer accepted: call_id=... callee_id=...
-   call_signal relay call-offer: target_user_id=... online (1 socket(s)) ...
+   call_signal call-offer accepted: call_id=... callee_id=... online (N socket(s))
    ```
-4. If callee shows `OFFLINE (0 global sockets)` — refresh tab, wait for chat WS to connect.
-5. Browser console: look for `ws.health.ok`, `session.incoming`, `audio.incoming`.
+5. Automated smoke test (backend must be running on `8002`):
+   ```bash
+   python scripts/test_call_signaling_local.py
+   ```
+6. If callee never rings — check WS connected (`WS connected: user_id=...` in backend logs). If you see `WS reject: inactive session`, log out and back in on that tab.
+7. Browser console: look for `ws.health.ok`, `session.incoming`, `audio.incoming`.
+
+**Mute during a call:** toggles `MediaStreamTrack.enabled` on the local mic (`useAudioCall.toggleMute`); hard-refresh after code changes.
 
 ### Known pitfalls
 
 | Symptom | Cause | Fix |
 | ------- | ----- | --- |
-| Caller stuck on “Calling…”, callee sees nothing | Multiple uvicorn processes / stale WS | Single instance; `ensureHealthy()` + reconnect |
+| Caller stuck on “Calling…”, callee sees nothing | Multiple uvicorn processes / stale WS / callee not connected | Single instance; both users logged in with WS up; `ensureHealthy()` + reconnect |
+| Contact shows offline while messaging | Missed presence event or stale DB flag | Hard refresh; presence snapshot on connect; message/typing marks sender online |
+| `WS reject: inactive session` loop | Stale JWT after login elsewhere or superseded session | Log out/in; `ForceLogoutBridge` + `chatflow:ws_auth_failed` handler |
 | Callee gets ring but no SDP | Only `call-ring` processed, offer dropped | Queue **all** inbound call frames |
+| Call button works but no ring on other side | Callee has 0 WebSockets (app closed / bad session) | Callee must open app; offer is still accepted server-side for caller |
 | Badge overlaps sidebar | Badge mounted at app root with `fixed` full width | Mount inside right-panel `position: relative` container |
 | Duplicate call UI in thread | Badge + `ChatCallHeader` both visible | Hide badge when `activeConversationId === callConversationId` |
 | `useEffect` registration race | Listener registered after first WS frame | Use sync ref (`callSignalListenerRef`) |
+| Mute button does nothing | Inverted track.enabled logic (fixed in `useAudioCall`) | Hard refresh frontend |
 
 ### Limitations (v1)
 
@@ -408,8 +420,8 @@ Native shells live under `frontend/android` and `frontend/ios` (Capacitor 8).
 - **API URL resolution** (`frontend/src/lib/backendUrl.js`):
   - **Native:** `REACT_APP_BACKEND_URL_MOBILE` or `REACT_APP_BASE_URL` (must be a LAN IP or public HTTPS URL — never `localhost`).
   - **Browser on AWS (DuckDNS / EC2):** same origin as the page; REST calls go to `/api` via Nginx (no `:8000` in the URL).
-  - **Browser dev:** same host as CRA, port `8001`.
-- **Auth on native:** JWT in `Authorization` header + `X-ChatFlow-Browser-Id` (not HttpOnly cookies — avoids WebView CORS issues). `nativeAuthSync.js` mirrors the token into Android shared prefs for FCM handlers.
+  - **Browser dev:** same host as CRA, port **`8002`** (override with `REACT_APP_DEV_BACKEND_PORT`).
+- **Auth:** JWT in `Authorization` header + `X-ChatFlow-Browser-Id` on web and native (not HttpOnly cookies — avoids WebView CORS and multi-tab cookie races). `nativeAuthSync.js` mirrors the token into Android shared prefs for FCM handlers.
 - **CORS for the native shell:** include `http://localhost`, `capacitor://localhost`, and `ionic://localhost` in backend `CORS_ORIGINS` for production APKs talking to a public API.
 - **Push:** `@capacitor/push-notifications` registers FCM tokens; custom `ChatFlowNative` plugin tracks active chat and notification sounds on Android (`frontend/android/.../ChatFlowNativePlugin.java`).
 - **Share intent (Android):** custom `ChatFlowShare` plugin receives shares from other apps; `ShareIntentProvider` routes to a conversation or shared folder (`frontend/src/lib/shareIntent/`).
@@ -432,15 +444,16 @@ Native shells live under `frontend/android` and `frontend/ios` (Capacitor 8).
 ```
 ┌──────────────┐         POST /api/auth/login        ┌────────────────┐
 │  Login page  │  ─── { phone_number, password } ──► │  FastAPI       │
-│ (phone + pw) │                                      │  /api          │
-└──────────────┘  ◄── HttpOnly JWT cookie (7d) ──────└────────────────┘
+│ (phone + pw) │  ◄── { access_token, user } ─────── │  /api          │
+└──────────────┘                                      └────────────────┘
 ```
 
-- All other routes (chat, admin) re-validate the session via `/api/auth/verify` or `/api/auth/session/validate`.
-- **Web:** HttpOnly JWT cookie; axios sends `withCredentials`.
-- **Native (Capacitor):** JWT in `Authorization: Bearer` + `X-ChatFlow-Browser-Id` header (no cookies).
-- WebSocket upgrade uses the cookie or `?token=` query param.
-- **Single-session login** — a new sign-in deactivates prior `sessions` rows and clears old FCM tokens; users can review/revoke history at `/api/auth/login-history`.
+- All other routes re-validate via `Authorization: Bearer` + `X-ChatFlow-Browser-Id` (JWT `bid` claim must match).
+- **Web:** JWT stored in `sessionStorage` (per tab); optional `localStorage` when “Stay signed in” is enabled (`frontend/src/lib/api.js`).
+- **Native (Capacitor):** same Bearer + browser-id headers; `nativeAuthSync.js` mirrors token for FCM handlers.
+- WebSocket upgrade: `GET /api/ws?token=...&bid=...` (query params — WS cannot read axios headers).
+- **Single-session login** — a new sign-in deactivates prior `sessions` rows, sends `force_logout` on the old WebSocket, and clears old FCM tokens; users can review/revoke history at `/api/auth/login-history`.
+- **Session health:** `ForceLogoutBridge` polls `/api/auth/session/validate` and reacts to WS close code `4401` (inactive session).
 - There are **no** `/auth/register` or public `/auth/forgot-password` endpoints.
 
 ---
@@ -582,8 +595,8 @@ On startup `_migrate_user_documents` runs:
 ## REST API surface
 
 ### Auth
-- `POST /api/auth/login` — `{ phone_number, password }` → sets HttpOnly cookie (deactivates prior sessions).
-- `POST /api/auth/logout` — clears cookie and current session.
+- `POST /api/auth/login` — `{ phone_number, password }` → `{ access_token, user, browser_install_id }` (deactivates prior sessions).
+- `POST /api/auth/logout` — invalidates current session row; client clears stored JWT.
 - `GET  /api/auth/verify` — returns the current session’s user.
 - `GET  /api/auth/me` — same shape, semantic alias.
 - `GET  /api/auth/session/validate` — lightweight `{ valid, reason? }` poll (foreground refresh).
@@ -622,7 +635,7 @@ On startup `_migrate_user_documents` runs:
 - `GET  /api/conversations/{chat_id}/starred` — starred messages in a thread.
 - `POST /api/upload`, `GET /api/files/{id}`
 - `GET  /api/media/stream` — authenticated stream for S3 uploads (incl. folder media).
-- `GET  /api/media/thumbnail/{file_id}` — JPEG poster for video files (auth via cookie or `?token=`).
+- `GET  /api/media/thumbnail/{file_id}` — JPEG poster for video files (auth via Bearer header or `?token=&bid=`).
 - `WS   /api/ws?token=...&bid=...` — chat events, typing, presence, **and WebRTC call signaling**
 
 **WebSocket → client call events (server relay):**
@@ -635,7 +648,7 @@ On startup `_migrate_user_documents` runs:
 | `call-answer` | SDP answer forwarded to caller |
 | `ice-candidate` | Trickle ICE to peer |
 | `call-decline` / `call-end` / `call-ended` | Teardown on either side |
-| `call-error` | e.g. invalid offer, callee offline |
+| `call-error` | e.g. invalid offer, forbidden (not used for “callee offline” — offers proceed and caller gets `call-ringing`) |
 
 **Client → server signaling (same socket):**
 
@@ -697,7 +710,8 @@ chatflow/
 │  ├─ build-android.ps1         ← mobile build + Capacitor sync + Android Studio
 │  ├─ deploy-aws.ps1            ← git push + SSH deploy to AWS EC2
 │  ├─ deploy-aws.sh             ← same deploy (Git Bash / Linux / macOS)
-│  └─ check-aws-backend.sh      ← remote health probe
+│  ├─ check-aws-backend.sh      ← remote health probe
+│  └─ test_call_signaling_local.py ← login + WS call-offer smoke test (port 8002)
 ├─ backend/
 │  ├─ server.py                 ← routes, RBAC, audit, FCM, WebSocket manager
 │  ├─ call_signaling.py         ← WebRTC signaling relay (1:1 audio)
@@ -717,7 +731,7 @@ chatflow/
    ├─ ios/
    ├─ public/sw.js                ← web push service worker
    └─ src/
-      ├─ App.js                      ← CallProvider, GlobalCallOverlay, ShareIntentProvider
+      ├─ App.js                      ← CallProvider, GlobalCallOverlay, ForceLogoutBridge, ShareIntentProvider
       ├─ context/
       │  ├─ AuthContext.jsx
       │  ├─ CallContext.jsx          ← activeCallSession, WebRTC orchestration
@@ -770,7 +784,7 @@ cd backend
 python -m venv .venv
 .venv\Scripts\Activate.ps1   # Windows PowerShell
 pip install -r requirements.txt
-uvicorn server:app --reload --port 8001
+uvicorn server:app --reload --port 8002 --host 127.0.0.1
 ```
 
 Create `backend/.env` from `backend/.env.example`. Important variables:
@@ -822,16 +836,16 @@ Sign in with the **phone number** (not the username) on the login page.
 
 ```bash
 cd frontend
-yarn install
-yarn start
+npm install
+npm start
 ```
 
-`frontend/.env` (see [`frontend/.env.example`](./frontend/.env.example)):
+`frontend/.env` (see [`frontend/.env.example`](./frontend/.env.example)) — **optional for local browser dev**; CRA on `localhost` auto-targets port **8002** via `backendUrl.js`. Use `frontend/.env.local` to override:
 
 ```env
-REACT_APP_BACKEND_URL=http://localhost:8001
+REACT_APP_BACKEND_URL=http://localhost:8002
 # Native APK dev on a phone (LAN IP, match uvicorn port):
-REACT_APP_BACKEND_URL_MOBILE=http://192.168.1.13:8001
+REACT_APP_BACKEND_URL_MOBILE=http://192.168.1.13:8002
 WDS_SOCKET_PORT=0
 # Optional TURN for WebRTC behind strict NAT:
 # REACT_APP_ICE_SERVERS=[{"urls":"stun:stun.l.google.com:19302"}]
@@ -846,8 +860,8 @@ For a **production APK** against AWS, set both mobile and web URLs to your publi
 ## Security
 
 - Passwords hashed with bcrypt (cost 12).
-- Sessions are HttpOnly cookies (set `COOKIE_SECURE=true` + `COOKIE_SAMESITE=none`
-  when frontend and backend live on different domains over HTTPS).
+- JWT sessions include a per-install `bid` (browser id) — replay from another browser/install is rejected.
+- Set `COOKIE_SECURE=true` + `COOKIE_SAMESITE=none` only if you re-enable HttpOnly cookie auth for cross-site deployments.
 - Phone numbers validated with Google libphonenumber (E.164).
 - All sensitive endpoints sit behind `require_admin` or `require_account_creator`.
 - Role escalation is prevented:
@@ -1019,8 +1033,8 @@ Adapt file paths to this project's conventions but preserve the design patterns.
    - Validates both users are participants in conversation_id (reject groups)
    - Maintains in-memory call registry: call_id → { caller_id, callee_id, conversation_id, state }
    - Relays SDP + ICE to peer via ConnectionManager.send_to_user(user_id, event)
-   - On offer: forward call-offer + call-ring to callee, call-ringing to caller
-   - On callee offline (0 sockets): send call-error to caller, remove call
+   - On offer: forward call-offer + call-ring to callee (if connected), call-ringing to caller always
+   - Do **not** reject offers when callee has 0 sockets — caller still rings; callee must connect to answer
    - Optionally persist call_logs to DB on offer/answer/decline/end
 
 2. ConnectionManager MUST map user_id → Set[WebSocket] (global registry, NOT conversation rooms)
@@ -1056,7 +1070,7 @@ States: idle | outgoing | incoming | connecting | connected | disconnected | fai
   - call-answer → setRemoteDescription, state=connecting
   - ice-candidate → addIceCandidate (buffer if needed)
   - call-decline | call-end | call-ended → teardown
-- Mute: local audio track.enabled toggle
+- Mute: toggle `isMuted` state and set `localAudioTrack.enabled = !isMuted` (do not double-negate track.enabled)
 - Timer when connected
 
 ### useChatSocket additions

@@ -1,9 +1,44 @@
 import React from "react";
 import i18n from "@/i18n";
+import { formatCallBubbleDuration } from "@/lib/callHistoryFormat";
 
-export function getLastMsgPreview(msg) {
-  if (!msg) return "";
+/** Sidebar / list preview for call messages (viewer perspective). */
+export function getCallMessagePreview(conv, currentUserId) {
+  const subtype = conv?.last_message_call_subtype;
+  if (!subtype) return conv?.last_message || "📞 Voice call";
+  const isOutgoing = String(conv?.last_message_sender_id) === String(currentUserId);
+  const duration = conv?.last_message_duration_seconds;
+
+  if (subtype === "call_answered") {
+    const dur = formatCallBubbleDuration(duration);
+    return dur ? `📞 ${dur}` : "📞 Voice call";
+  }
+  if (subtype === "call_missed") {
+    return isOutgoing ? "📵 No answer" : "📵 Missed call";
+  }
+  if (subtype === "call_declined") {
+    return isOutgoing ? "📵 Declined" : "📵 Declined call";
+  }
+  return conv?.last_message || "📞 Voice call";
+}
+
+export function isUnreadMissedCall(conv, currentUserId) {
+  if (!conv || Number(conv.unread_count || 0) <= 0) return false;
+  if (conv.last_message_type !== "call") return false;
+  const subtype = conv.last_message_call_subtype;
+  if (subtype !== "call_missed" && subtype !== "call_declined") return false;
+  return String(conv.last_message_sender_id) !== String(currentUserId);
+}
+
+export function getLastMsgPreview(msgOrConv, currentUserId) {
+  const msg = msgOrConv;
   const type = msg.message_type || msg.last_message_type;
+  if (type === "call") {
+    if (currentUserId != null && (msg.last_message_call_subtype || msg.call_subtype)) {
+      return getCallMessagePreview(msg, currentUserId);
+    }
+    return msg.content || msg.last_message || "📞 Voice call";
+  }
   if (type === "image") return i18n.t("preview.photo");
   if (type === "video") return i18n.t("preview.video");
   if (type === "file" || type === "document") {
@@ -35,7 +70,7 @@ export function resolveLastMessageTickStatus(conv, currentUserId) {
 }
 
 export function lastMessageFieldsFromMsg(msg, conv, userId) {
-  const rawPreview = getLastMsgPreview(msg);
+  const rawPreview = getLastMsgPreview(msg, userId);
   const previewText =
     conv?.type === "group" && msg.sender_name
       ? `${msg.sender_name}: ${rawPreview}`
@@ -45,6 +80,8 @@ export function lastMessageFieldsFromMsg(msg, conv, userId) {
     last_message_at: msg.created_at,
     last_message_sender_id: msg.sender_id,
     last_message_type: msg.message_type || "text",
+    last_message_call_subtype: msg.call_subtype || null,
+    last_message_duration_seconds: msg.duration_seconds ?? null,
     last_message_read_by: msg.read_by || (msg.sender_id ? [msg.sender_id] : []),
   };
 }

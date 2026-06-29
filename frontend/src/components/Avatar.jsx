@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { fileUrl } from "@/lib/api";
 
 const COLORS = [
@@ -13,24 +13,62 @@ function colorFor(key) {
   return COLORS[h % COLORS.length];
 }
 
-/** Renders initials or image. Extra props (`online`, `status`) from callers are ignored — no presence dot. */
-export default function Avatar({ name, size = 40, avatarUrl, testId }) {
-  const initials = (name || "?")
-    .split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase();
+export function avatarInitials(name) {
+  return (name || "?")
+    .split(" ")
+    .map((s) => s[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+}
+
+/**
+ * Renders profile photo when `avatarUrl` is set, otherwise initials.
+ * Extra props (`online`, `status`) from callers are ignored — no presence dot.
+ */
+export default function Avatar({
+  name,
+  size = 40,
+  avatarUrl,
+  testId,
+  variant = "default",
+  className = "",
+  imageClassName = "",
+  fallbackClassName = "",
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const initials = avatarInitials(name);
   const bg = colorFor(name);
+  const src = avatarUrl ? fileUrl(avatarUrl) : "";
+  const showImage = Boolean(src) && !imgFailed;
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [avatarUrl, src]);
+
+  const imageBorder =
+    variant === "dark"
+      ? "border-2 border-emerald-950/70"
+      : "border-2 border-white shadow-sm dark:border-gray-800";
 
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }} data-testid={testId}>
-      {avatarUrl ? (
+    <div
+      className={`relative shrink-0 ${className}`.trim()}
+      style={{ width: size, height: size }}
+      data-testid={testId}
+    >
+      {showImage ? (
         <img
-          src={fileUrl(avatarUrl)}
+          src={src}
           alt={name || "avatar"}
-          className="rounded-full object-cover border-2 border-white shadow-sm"
+          className={`rounded-full object-cover ${imageBorder} ${imageClassName}`.trim()}
           style={{ width: size, height: size }}
+          onError={() => setImgFailed(true)}
         />
       ) : (
         <div
-          className={`${bg} text-white rounded-full flex items-center justify-center font-medium`}
+          className={`${bg} text-white rounded-full flex items-center justify-center font-medium ${fallbackClassName}`.trim()}
           style={{ width: size, height: size, fontSize: size * 0.38 }}
         >
           {initials}

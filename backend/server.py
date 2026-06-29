@@ -1968,6 +1968,8 @@ async def my_permissions(user: dict = Depends(get_current_user)):
 @api_router.get("/admin/users")
 async def admin_users(user: dict = Depends(require_admin)):
     users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(2000)
+    for u in users:
+        u["online"] = manager.has_active_connection(u["id"])
     return users
 
 
@@ -3415,7 +3417,9 @@ async def client_assigned_employee_chat(user: dict = Depends(get_current_user)):
     conversation = enriched[0] if enriched else None
     if conversation is not None:
         conversation["client_can_write"] = True
-    return {"employee": clean_user(employee), "conversation": conversation}
+    employee_out = clean_user(employee)
+    employee_out["online"] = manager.has_active_connection(employee["id"])
+    return {"employee": employee_out, "conversation": conversation}
 
 
 @api_router.post("/conversations/group")
@@ -3480,7 +3484,10 @@ async def _enrich_conversations(convs: List[dict], viewer_id: Optional[str]) -> 
     users_map = {}
     if user_ids:
         async for u in db.users.find({"id": {"$in": list(user_ids)}}, {"_id": 0, "password_hash": 0}):
-            users_map[u["id"]] = u
+            uid = u["id"]
+            u = dict(u)
+            u["online"] = manager.has_active_connection(uid)
+            users_map[uid] = u
 
     unread_map: Dict[str, int] = {}
     prefs_map: Dict[str, dict] = {}
@@ -4346,6 +4353,18 @@ class ConnectionManager:
         ts = now_iso()
         await db.users.update_one({"id": user_id}, {"$set": {"online": True, "last_seen": ts}})
         await self._broadcast_presence(user_id, True, ts)
+        # Tell this tab who already has an live WebSocket (matches call routing, not stale DB flags).
+        try:
+            for uid in list(self.active.keys()):
+                if uid == user_id:
+                    continue
+                row = await db.users.find_one({"id": uid}, {"last_seen": 1, "_id": 0})
+                ls = (row or {}).get("last_seen") or ts
+                await ws.send_json(
+                    {"type": "presence", "user_id": uid, "online": True, "last_seen": ls}
+                )
+        except Exception:
+            logger.debug("presence snapshot failed for user_id=%s", user_id)
 
     async def disconnect(self, user_id: str, ws: WebSocket):
         if user_id in self.active:
@@ -5009,6 +5028,7 @@ register_folder_routes(
 register_call_routes(
     api_router,
     db=db,
+    manager=manager,
     require_admin=require_admin,
     get_current_user=get_current_user,
     clean_user=clean_user,

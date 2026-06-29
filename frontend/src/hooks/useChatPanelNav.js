@@ -1,26 +1,41 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import { MessageSquare, UtensilsCrossed, Folder, MessageCircle } from "lucide-react";
-import { dietPlanPath, profilePath } from "@/lib/appRoutes";
+import { MessageSquare, UtensilsCrossed, Folder, MessageCircle, Phone } from "lucide-react";
+import { callHistoryPath } from "@/lib/appRoutes";
 import { chatListTarget } from "@/lib/chatMobileNav";
 import { saveChatListScroll } from "@/lib/chatListScroll";
 
 /**
  * Desktop sidebar + mobile bottom nav items for employee / client chat portal.
  */
-export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
+export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef, clientTab = "chats", setClientTab } = {}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
   const pathname = location.pathname;
+  const isClientRole = role === "client";
+
+  const goClientTab = (tab) => {
+    setClientTab?.(tab);
+    navigate("/chat", { replace: true, state: { clientTab: tab } });
+  };
 
   const isActive = (id) => {
+    if (isClientRole) {
+      if (pathname !== "/chat") return false;
+      if (id === "chats") return clientTab === "chats";
+      if (id === "diet") return clientTab === "diet";
+      if (id === "folders") return clientTab === "folders";
+      if (id === "calls") return clientTab === "calls";
+      return false;
+    }
     if (id === "chats") {
-      return pathname === "/chat" || (pathname.startsWith("/chat") && !pathname.match(/\/(folders|tools|profile|diet-plan|complaint|new-conversation|medical|contact|create-account)/));
+      return pathname === "/chat" || (pathname.startsWith("/chat") && !pathname.match(/\/(folders|tools|profile|diet-plan|complaint|new-conversation|medical|contact|create-account|calls)/));
     }
     if (id === "diet") return pathname.startsWith("/chat/diet-plan");
     if (id === "folders") return pathname.startsWith("/chat/folders");
+    if (id === "calls") return pathname.startsWith("/chat/calls");
     return false;
   };
 
@@ -33,7 +48,7 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
         active: isActive("chats"),
         badge: unreadTotal,
         testId: "client-nav-chats",
-        onClick: () => navigate("/chat", { replace: true }),
+        onClick: () => goClientTab("chats"),
       },
       {
         id: "diet",
@@ -41,13 +56,7 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
         icon: UtensilsCrossed,
         active: isActive("diet"),
         testId: "client-nav-diet",
-        onClick: () => {
-          if (listScrollRef?.current) saveChatListScroll(listScrollRef.current.scrollTop);
-          navigate(dietPlanPath("client"), {
-            push: true,
-            state: { backTo: "/chat", startFromDayOne: true },
-          });
-        },
+        onClick: () => goClientTab("diet"),
       },
       {
         id: "folders",
@@ -55,10 +64,18 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
         icon: Folder,
         active: isActive("folders"),
         testId: "client-nav-folders",
-        onClick: () => navigate("/chat/folders", { push: true }),
+        onClick: () => goClientTab("folders"),
+      },
+      {
+        id: "calls",
+        label: "Call history",
+        icon: Phone,
+        active: isActive("calls"),
+        testId: "client-nav-calls",
+        onClick: () => goClientTab("calls"),
       },
     ],
-    [navigate, unreadTotal, pathname, listScrollRef, t],
+    [unreadTotal, clientTab, pathname, t, setClientTab],
   );
 
   const employeeItems = useMemo(
@@ -79,6 +96,14 @@ export function useChatPanelNav({ role, unreadTotal = 0, listScrollRef } = {}) {
         active: isActive("folders"),
         testId: "employee-nav-folders",
         onClick: () => navigate("/chat/folders", { push: true }),
+      },
+      {
+        id: "calls",
+        label: "Call history",
+        icon: Phone,
+        active: isActive("calls"),
+        testId: "employee-nav-calls",
+        onClick: () => navigate(callHistoryPath(), { push: true }),
       },
     ],
     [navigate, unreadTotal, pathname, t],

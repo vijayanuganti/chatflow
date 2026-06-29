@@ -54,7 +54,21 @@ export default function useChatSocket({
       onForceLogout,
     } = handlersRef.current;
 
-    if (data.type === "message" && onMessage) onMessage(data.message);
+    if ((data.type === "message" || data.type === "new_message") && onMessage) {
+      const raw = data.message;
+      if (!raw) return;
+      const msg =
+        raw.message_type === "call" || raw.type === "call"
+          ? {
+              ...raw,
+              message_type: raw.message_type || "call",
+              call_subtype: raw.call_subtype || raw.subtype || null,
+              call_status: raw.call_status || null,
+              created_at: raw.created_at || raw.timestamp || null,
+            }
+          : raw;
+      onMessage(msg);
+    }
     else if (data.type === "message_updated" && onMessageUpdated) onMessageUpdated(data.message);
     else if (data.type === "typing" && onTyping) onTyping(data);
     else if (data.type === "presence" && onPresence) onPresence(data);
@@ -159,7 +173,7 @@ export default function useChatSocket({
       }, 25000);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       setConnected(false);
       clearInterval(pingRef.current);
       pingRef.current = null;
@@ -170,8 +184,12 @@ export default function useChatSocket({
         waiter.reject(new Error("WebSocket closed"));
       }
       if (closedIntentionallyRef.current) return;
+      if (ev?.code === 4401 && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("chatflow:ws_auth_failed"));
+      }
       clearTimeout(reconnectRef.current);
-      reconnectRef.current = setTimeout(connect, 2000);
+      const delay = ev?.code === 4401 ? 5000 : 2000;
+      reconnectRef.current = setTimeout(connect, delay);
     };
 
     ws.onerror = () => {
@@ -345,52 +363,93 @@ export default function useChatSocket({
   }, [connect]);
 
   const ensureHealthy = useCallback(() => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
+    const pingOpenSocket = (ws) =>
+      new Promise((resolve, reject) => {
+        if (healthWaiterRef.current) {
+          const deadline = Date.now() + 6000;
+          const waitForPrior = () => {
+            if (!healthWaiterRef.current) {
+              pingOpenSocket(ws).then(resolve).catch(reject);
+              return;
+            }
+            if (Date.now() > deadline) {
+              healthWaiterRef.current = null;
+              reject(new Error("WebSocket health timeout"));
+              return;
+            }
+            setTimeout(waitForPrior, 50);
+          };
+          waitForPrior();
+          return;
+        }
+
+        const timeoutId = setTimeout(() => {
+          if (healthWaiterRef.current) {
+            healthWaiterRef.current = null;
+            reject(new Error("WebSocket health timeout"));
+          }
+        }, 5000);
+
+        healthWaiterRef.current = {
+          resolve: (value) => {
+            clearTimeout(timeoutId);
+            healthWaiterRef.current = null;
+            resolve(value);
+          },
+          reject: (err) => {
+            clearTimeout(timeoutId);
+            healthWaiterRef.current = null;
+            reject(err);
+          },
+          timeoutId,
+        };
+
+        try {
+          ws.send(JSON.stringify({ type: "ping" }));
+          logCallSignal("ws.health.ping", null);
+        } catch (err) {
+          healthWaiterRef.current = null;
+          clearTimeout(timeoutId);
+          reject(err);
+        }
+      });
+
+    const waitForOpenSocket = () =>
+      new Promise((resolve, reject) => {
+        const open = wsRef.current;
+        if (open?.readyState === WebSocket.OPEN) {
+          resolve(open);
+          return;
+        }
         reconnect();
         const deadline = Date.now() + 8000;
-        const waitOpen = () => {
+        const poll = () => {
           const current = wsRef.current;
           if (current?.readyState === WebSocket.OPEN) {
-            resolve(true);
+            resolve(current);
             return;
           }
           if (Date.now() > deadline) {
             reject(new Error("WebSocket not open"));
             return;
           }
-          setTimeout(waitOpen, 200);
+          setTimeout(poll, 200);
         };
-        waitOpen();
-        return;
-      }
+        poll();
+      });
 
-      if (healthWaiterRef.current) {
-        reject(new Error("Health check already in progress"));
-        return;
-      }
-
-      const timeoutId = setTimeout(() => {
-        if (healthWaiterRef.current) {
-          healthWaiterRef.current = null;
-          reject(new Error("WebSocket health timeout"));
+    return waitForOpenSocket()
+      .then((ws) => {
+        if (ws.readyState === WebSocket.OPEN && !healthWaiterRef.current) {
+          logCallSignal("ws.health.skip", "open");
+          return true;
         }
-      }, 5000);
-
-      healthWaiterRef.current = { resolve, reject, timeoutId };
-      try {
-        ws.send(JSON.stringify({ type: "ping" }));
-        logCallSignal("ws.health.ping", null);
-      } catch (err) {
-        healthWaiterRef.current = null;
-        clearTimeout(timeoutId);
-        reject(err);
-      }
-    }).then(() => {
-      logCallSignal("ws.health.ok", null);
-      return true;
-    });
+        return pingOpenSocket(ws);
+      })
+      .then(() => {
+        logCallSignal("ws.health.ok", null);
+        return true;
+      });
   }, [reconnect]);
 
   return {
