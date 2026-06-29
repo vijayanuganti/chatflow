@@ -361,10 +361,17 @@ async def _handle_call_offer(user_id: str, user: dict, payload: dict, manager: A
     stale_ids = [
         cid
         for cid, entry in list(_active_calls.items())
-        if entry.get("caller_id") == user_id and entry.get("callee_id") == target_user_id
+        if {entry.get("caller_id"), entry.get("callee_id")} == {user_id, target_user_id}
     ]
     for stale_id in stale_ids:
         _active_calls.pop(stale_id, None)
+    if stale_ids:
+        logger.info(
+            "call_signal call-offer: cleared %s stale call(s) between caller=%s callee=%s",
+            len(stale_ids),
+            user_id,
+            target_user_id,
+        )
 
     _active_calls[call_id] = {
         "call_id": call_id,
@@ -468,10 +475,11 @@ async def _handle_call_decline(user_id: str, payload: dict, manager: Any, db: An
     call_id = (payload.get("call_id") or "").strip()
     if not call_id:
         return
-    entry = _active_calls.get(call_id)
+    entry = _active_calls.pop(call_id, None)
     if not entry and db is not None:
         entry = await db.call_logs.find_one({"call_id": call_id}, {"_id": 0})
     if not entry:
+        logger.debug("call_signal call-decline: unknown call_id=%s user_id=%s", call_id, user_id)
         return
     caller_id = entry.get("caller_id")
     callee_id = entry.get("callee_id")
@@ -486,6 +494,12 @@ async def _handle_call_decline(user_id: str, payload: dict, manager: Any, db: An
     )
     await send_to_user(manager, user_id, {"type": "call-ended", "call_id": call_id, "reason": reason})
     await send_to_user(manager, peer_id, {"type": "call-ended", "call_id": call_id, "reason": reason})
+    logger.info(
+        "call_signal call-decline: call_id=%s by=%s reason=%s",
+        call_id,
+        user_id,
+        reason,
+    )
     await _finalize_call(db, call_id, "declined" if user_id == callee_id else "missed", reason, manager)
 
 
@@ -493,10 +507,11 @@ async def _handle_call_end(user_id: str, payload: dict, manager: Any, db: Any) -
     call_id = (payload.get("call_id") or "").strip()
     if not call_id:
         return
-    entry = _active_calls.get(call_id)
+    entry = _active_calls.pop(call_id, None)
     if not entry and db is not None:
         entry = await db.call_logs.find_one({"call_id": call_id}, {"_id": 0})
     if not entry:
+        logger.debug("call_signal call-end: unknown call_id=%s user_id=%s", call_id, user_id)
         return
     caller_id = entry.get("caller_id")
     callee_id = entry.get("callee_id")
@@ -512,6 +527,13 @@ async def _handle_call_end(user_id: str, payload: dict, manager: Any, db: Any) -
     await send_to_user(manager, user_id, {"type": "call-ended", "call_id": call_id, "reason": reason})
     await send_to_user(manager, peer_id, {"type": "call-ended", "call_id": call_id, "reason": reason})
     status = "answered" if entry.get("answered_at") else ("missed" if user_id == caller_id else "declined")
+    logger.info(
+        "call_signal call-end: call_id=%s by=%s status=%s reason=%s",
+        call_id,
+        user_id,
+        status,
+        reason,
+    )
     await _finalize_call(db, call_id, status, reason, manager)
 
 

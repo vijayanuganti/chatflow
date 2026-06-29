@@ -42,6 +42,7 @@ export default function useAudioCall({
   const callIdRef = useRef(null);
   const pendingOfferRef = useRef(null);
   const endingCallRef = useRef(false);
+  const teardownCalledRef = useRef(false);
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
@@ -70,20 +71,26 @@ export default function useAudioCall({
     }
     iceQueueRef.current = [];
     remoteDescSetRef.current = false;
-    callIdRef.current = null;
     pendingOfferRef.current = null;
-    if (activeCallIdRef) activeCallIdRef.current = null;
     setDurationSec(0);
     setIsMuted(false);
-  }, [remoteAudioRef, activeCallIdRef]);
+  }, [remoteAudioRef]);
 
-  const teardown = useCallback(
-    (nextState = CALL_STATE.IDLE) => {
-      cleanupMedia();
-      setCallState(nextState);
-    },
-    [cleanupMedia],
-  );
+  const teardown = useCallback(() => {
+    if (teardownCalledRef.current) return;
+    teardownCalledRef.current = true;
+    endingCallRef.current = true;
+
+    cleanupMedia();
+    callIdRef.current = null;
+    if (activeCallIdRef) activeCallIdRef.current = null;
+    setCallState(CALL_STATE.IDLE);
+    logCallSignal("teardown.idle", null);
+
+    window.setTimeout(() => {
+      endingCallRef.current = false;
+    }, 0);
+  }, [cleanupMedia, activeCallIdRef]);
 
   const flushIceQueue = useCallback(async () => {
     const pc = pcRef.current;
@@ -99,6 +106,18 @@ export default function useAudioCall({
   }, []);
 
   const createPeerConnection = useCallback(() => {
+    if (pcRef.current) {
+      try {
+        pcRef.current.ontrack = null;
+        pcRef.current.onicecandidate = null;
+        pcRef.current.onconnectionstatechange = null;
+        pcRef.current.close();
+      } catch {
+        /* ignore */
+      }
+      pcRef.current = null;
+    }
+
     const pc = new RTCPeerConnection({ iceServers: getDefaultIceServers() });
     pc.onicecandidate = (ev) => {
       const callId = callIdRef.current;
@@ -127,19 +146,15 @@ export default function useAudioCall({
           }, 1000);
         }
       } else if (state === "failed") {
-        if (endingCallRef.current) {
-          teardown(CALL_STATE.IDLE);
-          return;
-        }
-        teardown(CALL_STATE.FAILED);
-        onCallEnded?.();
+        if (endingCallRef.current) return;
+        const endedId = callIdRef.current;
+        teardown();
+        onCallEnded?.(endedId);
       } else if (state === "disconnected" || state === "closed") {
-        if (endingCallRef.current) {
-          teardown(CALL_STATE.IDLE);
-          return;
-        }
-        teardown(CALL_STATE.DISCONNECTED);
-        onCallEnded?.();
+        if (endingCallRef.current) return;
+        const endedId = callIdRef.current;
+        teardown();
+        onCallEnded?.(endedId);
       }
     };
     pcRef.current = pc;
@@ -153,15 +168,22 @@ export default function useAudioCall({
     return stream;
   }, []);
 
+  const prepareForNewCall = useCallback(() => {
+    teardownCalledRef.current = false;
+    endingCallRef.current = false;
+    cleanupMedia();
+    callIdRef.current = null;
+    if (activeCallIdRef) activeCallIdRef.current = null;
+    setCallState(CALL_STATE.IDLE);
+  }, [cleanupMedia, activeCallIdRef]);
+
   const startCall = useCallback(async (overrideSession) => {
     const s = overrideSession || sessionRef.current;
     if (!s?.conversationId || !s?.remoteUserId) {
       return { ok: false, error: "missing_session" };
     }
     try {
-      endingCallRef.current = false;
-      cleanupMedia();
-      setCallState(CALL_STATE.IDLE);
+      prepareForNewCall();
       const micReleaseMs = Capacitor.isNativePlatform() ? 350 : 120;
       await new Promise((resolve) => setTimeout(resolve, micReleaseMs));
 
@@ -175,15 +197,18 @@ export default function useAudioCall({
       await attachLocalAudio(pc);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      sendSignal(CALL_SIGNAL.OFFER, s.remoteUserId, {
+      const sent = sendSignal(CALL_SIGNAL.OFFER, s.remoteUserId, {
         call_id: callId,
         conversation_id: s.conversationId,
         sdp: offer.sdp,
       });
+      if (!sent) {
+        throw new Error("WebSocket not open");
+      }
       return { ok: true, callId };
     } catch (err) {
       logCallSignal("startCall.failed", err?.message);
-      teardown(CALL_STATE.IDLE);
+      teardown();
       const name = err?.name || "";
       if (name === "NotAllowedError" || name === "PermissionDeniedError") {
         return { ok: false, error: "mic_denied" };
@@ -204,6 +229,7 @@ export default function useAudioCall({
     teardown,
     cleanupMedia,
     activeCallIdRef,
+    prepareForNewCall,
   ]);
 
   const acceptCall = useCallback(async () => {
@@ -214,6 +240,21 @@ export default function useAudioCall({
       inboundQueueRef.current.find((f) => f.type === CALL_SIGNAL.OFFER && f.call_id === callId);
     if (!pendingOffer?.sdp) return false;
     try {
+      teardownCalledRef.current = false;
+      if (pcRef.current) {
+        try {
+          pcRef.current.ontrack = null;
+          pcRef.current.onicecandidate = null;
+          pcRef.current.onconnectionstatechange = null;
+          pcRef.current.close();
+        } catch {
+          /* ignore */
+        }
+        pcRef.current = null;
+      }
+      iceQueueRef.current = [];
+      remoteDescSetRef.current = false;
+
       setCallState(CALL_STATE.CONNECTING);
       const pc = createPeerConnection();
       await attachLocalAudio(pc);
@@ -222,14 +263,19 @@ export default function useAudioCall({
       await flushIceQueue();
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      sendSignal(CALL_SIGNAL.ANSWER, session.remoteUserId, {
+      const sent = sendSignal(CALL_SIGNAL.ANSWER, session.remoteUserId, {
         call_id: callId,
         sdp: answer.sdp,
       });
+      if (!sent) {
+        throw new Error("WebSocket not open");
+      }
       return true;
     } catch (err) {
       logCallSignal("acceptCall.failed", err?.message);
-      teardown(CALL_STATE.FAILED);
+      const endedId = callIdRef.current;
+      teardown();
+      onCallEnded?.(endedId);
       return false;
     }
   }, [
@@ -240,34 +286,31 @@ export default function useAudioCall({
     flushIceQueue,
     sendSignal,
     teardown,
+    onCallEnded,
   ]);
 
   const declineCall = useCallback(
     (reason = "declined") => {
-      endingCallRef.current = true;
       const callId = callIdRef.current;
       const remoteUserId = sessionRef.current?.remoteUserId;
       if (callId && remoteUserId) {
         sendSignal(CALL_SIGNAL.DECLINE, remoteUserId, { call_id: callId, reason });
       }
-      teardown(CALL_STATE.IDLE);
-      onCallEnded?.();
-      endingCallRef.current = false;
+      teardown();
+      onCallEnded?.(callId);
     },
     [sendSignal, teardown, onCallEnded],
   );
 
   const endCall = useCallback(
     (reason = "hangup") => {
-      endingCallRef.current = true;
       const callId = callIdRef.current;
       const remoteUserId = sessionRef.current?.remoteUserId;
       if (callId && remoteUserId) {
         sendSignal(CALL_SIGNAL.END, remoteUserId, { call_id: callId, reason });
       }
-      teardown(CALL_STATE.IDLE);
-      onCallEnded?.();
-      endingCallRef.current = false;
+      teardown();
+      onCallEnded?.(callId);
     },
     [sendSignal, teardown, onCallEnded],
   );
@@ -304,10 +347,22 @@ export default function useAudioCall({
         return;
       }
       if (type === CALL_SIGNAL.RING) {
+        if (frame.call_id && callIdRef.current && frame.call_id !== callIdRef.current) {
+          logCallSignal("session.ignore.ring.stale", type);
+          return;
+        }
+        if (frame.call_id) {
+          callIdRef.current = frame.call_id;
+          if (activeCallIdRef) activeCallIdRef.current = frame.call_id;
+        }
         setCallState(CALL_STATE.INCOMING);
         return;
       }
       if (type === CALL_SIGNAL.RINGING) {
+        if (frame.call_id && callIdRef.current && frame.call_id !== callIdRef.current) {
+          logCallSignal("session.ignore.ringing.stale", type);
+          return;
+        }
         setCallState(CALL_STATE.OUTGOING);
         return;
       }
@@ -321,12 +376,17 @@ export default function useAudioCall({
           setCallState(CALL_STATE.CONNECTING);
         } catch (err) {
           logCallSignal("answer.failed", err?.message);
-          teardown(CALL_STATE.FAILED);
-          onCallEnded?.();
+          const endedId = callIdRef.current;
+          teardown();
+          onCallEnded?.(endedId);
         }
         return;
       }
       if (type === CALL_SIGNAL.ICE) {
+        if (frame.call_id && callIdRef.current && frame.call_id !== callIdRef.current) {
+          logCallSignal("session.ignore.ice.stale", type);
+          return;
+        }
         const cand = parseIceCandidate(frame.candidate);
         if (!cand) return;
         if (!remoteDescSetRef.current || !pcRef.current) {
@@ -345,16 +405,16 @@ export default function useAudioCall({
           logCallSignal("session.ignore.end.stale", type);
           return;
         }
-        endingCallRef.current = true;
-        teardown(CALL_STATE.IDLE);
-        onCallEnded?.();
-        endingCallRef.current = false;
+        const endedId = callIdRef.current;
+        teardown();
+        onCallEnded?.(endedId);
         return;
       }
       if (type === CALL_SIGNAL.ERROR) {
-        teardown(CALL_STATE.FAILED);
+        const endedId = callIdRef.current;
+        teardown();
         onCallError?.(frame.reason, frame.detail);
-        onCallEnded?.();
+        onCallEnded?.(endedId);
       }
     };
 
@@ -372,7 +432,11 @@ export default function useAudioCall({
     activeCallIdRef,
   ]);
 
-  useEffect(() => () => cleanupMedia(), [cleanupMedia]);
+  useEffect(() => () => {
+    teardownCalledRef.current = false;
+    cleanupMedia();
+    setCallState(CALL_STATE.IDLE);
+  }, [cleanupMedia]);
 
   return {
     callState,
@@ -386,6 +450,7 @@ export default function useAudioCall({
     toggleMute,
     toggleSpeaker,
     teardown,
+    prepareForNewCall,
     callIdRef,
     peerConnectionRef: pcRef,
   };

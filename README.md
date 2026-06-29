@@ -22,7 +22,8 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 - **Client medical profiles** — conditions, medications, and notes; visible to assigned employees and admins.
 - **Complaints** — clients raise issues against their employee; admins triage from the panel (open / solved).
 - **Push notifications** — Firebase Cloud Messaging (FCM) on web (service worker) and Android (native tray + actions); muted chats skip FCM.
-- **1:1 audio calling (WebRTC)** — voice calls between conversation participants; global WebSocket signaling so incoming calls reach any screen; full-screen overlay with minimize-to-chat badge and in-thread call header (see [architecture reference](#audio-calling-webrtc--architecture-reference)).
+- **1:1 audio calling (WebRTC)** — voice calls between conversation participants; global WebSocket signaling so incoming calls reach any screen; full-screen overlay with minimize-to-chat badge, in-thread call header, WhatsApp-style **call message bubbles** in chat, **call history** tab, per-contact **ringtones**, and post-call rating (see [architecture reference](#audio-calling-webrtc--architecture-reference)).
+- **Mobile real-time reliability** — native apps keep the chat WebSocket open (no disconnect on background), reconnect on foreground with a 15s watchdog, and Nginx uses long-lived `/api/` proxy timeouts for stable instant messaging on Android.
 - **Foreground message banner** — in-app dropdown when a new message arrives while the app is open (positioned below the status bar on native).
 - **Single-session login** — one active device per account; logging in elsewhere signs out the previous session and clears push tokens.
 - **Shared folders** — admins/employees create folders with media, documents, and links; role-gated view/edit access.
@@ -35,7 +36,7 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 - **Admin reports** — search users, view JSON summaries, download client/employee PDFs (`reports_api.py`, `AdminReportsPane.jsx`).
 - **Android share intent** — share photos/files from other apps into a ChatFlow conversation or shared folder (`ShareIntentProvider`, native `ChatFlowShare` plugin).
 - **Login history** — recent sign-in sessions in Profile settings; revoke remote devices without logging out locally (`LoginHistorySection.jsx`).
-- **Role-aware mobile shells** — fixed ChatFlow header; client/employee footers (**Chats · My Diet · Folders** / **Chats · Folders**); employee batch filter in the chat sidebar; **Settings** via top-bar **⋮** menu; native back-button handling.
+- **Role-aware mobile shells** — fixed ChatFlow header; client footer (**Chats · My Diet · Folders · Call history**); employee footer (**Chats · Folders · Call history**); employee batch filter in the chat sidebar; **Settings** via top-bar **⋮** menu; native back-button handling.
 - **Production on AWS EC2** — Nginx + PM2 + MongoDB Atlas + S3 + DuckDNS HTTPS (documented below); optional Render/Vercel path also supported.
 
 ---
@@ -63,7 +64,7 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 - **In-chat search** — find messages with highlighted matches.
 - **Starred messages** — star/unstar persisted per user in `starred_messages`; in-chat panel via `StarredMessagesPanel.jsx` (`messageActionsApi.js`).
 - **Message edit** — long-press → Edit on your own text messages (`PATCH /api/messages/{message_id}`).
-- **Audio call** — phone icon in header for 1:1 threads; compact call status row while connected (`ChatCallHeader.jsx`).
+- **Audio call** — phone icon in header for 1:1 threads; compact call status row while connected (`ChatCallHeader.jsx`); completed/missed/declined calls appear as **call bubbles** in the thread (`CallMessageBubble.jsx`).
 - **Header tap** — opens the contact **User profile** page (mute toggle + shared media). Call controls sit outside the profile tap target so End/Decline does not open the profile.
 
 ### Chat media (images, video, documents)
@@ -111,11 +112,13 @@ reset, phone-number-based authentication, full audit trail of sensitive actions.
 
 ### Mobile footers (`PanelBottomNav`)
 
-| Role     | Footer tabs                         | Settings / profile      |
-| -------- | ----------------------------------- | ----------------------- |
-| Client   | Chats · My Diet · Folders           | Top bar **⋮** menu      |
-| Employee | Chats · Folders                     | Top bar **⋮** menu      |
-| Admin    | Home · Chats · Contacts · Settings  | **More** hub + sidebar  |
+| Role     | Footer tabs                                      | Settings / profile      |
+| -------- | ------------------------------------------------ | ----------------------- |
+| Client   | Chats · My Diet · Folders · Call history         | Top bar **⋮** menu      |
+| Employee | Chats · Folders · Call history                   | Top bar **⋮** menu      |
+| Admin    | Home · Chats · Contacts · Settings               | **More** hub + sidebar  |
+
+**Client home tabs** swap in-place at `/chat` via `ClientHome.jsx` (no full route hop). **Call history** lists past calls with tap-to-call-back; employees/admins also reach history at `/chat/calls` or from the top-bar **⋮** menu.
 
 Employee **batch filter** lives in the chat sidebar (not the footer). Footers hide only when a **conversation thread** is open, not during list selection.
 
@@ -264,7 +267,11 @@ WS hook in [`backend/server.py`](./backend/server.py) — inbound frames whose `
 | `lib/callConstants.js` | States, signal types, ICE servers, SDP normalization |
 | `lib/callSignalBridge.js` | Sync ref `{ current: onCallSignalReceived }` — avoids useEffect race |
 | `lib/callSignalingLog.js` | Debug logging (`ws.inbound`, `session.incoming`, etc.) |
-| `lib/callHistoryFormat.js` | Timer formatting for UI |
+| `lib/callHistoryFormat.js` | Timer + list date formatting for call history |
+| `lib/ringtones.js` | Ringtone presets, ringback burst, per-contact overrides |
+| `hooks/useRingtone.js` | Incoming ringtone playback + settings persistence |
+| `hooks/useCallQuality.js` | RTC stats sampling during connected calls |
+| `components/chat/CallMessageBubble.jsx` | WhatsApp-style in-thread call log bubbles |
 
 **Frontend — UI**
 
@@ -292,8 +299,11 @@ WS hook in [`backend/server.py`](./backend/server.py) — inbound frames whose `
 
 | File | Role |
 | ---- | ---- |
-| `pages/CallHistoryPage.jsx` | Employee/client call history |
-| `components/call/CallHistoryList.jsx` | Shared list UI |
+| `pages/CallHistoryPage.jsx` | Employee/client call history (footer tab + `/chat/calls`) |
+| `pages/RingtoneSettingsPage.jsx` | Default + per-contact ringtone picker |
+| `components/call/CallHistoryList.jsx` | Shared list UI with tap-to-call-back |
+| `components/call/CallRatingSheet.jsx` | Post-call star rating sheet |
+| `components/call/CallKeypad.jsx` | In-call DTMF keypad (UI) |
 | `components/admin/AdminCallLogsPane.jsx` | Admin call log tab |
 
 ### UI behavior matrix
@@ -311,13 +321,15 @@ WS hook in [`backend/server.py`](./backend/server.py) — inbound frames whose `
 ### WebSocket requirements (critical for reliability)
 
 1. **Single backend instance** on the WS port — multiple uvicorn workers each have their own in-memory `ConnectionManager`; caller and callee can land on different instances and never see each other’s frames.
-2. **`ensureHealthy()` before placing a call** — ping/pong on the socket; stale sockets after `uvicorn --reload` must reconnect.
+2. **`ensureHealthy()` before placing a call** — reconnects if the socket is closed; skips redundant ping when already open.
 3. **Global `user_id` registry** — `send_to_user(target_user_id, event)` delivers to **all** open tabs for that user.
 4. **Presence snapshot on connect** — when a tab opens `/api/ws`, the server sends `presence` events for every user already in `ConnectionManager.active` (fixes “offline” on fresh tabs).
 5. **Live `online` in REST responses** — conversation/user APIs set `online` from `has_active_connection()` (same check as call routing), not stale DB flags alone.
 6. **Inbound routing** — `useChatSocket` checks `CALL_INBOUND_TYPES` and invokes `callSignalListenerRef.current` **synchronously** (set by `CallProvider`, not via React effect).
 7. **Signal queue** — both `call-offer` and `call-ring` are queued; dropping either breaks incoming calls.
 8. **Activity fallback** — incoming messages/typing mark the sender online in the UI when presence events were missed.
+9. **Mobile keep-alive** — Capacitor apps **do not** close the WebSocket on `appStateChange` background; they reconnect on foreground and run a 15s watchdog while the app is active (`useChatSocket.js`). Closing WS on every background transition breaks instant messages on Android.
+10. **Nginx WebSocket proxy** — production uses `location /api/` with `Upgrade`, `Connection upgrade`, and long `proxy_read_timeout` / `proxy_send_timeout` (see [`deploy/nginx-chatflow.conf`](./deploy/nginx-chatflow.conf)). `deploy-aws.ps1` copies this file to the server on each deploy.
 
 ### Backend: ConnectionManager pattern
 
@@ -398,6 +410,9 @@ REST: `GET /api/call-history/me`, `GET /api/admin/call-logs?user_id=...`
 | Duplicate call UI in thread | Badge + `ChatCallHeader` both visible | Hide badge when `activeConversationId === callConversationId` |
 | `useEffect` registration race | Listener registered after first WS frame | Use sync ref (`callSignalListenerRef`) |
 | Mute button does nothing | Inverted track.enabled logic (fixed in `useAudioCall`) | Hard refresh frontend |
+| Messages not instant on Android | WS closed on every background event | Keep WS alive on native; reconnect on foreground (`useChatSocket.js`) |
+| Second call fails after hangup | Stale `call-ended` frames or double WebRTC teardown | Ignore end signals for wrong/missing `call_id`; `endingCallRef` guards; clear queue before new call |
+| Duplicate call bubbles in thread | Multiple inserts/broadcasts for same `call_id` | Backend `$setOnInsert` + frontend dedupe in `optimisticMessages.js` |
 
 ### Limitations (v1)
 
@@ -428,10 +443,11 @@ Native shells live under `frontend/android` and `frontend/ios` (Capacitor 8).
 - **Firebase:** place `firebase-adminsdk.json` in `backend/` for local dev, or set `FIREBASE_SERVICE_ACCOUNT_FILE` on the server (see `backend/.env.example`). Add `google-services.json` in the Android app per Firebase console instructions.
 - **Camera and photos:** profile avatar and chat “Photo” attachments use `@capacitor/camera` (`nativeMedia.js`). iOS privacy strings are in `frontend/ios/App/App/Info.plist`.
 - **Files:** `@capacitor-community/file-opener` + `@capacitor/filesystem` for opening documents in chat (`mediaHandler.js`, `fileSystem.js`). Typed download subfolders: Images, Videos, Documents, Audio under `ChatFlow/`.
+- **WebSocket on native:** the chat socket stays connected while the app is open. When the app returns to foreground, `useChatSocket` reconnects if needed; a 15s interval also reconnects if the socket drops silently. FCM still delivers when the app is fully killed — enable push permissions for background delivery.
 - **Quick scripts (repo root):**
   - `.\scripts\build-android.ps1` — `npm run build:mobile`, sync Capacitor, open Android Studio.
   - `.\scripts\build-android.ps1 -AssembleDebug` — same + debug APK via Gradle.
-  - `.\scripts\deploy-aws.ps1` — `git push`, SSH deploy to AWS EC2 (pull, pip, PM2, frontend build, Nginx reload). Use `-SkipGitPush` to deploy only what is already on the remote. (`deploy-oci.ps1` is deprecated and forwards here.)
+  - `.\scripts\deploy-aws.ps1` — `git push`, SSH deploy to AWS EC2 (pull, pip, PM2, frontend build, **sync Nginx config**, reload). Use `-SkipGitPush` to deploy only what is already on the remote. (`deploy-oci.ps1` is deprecated and forwards here.)
 - **Haptics:** `@capacitor/haptics` for chat-list long-press selection (`selectionHaptics.js`). After adding or upgrading native plugins, run `npm run cap:sync` from `frontend/`.
 - **Safe area:** status-bar spacer in `TopBar` / `ChatWindow`; notification banners and toasts use `notification-viewport-top` + `initSafeAreaInsets()` so they clear the Android status bar when `env(safe-area-inset-top)` is `0`.
 - **System back:** `useDoubleBackToExit.js` traps back at the app root and delegates drill-up (clear selection → close chat → admin sub-panels) before normal history.
@@ -661,6 +677,8 @@ On startup `_migrate_user_documents` runs:
 
 ### Call history
 - `GET /api/call-history/me` — current user’s call log.
+- `POST /api/call-history/rate` — `{ call_id, rating }` post-call star rating (1–5).
+- `POST /api/call-history/sync-thread-message` — `{ call_id }` idempotently ensure the in-thread call bubble exists after hangup.
 - `GET /api/admin/call-logs?user_id=...` — admin call log search.
 
 ### Shared folders
@@ -706,9 +724,11 @@ On startup `_migrate_user_documents` runs:
 
 ```
 chatflow/
+├─ deploy/
+│  └─ nginx-chatflow.conf       ← Nginx reference (HTTPS, /api WS proxy, copied on deploy)
 ├─ scripts/
 │  ├─ build-android.ps1         ← mobile build + Capacitor sync + Android Studio
-│  ├─ deploy-aws.ps1            ← git push + SSH deploy to AWS EC2
+│  ├─ deploy-aws.ps1            ← git push + SSH deploy to AWS EC2 (+ Nginx sync)
 │  ├─ deploy-aws.sh             ← same deploy (Git Bash / Linux / macOS)
 │  ├─ check-aws-backend.sh      ← remote health probe
 │  └─ test_call_signaling_local.py ← login + WS call-offer smoke test (port 8002)
@@ -764,7 +784,9 @@ chatflow/
       │  ├─ RaiseComplaintPage.jsx, ProfileSettingsPage.jsx, UserProfilePage.jsx, …
       └─ components/
          ├─ ChatSidebar.jsx, ChatWindow.jsx, TopBar.jsx
-         ├─ call/GlobalCallOverlay.jsx, MinimizedCallBadge.jsx, ChatCallHeader.jsx
+         ├─ call/GlobalCallOverlay.jsx, MinimizedCallBadge.jsx, ChatCallHeader.jsx, CallRatingSheet.jsx
+         ├─ chat/CallMessageBubble.jsx
+         ├─ pages/CallHistoryPage.jsx, RingtoneSettingsPage.jsx, ClientHome.jsx
          ├─ AboutSheet.jsx, PrivacyPolicyScreen.jsx, LanguageSheet.jsx
          ├─ LoginHistorySection.jsx, InAppMessageBanner.jsx
          ├─ PushNotificationBootstrap.jsx, SplashScreenBootstrap.jsx
@@ -900,7 +922,10 @@ Typical layout: Ubuntu EC2 (`3.108.152.171`), Nginx serves the CRA `build/` and 
 # Optional: -SshKey "C:\path\to\chatflow-aws.pem"  -SkipGitPush
 ```
 
-This SSHs to `ubuntu@3.108.152.171`, runs `git pull`, reinstalls backend deps, `pm2 restart chatflow-backend`, `npm run build` in `frontend/`, and reloads Nginx.
+This SSHs to `ubuntu@3.108.152.171`, runs `git pull`, reinstalls backend deps, `pm2 restart chatflow-backend`, `npm run build` in `frontend/`, copies [`deploy/nginx-chatflow.conf`](./deploy/nginx-chatflow.conf) to `/etc/nginx/sites-enabled/chatflow`, and reloads Nginx.
+
+**Current production URL:** https://vijay-chatflow.duckdns.org  
+**Latest stable deploy includes:** mobile WebSocket keep-alive, repeat-call lifecycle fixes, call thread bubbles, and client call-history footer tab (commit `dcec3c1` and later).
 
 **Manual update (SSH into EC2):**
 
@@ -918,17 +943,19 @@ sudo nginx -t && sudo systemctl reload nginx
 
 After `.env` changes: `pm2 restart chatflow-backend --update-env`.
 
-**Live instance:** https://vijay-chatflow.duckdns.org
-
 **Browser API URL:** on DuckDNS / EC2 hosts, the app uses same-origin `/api` automatically (`backendUrl.js`). No `:8000` in the public URL.
 
-**Mobile release:** set `REACT_APP_BACKEND_URL` and `REACT_APP_BACKEND_URL_MOBILE` to `https://vijay-chatflow.duckdns.org`, then:
+**Mobile release:** set `REACT_APP_BACKEND_URL`, `REACT_APP_BACKEND_URL_MOBILE`, and `REACT_APP_BASE_URL` to `https://vijay-chatflow.duckdns.org` in `frontend/.env`, then:
 
 ```powershell
 .\scripts\build-android.ps1
+# or debug APK:
+.\scripts\build-android.ps1 -AssembleDebug
 ```
 
-Build a signed APK/AAB in Android Studio (**Build → Generate Signed Bundle / APK**). Add your host to `capacitor.config.json` → `server.allowNavigation` if needed.
+Build a signed APK/AAB in Android Studio (**Build → Generate Signed Bundle / APK**). Reinstall on devices after server-side-only changes; **WebSocket and call fixes require a new APK** because they live in the bundled JS.
+
+`frontend/capacitor.config.json` → `server.allowNavigation` must include your API hostname (e.g. `vijay-chatflow.duckdns.org`). Place `google-services.json` in `frontend/android/app/` for FCM.
 
 **Other scripts:** `scripts/bootstrap-aws.sh` (first-time server setup), `scripts/start-aws-backend.sh` (sync `.env` + restart PM2), `scripts/check-aws-backend.sh` (health probe), `scripts/configure-aws-domain.sh` (DuckDNS + SSL).
 
