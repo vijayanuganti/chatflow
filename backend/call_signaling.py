@@ -364,7 +364,10 @@ async def _handle_call_offer(user_id: str, user: dict, payload: dict, manager: A
         if {entry.get("caller_id"), entry.get("callee_id")} == {user_id, target_user_id}
     ]
     for stale_id in stale_ids:
-        _active_calls.pop(stale_id, None)
+        stale_entry = _active_calls.pop(stale_id, None)
+        if stale_entry and db is not None:
+            stale_status = "answered" if stale_entry.get("answered_at") else "missed"
+            await _finalize_call(db, stale_id, stale_status, "superseded", manager)
     if stale_ids:
         logger.info(
             "call_signal call-offer: cleared %s stale call(s) between caller=%s callee=%s",
@@ -630,8 +633,8 @@ def register_call_routes(
             raise HTTPException(status_code=400, detail="call_id required")
         msg = await ensure_call_thread_message(db, call_id, user["id"], manager)
         if not msg:
-            raise HTTPException(status_code=404, detail="call not found or not eligible")
-        return {"message": msg}
+            return {"message": None, "ok": False}
+        return {"message": msg, "ok": True}
 
     @router.get("/admin/call-logs")
     async def admin_call_logs(

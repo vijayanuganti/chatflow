@@ -28,6 +28,7 @@ export default function useAudioCall({
   remoteAudioRef,
   onCallEnded,
   onCallError,
+  onCallIdReady,
 }) {
   const [callState, setCallState] = useState(CALL_STATE.IDLE);
   const [durationSec, setDurationSec] = useState(0);
@@ -43,6 +44,7 @@ export default function useAudioCall({
   const pendingOfferRef = useRef(null);
   const endingCallRef = useRef(false);
   const teardownCalledRef = useRef(false);
+  const callGenerationRef = useRef(0);
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
@@ -89,8 +91,55 @@ export default function useAudioCall({
 
     window.setTimeout(() => {
       endingCallRef.current = false;
-    }, 0);
+    }, 500);
   }, [cleanupMedia, activeCallIdRef]);
+
+  const bindPeerConnectionHandlers = useCallback(
+    (pc, generation) => {
+      pc.onicecandidate = (ev) => {
+        if (generation !== callGenerationRef.current) return;
+        const callId = callIdRef.current;
+        const remoteUserId = sessionRef.current?.remoteUserId;
+        if (!callId || !ev.candidate || !remoteUserId) return;
+        sendSignal(CALL_SIGNAL.ICE, remoteUserId, {
+          call_id: callId,
+          candidate: ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate,
+        });
+      };
+      pc.ontrack = (ev) => {
+        if (generation !== callGenerationRef.current) return;
+        const stream = ev.streams?.[0] || new MediaStream([ev.track]);
+        if (remoteAudioRef?.current) {
+          remoteAudioRef.current.srcObject = stream;
+          remoteAudioRef.current.play().catch(() => {});
+        }
+      };
+      pc.onconnectionstatechange = () => {
+        if (pc !== pcRef.current) return;
+        if (generation !== callGenerationRef.current) return;
+        const state = pc.connectionState;
+        if (state === "connected") {
+          setCallState(CALL_STATE.CONNECTED);
+          if (!durationTimerRef.current) {
+            durationTimerRef.current = setInterval(() => {
+              setDurationSec((s) => s + 1);
+            }, 1000);
+          }
+        } else if (state === "failed") {
+          if (endingCallRef.current) return;
+          const endedId = callIdRef.current;
+          teardown();
+          onCallEnded?.(endedId);
+        } else if (state === "disconnected" || state === "closed") {
+          if (endingCallRef.current) return;
+          const endedId = callIdRef.current;
+          teardown();
+          onCallEnded?.(endedId);
+        }
+      };
+    },
+    [remoteAudioRef, sendSignal, teardown, onCallEnded],
+  );
 
   const flushIceQueue = useCallback(async () => {
     const pc = pcRef.current;
@@ -119,47 +168,11 @@ export default function useAudioCall({
     }
 
     const pc = new RTCPeerConnection({ iceServers: getDefaultIceServers() });
-    pc.onicecandidate = (ev) => {
-      const callId = callIdRef.current;
-      const remoteUserId = sessionRef.current?.remoteUserId;
-      if (!callId || !ev.candidate || !remoteUserId) return;
-      sendSignal(CALL_SIGNAL.ICE, remoteUserId, {
-        call_id: callId,
-        candidate: ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate,
-      });
-    };
-    pc.ontrack = (ev) => {
-      const stream = ev.streams?.[0] || new MediaStream([ev.track]);
-      if (remoteAudioRef?.current) {
-        remoteAudioRef.current.srcObject = stream;
-        remoteAudioRef.current.play().catch(() => {});
-      }
-    };
-    pc.onconnectionstatechange = () => {
-      if (pc !== pcRef.current) return;
-      const state = pc.connectionState;
-      if (state === "connected") {
-        setCallState(CALL_STATE.CONNECTED);
-        if (!durationTimerRef.current) {
-          durationTimerRef.current = setInterval(() => {
-            setDurationSec((s) => s + 1);
-          }, 1000);
-        }
-      } else if (state === "failed") {
-        if (endingCallRef.current) return;
-        const endedId = callIdRef.current;
-        teardown();
-        onCallEnded?.(endedId);
-      } else if (state === "disconnected" || state === "closed") {
-        if (endingCallRef.current) return;
-        const endedId = callIdRef.current;
-        teardown();
-        onCallEnded?.(endedId);
-      }
-    };
+    const generation = callGenerationRef.current;
+    bindPeerConnectionHandlers(pc, generation);
     pcRef.current = pc;
     return pc;
-  }, [remoteAudioRef, sendSignal, teardown, onCallEnded]);
+  }, [bindPeerConnectionHandlers]);
 
   const attachLocalAudio = useCallback(async (pc) => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -169,6 +182,7 @@ export default function useAudioCall({
   }, []);
 
   const prepareForNewCall = useCallback(() => {
+    callGenerationRef.current += 1;
     teardownCalledRef.current = false;
     endingCallRef.current = false;
     cleanupMedia();
@@ -191,6 +205,7 @@ export default function useAudioCall({
       const callId = newCallId();
       callIdRef.current = callId;
       if (activeCallIdRef) activeCallIdRef.current = callId;
+      onCallIdReady?.(callId);
       sessionRef.current = s;
       setCallState(CALL_STATE.OUTGOING);
       const pc = createPeerConnection();
@@ -230,6 +245,7 @@ export default function useAudioCall({
     cleanupMedia,
     activeCallIdRef,
     prepareForNewCall,
+    onCallIdReady,
   ]);
 
   const acceptCall = useCallback(async () => {
@@ -340,6 +356,10 @@ export default function useAudioCall({
       logCallSignal("session.inbound", type);
 
       if (type === CALL_SIGNAL.OFFER) {
+        if (callIdRef.current && frame.call_id && frame.call_id !== callIdRef.current) {
+          logCallSignal("session.ignore.offer.other", type);
+          return;
+        }
         pendingOfferRef.current = frame;
         callIdRef.current = frame.call_id;
         if (activeCallIdRef) activeCallIdRef.current = frame.call_id;

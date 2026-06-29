@@ -23,7 +23,7 @@ import { api, formatApiError } from "@/lib/api";
 const CallContext = createContext(null);
 
 export function CallProvider({ children }) {
-  const { sendSignal, ensureHealthy } = useChatSocketContext();
+  const { sendSignal, ensureHealthy, reconnect } = useChatSocketContext();
   const remoteAudioRef = useRef(null);
   const navigateToConversationRef = useRef(null);
   const activeCallIdRef = useRef(null);
@@ -43,6 +43,8 @@ export function CallProvider({ children }) {
   const callEndHandledRef = useRef(false);
   const localHangupInitiatedRef = useRef(false);
   const endedCallIdsRef = useRef(new Set());
+  const serverConfirmedCallIdsRef = useRef(new Set());
+  const lastCallEndedAtRef = useRef(0);
 
   const [activeCallSession, setActiveCallSession] = useState(null);
   const [session, setSession] = useState(null);
@@ -139,22 +141,20 @@ export function CallProvider({ children }) {
       const callId =
         endedCallId ||
         activeCallSessionRef.current?.callId ||
-        persistedCallIdRef.current ||
-        lastConnectedCallIdRef.current;
-      const remoteUserId = activeCallSessionRef.current?.remoteUserId;
+        persistedCallIdRef.current;
       const convId = activeCallSessionRef.current?.conversationId;
 
       if (callId) {
         endedCallIdsRef.current.add(callId);
       }
 
-      if (!localHangupInitiatedRef.current && callId && remoteUserId) {
-        sendSignal(CALL_SIGNAL.END, remoteUserId, {
-          call_id: callId,
-          reason: "hangup",
-        });
+      const shouldSync = Boolean(callId) && serverConfirmedCallIdsRef.current.has(callId);
+      if (callId) {
+        serverConfirmedCallIdsRef.current.delete(callId);
       }
+
       localHangupInitiatedRef.current = false;
+      lastCallEndedAtRef.current = Date.now();
 
       forceIdleCallState();
       clearCallSession();
@@ -166,7 +166,7 @@ export function CallProvider({ children }) {
         }
       };
 
-      if (callId) {
+      if (shouldSync) {
         void api
           .post("/call-history/sync-thread-message", { call_id: callId })
           .then((res) => refreshThread(res.data?.message))
@@ -181,8 +181,14 @@ export function CallProvider({ children }) {
         if (convId) window.setTimeout(() => refreshThread(null), 800);
       }
     },
-    [clearCallSession, sendSignal, forceIdleCallState],
+    [clearCallSession, forceIdleCallState],
   );
+
+  const onCallIdReady = useCallback((callId) => {
+    if (!callId) return;
+    persistedCallIdRef.current = callId;
+    setActiveCallSession((prev) => (prev ? { ...prev, callId } : prev));
+  }, []);
 
   const audio = useAudioCall({
     session,
@@ -194,6 +200,7 @@ export function CallProvider({ children }) {
     remoteAudioRef,
     onCallEnded,
     onCallError,
+    onCallIdReady,
   });
 
   audioTeardownRef.current = audio.teardown;
@@ -308,7 +315,10 @@ export function CallProvider({ children }) {
   useEffect(() => {
     if (audio.callState === CALL_STATE.CONNECTED) {
       const id = activeCallSession?.callId || audio.callIdRef?.current;
-      if (id) lastConnectedCallIdRef.current = id;
+      if (id) {
+        lastConnectedCallIdRef.current = id;
+        serverConfirmedCallIdsRef.current.add(id);
+      }
     }
   }, [audio.callState, activeCallSession?.callId, audio.callIdRef]);
 
@@ -347,10 +357,8 @@ export function CallProvider({ children }) {
     const activeCallId = activeCallIdRef.current;
 
     if (callId && endedCallIdsRef.current.has(callId)) {
-      if (type !== CALL_SIGNAL.OFFER && type !== CALL_SIGNAL.RING) {
-        logCallSignal("session.ignore.ended", type);
-        return;
-      }
+      logCallSignal("session.ignore.ended", type);
+      return;
     }
 
     if (
@@ -385,8 +393,13 @@ export function CallProvider({ children }) {
       persistedCallIdRef.current = frame.call_id;
     }
 
+    if (frame?.type === CALL_SIGNAL.RINGING && frame?.call_id) {
+      serverConfirmedCallIdsRef.current.add(frame.call_id);
+    }
+
     if (frame?.type === "call-offer") {
       endedCallIdsRef.current.delete(frame.call_id);
+      serverConfirmedCallIdsRef.current.add(frame.call_id);
       setSession({
         conversationId: frame.conversation_id,
         remoteUserId: frame.caller_id,
@@ -466,6 +479,10 @@ export function CallProvider({ children }) {
       }
 
       try {
+        if (Date.now() - lastCallEndedAtRef.current < 20_000) {
+          reconnect();
+          await new Promise((resolve) => setTimeout(resolve, 350));
+        }
         await ensureHealthy();
       } catch {
         toast.error("Connection lost. Check your network and try again.");
@@ -505,7 +522,7 @@ export function CallProvider({ children }) {
       }
       return ok;
     },
-    [audio, clearCallSession, forceIdleCallState, ensureHealthy],
+    [audio, clearCallSession, forceIdleCallState, ensureHealthy, reconnect],
   );
 
   const acceptIncomingCall = useCallback(async () => {
