@@ -423,6 +423,13 @@ export function CallProvider({ children }) {
     async (conversationId, remoteUserId, remoteName, remoteAvatarUrl = null) => {
       if (audio.callState === CALL_STATE.INCOMING) return false;
 
+      callEndHandledRef.current = false;
+      localHangupInitiatedRef.current = false;
+      inboundQueueRef.current = [];
+      if (endedCallIdsRef.current.size > 48) {
+        endedCallIdsRef.current = new Set(Array.from(endedCallIdsRef.current).slice(-24));
+      }
+
       const nextSession = { conversationId, remoteUserId, remoteName };
       setSession(nextSession);
       setActiveCallSession({

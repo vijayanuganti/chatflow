@@ -86,7 +86,10 @@ npm install --no-audit --no-fund
 export NODE_OPTIONS="--max-old-space-size=1536"
 npm run build
 chmod -R o+rX build
-echo '==> nginx reload'
+echo '==> nginx config'
+if [[ -f deploy/nginx-chatflow.conf ]]; then
+  sudo cp deploy/nginx-chatflow.conf /etc/nginx/sites-enabled/chatflow
+fi
 sudo nginx -t
 sudo systemctl reload nginx
 echo '==> done'

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Capacitor } from "@capacitor/core";
 import {
   CALL_STATE,
   CALL_SIGNAL,
@@ -40,6 +41,7 @@ export default function useAudioCall({
   const durationTimerRef = useRef(null);
   const callIdRef = useRef(null);
   const pendingOfferRef = useRef(null);
+  const endingCallRef = useRef(false);
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
@@ -125,9 +127,17 @@ export default function useAudioCall({
           }, 1000);
         }
       } else if (state === "failed") {
+        if (endingCallRef.current) {
+          teardown(CALL_STATE.IDLE);
+          return;
+        }
         teardown(CALL_STATE.FAILED);
         onCallEnded?.();
       } else if (state === "disconnected" || state === "closed") {
+        if (endingCallRef.current) {
+          teardown(CALL_STATE.IDLE);
+          return;
+        }
         teardown(CALL_STATE.DISCONNECTED);
         onCallEnded?.();
       }
@@ -149,9 +159,11 @@ export default function useAudioCall({
       return { ok: false, error: "missing_session" };
     }
     try {
+      endingCallRef.current = false;
       cleanupMedia();
       setCallState(CALL_STATE.IDLE);
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      const micReleaseMs = Capacitor.isNativePlatform() ? 350 : 120;
+      await new Promise((resolve) => setTimeout(resolve, micReleaseMs));
 
       await ensureHealthy();
       const callId = newCallId();
@@ -232,6 +244,7 @@ export default function useAudioCall({
 
   const declineCall = useCallback(
     (reason = "declined") => {
+      endingCallRef.current = true;
       const callId = callIdRef.current;
       const remoteUserId = sessionRef.current?.remoteUserId;
       if (callId && remoteUserId) {
@@ -239,12 +252,14 @@ export default function useAudioCall({
       }
       teardown(CALL_STATE.IDLE);
       onCallEnded?.();
+      endingCallRef.current = false;
     },
     [sendSignal, teardown, onCallEnded],
   );
 
   const endCall = useCallback(
     (reason = "hangup") => {
+      endingCallRef.current = true;
       const callId = callIdRef.current;
       const remoteUserId = sessionRef.current?.remoteUserId;
       if (callId && remoteUserId) {
@@ -252,6 +267,7 @@ export default function useAudioCall({
       }
       teardown(CALL_STATE.IDLE);
       onCallEnded?.();
+      endingCallRef.current = false;
     },
     [sendSignal, teardown, onCallEnded],
   );
@@ -325,12 +341,14 @@ export default function useAudioCall({
         return;
       }
       if (type === CALL_SIGNAL.DECLINE || type === CALL_SIGNAL.END || type === CALL_SIGNAL.ENDED) {
-        if (frame.call_id && callIdRef.current && frame.call_id !== callIdRef.current) {
-          logCallSignal("session.ignore.end.other", type);
+        if (!callIdRef.current || (frame.call_id && frame.call_id !== callIdRef.current)) {
+          logCallSignal("session.ignore.end.stale", type);
           return;
         }
+        endingCallRef.current = true;
         teardown(CALL_STATE.IDLE);
         onCallEnded?.();
+        endingCallRef.current = false;
         return;
       }
       if (type === CALL_SIGNAL.ERROR) {

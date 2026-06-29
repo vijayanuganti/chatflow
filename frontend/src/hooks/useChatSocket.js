@@ -258,39 +258,32 @@ export default function useChatSocket({
     document.addEventListener("visibilitychange", onVis);
 
     let appStateListener = null;
+    let nativeWatchRef = null;
     if (Capacitor.isNativePlatform()) {
       import("@capacitor/app")
         .then(({ App }) => {
           appStateListener = App.addListener("appStateChange", ({ isActive }) => {
-            if (isActive) {
-              if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-                connect();
-              }
-            } else {
-              closedIntentionallyRef.current = true;
-              clearTimeout(reconnectRef.current);
-              clearInterval(pingRef.current);
-              const ws = wsRef.current;
-              wsRef.current = null;
-              if (ws) {
-                ws.onopen = null;
-                ws.onmessage = null;
-                ws.onerror = null;
-                ws.onclose = null;
-                try {
-                  ws.close(1000, "background");
-                } catch {
-                  /* ignore */
-                }
-              }
-              setConnected(false);
+            if (!isActive) return;
+            closedIntentionallyRef.current = false;
+            if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+              connect();
             }
           });
         })
         .catch(() => {});
+
+      nativeWatchRef = setInterval(() => {
+        if (closedIntentionallyRef.current || !enabled) return;
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          closedIntentionallyRef.current = false;
+          connect();
+        }
+      }, 15000);
     }
 
     return () => {
+      if (nativeWatchRef) clearInterval(nativeWatchRef);
       if (appStateListener?.remove) {
         appStateListener.remove().catch(() => {});
       }

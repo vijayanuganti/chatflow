@@ -361,9 +361,7 @@ async def _handle_call_offer(user_id: str, user: dict, payload: dict, manager: A
     stale_ids = [
         cid
         for cid, entry in list(_active_calls.items())
-        if entry.get("caller_id") == user_id
-        and entry.get("callee_id") == target_user_id
-        and entry.get("state") == "ringing"
+        if entry.get("caller_id") == user_id and entry.get("callee_id") == target_user_id
     ]
     for stale_id in stale_ids:
         _active_calls.pop(stale_id, None)
